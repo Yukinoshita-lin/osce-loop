@@ -4,10 +4,12 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .. import db
+from ..config import LOGIN_MAX_FAILURES, LOGIN_WINDOW_SECONDS
 
 PBKDF2_ITERATIONS = 180_000
 SESSION_TTL_HOURS = 8
@@ -148,6 +150,43 @@ def revoke_token(conn, token: str) -> None:
         return
     conn.execute("DELETE FROM auth_sessions WHERE token_hash = ?", (_token_hash(token),))
     conn.commit()
+
+
+def record_login_attempt(conn, *, username: str, ip: str | None, success: bool) -> None:
+    now = time.time()
+    conn.execute(
+        "INSERT INTO login_attempts(attempt_id, username, ip, success, created_ts, created_at) "
+        "VALUES(?,?,?,?,?,?)",
+        (db.new_id("login"), username, ip or "", 1 if success else 0, now, db.now_iso()),
+    )
+    conn.execute("DELETE FROM login_attempts WHERE created_ts < ?", (now - 7 * 86400,))
+    conn.commit()
+
+
+def login_rate_limited(
+    conn,
+    *,
+    username: str,
+    ip: str | None,
+    max_failures: int | None = None,
+    window_seconds: int | None = None,
+) -> bool:
+    limit = max_failures if max_failures is not None else LOGIN_MAX_FAILURES
+    window = window_seconds if window_seconds is not None else LOGIN_WINDOW_SECONDS
+    cutoff = time.time() - max(1, window)
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM login_attempts "
+        "WHERE success = 0 AND created_ts >= ? AND (username = ? OR ip = ?)",
+        (cutoff, username, ip or ""),
+    ).fetchone()
+    return row["n"] >= limit
+
+
+def cleanup_expired_sessions(conn) -> int:
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    cursor = conn.execute("DELETE FROM auth_sessions WHERE expires_at <= ?", (now,))
+    conn.commit()
+    return cursor.rowcount
 
 
 def _media_ref_active(row, now: datetime) -> bool:

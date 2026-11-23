@@ -19,22 +19,28 @@ from .ai.base import CapabilityGateway
 from .ai.factory import build_scoring_provider, scoring_provider_info
 from .config import (
     ASR_PROMPT_VERSION,
+    LOGIN_WINDOW_SECONDS,
     MEDIA_DIR,
     MODEL_VERSION,
     PROMPT_VERSION,
     REASON_LABELS,
     RISK_LEVELS,
     ROUTE_LABELS,
+    SESSION_COOKIE_SECURE,
     SP_MODEL_VERSION,
     SP_PROMPT_VERSION,
     WEB_DIR,
 )
 from .domain.ab import ab_report
 from .domain.auth import (
+    SESSION_TTL_HOURS,
     authenticate,
+    cleanup_expired_sessions,
     create_session,
     ensure_users,
+    login_rate_limited,
     media_access,
+    record_login_attempt,
     resolve_token,
     revoke_token,
     rbac_allowed,
@@ -173,17 +179,45 @@ class LoginBody(BaseModel):
 
 
 @app.post("/api/auth/login")
-def login(body: LoginBody, response: Response, conn=Depends(get_conn)):
-    user = authenticate(conn, body.username, body.password)
+def login(body: LoginBody, request: Request, response: Response, conn=Depends(get_conn)):
+    username = body.username.strip()
+    ip = request.client.host if request.client else ""
+    if login_rate_limited(conn, username=username, ip=ip):
+        db.append_audit(
+            conn,
+            actor=username,
+            action="auth.login_locked",
+            object_type="User",
+            object_id=username,
+            after={"ip": ip, "window_seconds": LOGIN_WINDOW_SECONDS},
+        )
+        raise HTTPException(
+            429,
+            "登录失败次数过多，请稍后再试",
+            headers={"Retry-After": str(LOGIN_WINDOW_SECONDS)},
+        )
+    user = authenticate(conn, username, body.password)
     if not user:
+        record_login_attempt(conn, username=username, ip=ip, success=False)
+        db.append_audit(
+            conn,
+            actor=username,
+            action="auth.login_failed",
+            object_type="User",
+            object_id=username,
+            after={"ip": ip},
+        )
         raise HTTPException(401, "用户名或密码错误")
+    record_login_attempt(conn, username=username, ip=ip, success=True)
+    cleanup_expired_sessions(conn)
     session = create_session(conn, user["user_id"])
     response.set_cookie(
         "osceloop_session",
         session["token"],
-        max_age=8 * 3600,
+        max_age=SESSION_TTL_HOURS * 3600,
         httponly=True,
         samesite="lax",
+        secure=SESSION_COOKIE_SECURE,
         path="/",
     )
     db.append_audit(

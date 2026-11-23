@@ -23,6 +23,11 @@ SP_PROMPT_VERSION = os.getenv("OSCELOOP_SP_PROMPT_VERSION", "sp-prompt-1.0")
 # SP 认证有效期：按季度更新红队用例并复测；过期后 G1 的 SP 指标按未采集处理。
 SP_CERT_VALID_DAYS = int(os.getenv("OSCELOOP_SP_CERT_VALID_DAYS", "90"))
 
+# 登录防爆破：窗口内失败次数达到阈值即暂时锁定；Cookie Secure 在 HTTPS 部署时开启。
+LOGIN_MAX_FAILURES = int(os.getenv("OSCELOOP_LOGIN_MAX_FAILURES", "5"))
+LOGIN_WINDOW_SECONDS = int(os.getenv("OSCELOOP_LOGIN_WINDOW_SECONDS", "300"))
+SESSION_COOKIE_SECURE = os.getenv("OSCELOOP_COOKIE_SECURE", "0") == "1"
+
 # 评分能力提供方：默认 mock；配置 http 后走 OpenAI 兼容接口。
 # L2–L3 真实考生场景应使用私有化/专有云部署，避免音视频与转写出院/校网。
 AI_PROVIDER = os.getenv("OSCELOOP_AI_PROVIDER", "mock").strip().lower()

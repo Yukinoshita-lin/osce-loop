@@ -345,6 +345,17 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS login_attempts (
+    attempt_id TEXT PRIMARY KEY,
+    username TEXT NOT NULL,
+    ip TEXT,
+    success INTEGER NOT NULL,
+    created_ts REAL NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_login_attempts_ts ON login_attempts(created_ts);
+
 CREATE TABLE IF NOT EXISTS audit_anchors (
     anchor_id TEXT PRIMARY KEY,
     event_count INTEGER NOT NULL,

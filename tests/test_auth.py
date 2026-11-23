@@ -6,10 +6,13 @@ import pytest
 from app import db
 from app.domain.auth import (
     authenticate,
+    cleanup_expired_sessions,
     create_session,
     ensure_users,
     hash_password,
+    login_rate_limited,
     media_allowed,
+    record_login_attempt,
     resolve_token,
     revoke_token,
     rbac_allowed,
@@ -52,6 +55,24 @@ def test_expired_session_is_rejected(conn):
     admin = authenticate(conn, "admin", "admin123")
     session = create_session(conn, admin["user_id"], ttl_hours=-1)
     assert resolve_token(conn, session["token"]) is None
+
+
+def test_cleanup_expired_sessions(conn):
+    admin = authenticate(conn, "admin", "admin123")
+    create_session(conn, admin["user_id"], ttl_hours=-1)
+    assert conn.execute("SELECT COUNT(*) AS n FROM auth_sessions").fetchone()["n"] == 1
+    assert cleanup_expired_sessions(conn) == 1
+    assert conn.execute("SELECT COUNT(*) AS n FROM auth_sessions").fetchone()["n"] == 0
+
+
+def test_login_rate_limit_by_username_and_ip(conn):
+    for _ in range(4):
+        record_login_attempt(conn, username="admin", ip="10.0.0.1", success=False)
+    assert login_rate_limited(conn, username="admin", ip="10.0.0.1", max_failures=5) is False
+    record_login_attempt(conn, username="admin", ip="10.0.0.1", success=False)
+    assert login_rate_limited(conn, username="admin", ip="10.0.0.2", max_failures=5) is True
+    assert login_rate_limited(conn, username="other", ip="10.0.0.1", max_failures=5) is True
+    assert login_rate_limited(conn, username="other", ip="10.0.0.9", max_failures=5) is False
 
 
 def test_rbac_write_matrix():
