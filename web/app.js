@@ -553,6 +553,8 @@ function renderWorkbench(data) {
           <span class="pill ${attempt.transcript_integrity === 'ok' ? 'teal' : attempt.transcript_integrity === 'mismatch' ? 'red' : 'amber'}">${
             attempt.transcript_integrity === 'ok' ? '一致' : attempt.transcript_integrity === 'mismatch' ? '不一致' : attempt.transcript_integrity === 'unrecorded' ? '未记录' : '无转写'
           }</span></div>` : ''}
+        ${data.evidence_integrity && data.evidence_integrity.checked ? `<div class="tiny muted" style="margin-top:2px">证据哈希
+          <span class="pill ${data.evidence_integrity.passed ? 'teal' : 'red'}">${data.evidence_integrity.matched}/${data.evidence_integrity.checked} 一致</span></div>` : ''}
         <div class="clip-actions">
           <button class="btn small primary" data-action="play-clip">播放证据片段 ±3 秒</button>
           <span class="play-status" id="play-status">${data.evidence.length ? '等待播放' : '无 AI 片段'}</span>

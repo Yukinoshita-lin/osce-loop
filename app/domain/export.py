@@ -6,7 +6,7 @@ import json
 from typing import Any
 
 from .. import db
-from .integrity import transcript_integrity
+from .integrity import transcript_integrity, verify_evidence
 
 
 def canonical_json(value: Any) -> str:
@@ -48,6 +48,20 @@ def build_attempt_package(conn, attempt_id: str, *, exported_by: str) -> dict[st
         ).fetchall()
     )
     record_ids = [row["record_id"] for row in records]
+    evidence_summary = {"checked": 0, "matched": 0, "mismatched": 0, "skipped": 0, "samples": []}
+    for row in records:
+        try:
+            spans = json.loads(row["ai_evidence"] or "[]")
+        except (TypeError, ValueError):
+            spans = []
+        result = verify_evidence(spans)
+        evidence_summary["checked"] += result["checked"]
+        evidence_summary["matched"] += result["matched"]
+        evidence_summary["mismatched"] += result["mismatched"]
+        evidence_summary["skipped"] += result["skipped"]
+        if len(evidence_summary["samples"]) < 5:
+            evidence_summary["samples"].extend(result["samples"][: 5 - len(evidence_summary["samples"])])
+    evidence_summary["passed"] = evidence_summary["mismatched"] == 0
     actions = []
     if record_ids:
         placeholders = ",".join("?" * len(record_ids))
@@ -109,6 +123,7 @@ def build_attempt_package(conn, attempt_id: str, *, exported_by: str) -> dict[st
             "retain_until": attempt.get("retain_until"),
             "integrity_gap": bool(attempt.get("integrity_gap")),
             "integrity_note": attempt.get("integrity_note"),
+            "evidence": evidence_summary,
         },
     }
     digest = package_hash(package)

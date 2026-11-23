@@ -86,7 +86,7 @@ from .domain.execution import (
     toggle_hints,
 )
 from .domain.ingest import create_ingested_attempt
-from .domain.integrity import backfill_transcript_hashes, transcript_integrity
+from .domain.integrity import backfill_transcript_hashes, transcript_integrity, verify_evidence
 from .domain.media import backfill_media_hashes
 from .domain.practice import build_practice_report
 from .domain.retention import purge_expired, refresh_retention, retention_overview
@@ -448,6 +448,7 @@ def _record_public(conn, record: dict[str, Any], bundle: dict[str, Any], attempt
         evidence = json.loads(record["ai_evidence"] or "[]")
     except (TypeError, ValueError):
         evidence = []
+    evidence_integrity = verify_evidence(evidence)
     for ev in evidence:
         ev["media_url"] = attempt.get("media_url")
     return {
@@ -469,6 +470,7 @@ def _record_public(conn, record: dict[str, Any], bundle: dict[str, Any], attempt
         "ai_confidence": record["ai_confidence"],
         "ai_rationale": record["ai_rationale"],
         "evidence": evidence,
+        "evidence_integrity": evidence_integrity,
         "routing": {
             **routing,
             "route_label": ROUTE_LABELS.get(routing.get("route"), routing.get("route")),
