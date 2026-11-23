@@ -7,7 +7,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
+from app import db
 from app.ai.asr import ASRError, HttpASRProvider, build_asr_provider
+from app.ai.base import CapabilityGateway
 
 ASR_OUTPUT = {
     "duration": 6.0,
@@ -84,6 +86,14 @@ def audio_path(tmp_path):
     path = tmp_path / "consult.wav"
     path.write_bytes(b"RIFF" + b"0" * 128)
     return path
+
+
+@pytest.fixture()
+def conn(tmp_path):
+    connection = db.connect(tmp_path / "asr-gateway.db")
+    db.init_db(connection)
+    yield connection
+    connection.close()
 
 
 def _provider(fake_asr, max_retries: int = 0) -> HttpASRProvider:
@@ -165,6 +175,35 @@ def test_retry_on_5xx_then_success(fake_asr, audio_path):
     transcript = _provider(fake_asr, max_retries=1).transcribe_media(audio_path)
     assert len(transcript["utterances"]) == 2
     assert len(fake_asr.requests) == 2
+
+
+def test_asr_gateway_logs_call(fake_asr, audio_path, conn):
+    fake_asr.enqueue(200, ASR_OUTPUT)
+    gateway = CapabilityGateway(conn, _provider(fake_asr), "test-asr", "asr-prompt-1.0")
+    response = gateway.transcribe_media(media_path=audio_path, subject_ref="media:1")
+    assert response["status"] == "ok"
+    assert response["output"]["source"] == "asr"
+    assert response["prompt_version"] == "asr-prompt-1.0"
+
+    call = conn.execute("SELECT * FROM ai_calls ORDER BY rowid DESC LIMIT 1").fetchone()
+    assert call["capability"] == "asr.transcribe"
+    assert call["model_version"] == "test-asr"
+    assert call["prompt_version"] == "asr-prompt-1.0"
+    assert call["status"] == "ok"
+    detail = json.loads(call["detail"])
+    assert detail["utterances"] == 2
+    assert detail["candidate_utterances"] == 1
+    assert detail["patient_utterances"] == 1
+
+
+def test_asr_gateway_logs_error(fake_asr, audio_path, conn):
+    fake_asr.enqueue(500, {"error": "down"})
+    gateway = CapabilityGateway(conn, _provider(fake_asr), "test-asr", "asr-prompt-1.0")
+    with pytest.raises(ASRError):
+        gateway.transcribe_media(media_path=audio_path, subject_ref="media:2")
+    call = conn.execute("SELECT * FROM ai_calls ORDER BY rowid DESC LIMIT 1").fetchone()
+    assert call["capability"] == "asr.transcribe"
+    assert call["status"] == "error"
 
 
 def test_factory_is_off_by_default():

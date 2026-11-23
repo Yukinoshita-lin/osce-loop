@@ -80,6 +80,29 @@ class CapabilityGateway:
             fallback_fn=fallback if self.fallback_provider else None,
         )
 
+    def transcribe_media(
+        self,
+        *,
+        media_path,
+        language: str = "zh",
+        speaker_map=None,
+        first_speaker: str = "patient",
+        subject_ref: str,
+    ) -> dict[str, Any]:
+        """ASR 也必须经过网关：统一模型版本、耗时、状态与调用日志。"""
+        if not hasattr(self.provider, "transcribe_media"):
+            raise RuntimeError("当前提供方不支持 ASR")
+        return self._invoke(
+            "asr.transcribe",
+            lambda: self.provider.transcribe_media(
+                media_path,
+                language=language,
+                speaker_map=speaker_map,
+                first_speaker=first_speaker,
+            ),
+            subject_ref=subject_ref,
+        )
+
     def _invoke(
         self,
         capability: str,
@@ -141,6 +164,15 @@ class CapabilityGateway:
                     "confidence": output.confidence,
                     "evidence_count": len(output.evidence),
                     "refusal_reason": output.refusal_reason,
+                }
+            )
+        elif isinstance(output, dict):
+            detail.update(
+                {
+                    "source": output.get("source"),
+                    "utterances": len(output.get("utterances") or []),
+                    "candidate_utterances": output.get("candidate_utterances"),
+                    "patient_utterances": output.get("patient_utterances"),
                 }
             )
         db.log_ai_call(

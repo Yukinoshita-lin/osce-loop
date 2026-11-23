@@ -38,6 +38,7 @@ ASR_BASE_URL = os.getenv("OSCELOOP_ASR_BASE_URL", "").strip()
 ASR_API_KEY = os.getenv("OSCELOOP_ASR_API_KEY", "").strip()
 ASR_MODEL = os.getenv("OSCELOOP_ASR_MODEL", "").strip()
 ASR_LANGUAGE = os.getenv("OSCELOOP_ASR_LANGUAGE", "zh").strip()
+ASR_PROMPT_VERSION = os.getenv("OSCELOOP_ASR_PROMPT_VERSION", "asr-transcribe-1.0").strip()
 ASR_TIMEOUT_SECONDS = float(os.getenv("OSCELOOP_ASR_TIMEOUT_SECONDS", "60"))
 ASR_MAX_RETRIES = int(os.getenv("OSCELOOP_ASR_MAX_RETRIES", "1"))
 

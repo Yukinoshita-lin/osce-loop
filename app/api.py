@@ -18,6 +18,7 @@ from .ai.asr import ASRError, build_asr_provider
 from .ai.base import CapabilityGateway
 from .ai.factory import build_scoring_provider, scoring_provider_info
 from .config import (
+    ASR_PROMPT_VERSION,
     MEDIA_DIR,
     MODEL_VERSION,
     PROMPT_VERSION,
@@ -545,19 +546,30 @@ async def ingest_attempt(
             _cleanup_media(media)
             reason = asr_bundle.info.get("reason") or "无可用的 ASR 服务"
             raise HTTPException(400, f"未配置 ASR：{reason}")
+        asr_gateway = CapabilityGateway(
+            conn,
+            asr_bundle.provider,
+            asr_bundle.provider.model_version,
+            ASR_PROMPT_VERSION,
+        )
         try:
-            parsed = asr_bundle.provider.transcribe_media(
-                UPLOAD_DIR / media["stored_name"],
+            asr_response = asr_gateway.transcribe_media(
+                media_path=UPLOAD_DIR / media["stored_name"],
                 language=asr_language or "zh",
                 speaker_map=speaker_map,
                 first_speaker=asr_first_speaker,
+                subject_ref=f"media:{media['media_id']}",
             )
         except ASRError as exc:
             _cleanup_media(media)
             raise HTTPException(400, f"ASR 转写失败：{exc}") from exc
+        parsed = asr_response["output"]
         asr_meta = {
             "provider": parsed.get("provider"),
             "model_version": parsed.get("model_version"),
+            "prompt_version": asr_response["prompt_version"],
+            "latency_ms": asr_response["latency_ms"],
+            "status": asr_response["status"],
             "language": asr_language or "zh",
             "speaker_labels": parsed.get("speaker_labels"),
         }

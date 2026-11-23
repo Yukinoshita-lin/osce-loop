@@ -872,7 +872,7 @@ function renderIngestResult(data) {
       <span>${esc(a.candidate_code)} · ${esc(a.candidate_name)}</span>
       <span>风险 ${esc(a.risk_level)}</span>
       <span>转写 ${t.utterances} 句</span>
-      <span>${t.source === 'asr' ? `ASR · ${esc((t.asr || {}).model_version || '自动转写')}` : '转写文件'}</span>
+      <span>${t.source === 'asr' ? `ASR · ${esc((t.asr || {}).model_version || '自动转写')} · ${num((t.asr || {}).latency_ms, 0)} ms` : '转写文件'}</span>
       <span>考生 ${t.candidate_utterances} / 患者 ${t.patient_utterances}</span>
       <span>${data.media ? '媒体已上传' : '无媒体'}</span>
     </div>
