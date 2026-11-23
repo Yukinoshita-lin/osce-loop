@@ -39,10 +39,12 @@ def route_item(
     rate = SAMPLE_RATES.get(risk_level, 0.2)
 
     # 0. 无评分权限 / 仅提取证据：不产生 AI 分，直接进入人工评分
-    if authority == "none" or ai_score is None:
+    if authority == "none":
         return _route("manual", "manual_only", requires_human=True, reason_text="该项 AI 无评分权限")
     if authority == "extract":
         return _route("manual", "extract_only", requires_human=True, reason_text="AI 仅提取证据，分数由人给")
+    if ai_score is None:
+        return _route("manual", "manual_only", requires_human=True, reason_text="AI 未给出分数，转人工")
 
     # 1. 证据链不完整：全站人工
     if integrity_gap:
@@ -51,6 +53,15 @@ def route_item(
     # 2. 关键项 AI 判阴性：双人复核
     if item.get("critical") and ai_score == 0:
         return _route("dual_review", "critical_negative", requires_human=True)
+
+    # 2b. L3 高利害：AI 建议分一律人工确认
+    if risk_level == "L3" and authority in ("suggest", "decide"):
+        return _route(
+            "send_review",
+            "l3_human_confirmation",
+            requires_human=True,
+            reason_text="L3 高利害场次，AI 建议分必须由人确认",
+        )
 
     # 3. 边缘案例：高年资裁决
     if near_cutoff:

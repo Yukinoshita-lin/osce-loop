@@ -128,6 +128,8 @@ CREATE TABLE IF NOT EXISTS model_cards (
     prompt_version TEXT NOT NULL,
     metrics TEXT NOT NULL,
     limitations TEXT,
+    is_public INTEGER NOT NULL DEFAULT 0,
+    published_at TEXT,
     created_at TEXT NOT NULL
 );
 
@@ -198,6 +200,33 @@ CREATE TABLE IF NOT EXISTS governance_checks (
     detail TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS switch_drills (
+    drill_id TEXT PRIMARY KEY,
+    duration_ms REAL NOT NULL,
+    passed INTEGER NOT NULL,
+    actor TEXT NOT NULL,
+    detail TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS appeal_drills (
+    drill_id TEXT PRIMARY KEY,
+    attempt_id TEXT,
+    steps TEXT NOT NULL,
+    passed INTEGER NOT NULL,
+    actor TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS governance_approvals (
+    approval_id TEXT PRIMARY KEY,
+    approval_type TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL,
+    approver TEXT NOT NULL,
+    note TEXT,
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -236,6 +265,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
     for column, ddl in additions.items():
         if column not in existing:
             conn.execute(f"ALTER TABLE attempts ADD COLUMN {column} {ddl}")
+
+    card_columns = {row["name"] for row in conn.execute("PRAGMA table_info(model_cards)").fetchall()}
+    if "is_public" not in card_columns:
+        conn.execute("ALTER TABLE model_cards ADD COLUMN is_public INTEGER NOT NULL DEFAULT 0")
+    if "published_at" not in card_columns:
+        conn.execute("ALTER TABLE model_cards ADD COLUMN published_at TEXT")
 
 
 def rows_to_dicts(rows: Iterable[sqlite3.Row]) -> list[dict[str, Any]]:

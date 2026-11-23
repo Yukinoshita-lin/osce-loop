@@ -88,8 +88,24 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
         if item and item.get("critical") and rec["ai_score"] == 0 and (rec["gold_score"] or 0) > 0:
             critical_miss += 1
 
-    model_card_count = conn.execute("SELECT COUNT(*) AS n FROM model_cards").fetchone()["n"]
+    public_card_count = conn.execute(
+        "SELECT COUNT(*) AS n FROM model_cards WHERE is_public = 1"
+    ).fetchone()["n"]
     version_complete = version_stamped == ai_records and ai_records > 0
+    sus_row = conn.execute("SELECT value FROM system_state WHERE key = 'sus_score'").fetchone()
+    sus_score = float(sus_row["value"]) if sus_row else None
+    switch_row = conn.execute(
+        "SELECT passed FROM switch_drills ORDER BY created_at DESC LIMIT 1"
+    ).fetchone()
+    switch_drill = 1.0 if switch_row and switch_row["passed"] else 0.0
+    appeal_drill = conn.execute(
+        "SELECT COUNT(*) AS n FROM appeal_drills WHERE passed = 1"
+    ).fetchone()["n"]
+    ethics_row = conn.execute(
+        "SELECT status FROM governance_approvals WHERE approval_type = 'ethics_and_data'"
+    ).fetchone()
+    ethics = 1.0 if ethics_row and ethics_row["status"] == "approved" else 0.0
+    model_card_public = 1.0 if public_card_count > 0 else 0.0
     cert_row = conn.execute(
         "SELECT report FROM sp_certifications ORDER BY created_at DESC LIMIT 1"
     ).fetchone()
@@ -114,18 +130,18 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
         "edit_rate": (report.get("review") or {}).get("edit_rate"),
         "critical_miss": critical_miss,
         "audit_replay": 1.0 if version_complete and report.get("counts", {}).get("records", 0) > 0 else None,
-        "model_card": 1.0 if model_card_count > 0 else None,
         "sp_fact_error": sp_fact_error,
         "persona_pass": sp_persona_pass,
         "p95_latency": sp_p95_latency,
-        "sus": None,
+        "sus": sus_score,
         "p0_incidents": sp_p0 if sp_p0 is not None else 0,
         "near_improvement": ab.get("comparison", {}).get("near_improvement"),
         "subgroup_gap": fairness.get("overall_gap_sd"),
         "teacher_hours": ab.get("comparison", {}).get("teacher_hours_reduction"),
-        "switch_drill": None,
-        "appeal_drill": None,
-        "ethics": None,
+        "switch_drill": switch_drill,
+        "appeal_drill": appeal_drill,
+        "ethics": ethics,
+        "model_card": model_card_public,
     }
 
 

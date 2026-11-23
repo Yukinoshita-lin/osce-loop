@@ -21,7 +21,17 @@ from app.domain.rubric import (
 from app.domain.ab import ab_report
 from app.domain.fairness import fairness_report
 from app.domain.gates import evaluate_gates
-from app.domain.governance import run_self_check
+from app.domain.governance import (
+    emergency_stop_active,
+    governance_status,
+    publish_model_card,
+    register_approval,
+    run_appeal_drill,
+    run_self_check,
+    run_termination_drill,
+    set_emergency_stop,
+    set_release_stage,
+)
 from app.domain.practice import build_practice_report
 from app.domain.risk import escalate_risk
 from app.domain.routing import is_near_cutoff, route_item, sampling_hit
@@ -89,6 +99,8 @@ def test_authority_cap_by_risk_and_evidence_type():
     payload = build_bundle_payload()
     items = {item["item_id"]: item for item in payload["rubric"]}
     assert cap_authority(items["HX.01"], "L3", "G0_offline") == "extract"
+    assert cap_authority(items["HX.01"], "L3", "G3_limited") == "suggest"
+    assert cap_authority(items["HX.04"], "L3", "G3_limited") == "extract"
     assert cap_authority(items["HX.01"], "L2", "G0_offline") == "suggest"
     assert cap_authority(items["CM.01"], "L1", "G1_practice") == "none"
     assert cap_authority(items["AS.01"], "L1", "G1_practice") == "extract"
@@ -134,7 +146,7 @@ def test_routing_priority_and_sampling():
     assert route_item(**{**common, "item_disagreement_rate": 0.2})["reason"] == "item_disagreement"
     assert route_item(**{**common, "appeal": True})["reason"] == "appeal"
     l3 = route_item(**{**common, "risk_level": "L3", "item": {**item, "critical": True}})
-    assert l3["reason"] == "sampling"
+    assert l3["reason"] == "l3_human_confirmation"
     auto = None
     for i in range(200):
         rid = f"rec_{i}"
@@ -441,4 +453,79 @@ def test_governance_auto_downgrade_on_low_qwk(seeded_path, tmp_path):
         "SELECT COUNT(*) AS n FROM audit_events WHERE action = 'authority.auto_downgrade'"
     ).fetchone()["n"]
     assert audit >= 1
+    conn.close()
+
+
+def test_l3_routing_requires_human_confirmation():
+    item = {"item_id": "HX.01", "critical": False, "confidence_floor": 0.5}
+    result = route_item(
+        record_id="rec_l3",
+        item=item,
+        authority="suggest",
+        ai_score=2,
+        confidence=0.95,
+        risk_level="L3",
+        release_stage="G3_limited",
+    )
+    assert result["reason"] == "l3_human_confirmation"
+    assert result["requires_human"] is True
+    critical = {**item, "critical": True}
+    result = route_item(
+        record_id="rec_l3c",
+        item=critical,
+        authority="extract",
+        ai_score=None,
+        confidence=None,
+        risk_level="L3",
+        release_stage="G3_limited",
+    )
+    assert result["reason"] == "extract_only"
+
+
+def test_termination_and_appeal_drills(conn):
+    drill = run_termination_drill(conn, actor="test")
+    assert drill["passed"] is True
+    set_emergency_stop(conn, active=True, reason="测试", actor="test")
+    assert emergency_stop_active(conn) is True
+    set_emergency_stop(conn, active=False, reason="测试结束", actor="test")
+    assert emergency_stop_active(conn) is False
+    for _ in range(2):
+        appeal = run_appeal_drill(conn, actor="test")
+        assert appeal["passed"] is True
+    status = governance_status(conn)
+    assert status["switch_drill"]["passed"] == 1
+    assert status["appeal_drills"]["passed"] >= 2
+
+
+def test_p3_readiness_and_release(seeded_path, tmp_path):
+    path = tmp_path / "p3.db"
+    shutil.copy(seeded_path, path)
+    conn = db.connect(path)
+    run_termination_drill(conn, actor="test")
+    run_appeal_drill(conn, actor="test")
+    run_appeal_drill(conn, actor="test")
+    register_approval(
+        conn,
+        approval_type="ethics_and_data",
+        approver="伦理委员会",
+        note="P3 测试批准",
+    )
+    publish_model_card(conn, actor="test")
+    report = quality_report(conn)
+    gates = evaluate_gates(conn, report, "G0_offline")
+    g3 = next(g for g in gates["gates"] if g["id"] == "G3")
+    assert g3["status"] == "pass", {c["key"]: c["value"] for c in g3["criteria"]}
+    result = set_release_stage(
+        conn,
+        stage="G3_limited",
+        actor="test",
+        reason="P3 测试放行",
+    )
+    assert result["new_stage"] == "G3_limited"
+    assert db.get_state(conn, "release_stage") == "G3_limited"
+    bundle = get_bundle(conn, conn.execute("SELECT bundle_id FROM bundles LIMIT 1").fetchone()["bundle_id"])
+    item = next(i for i in bundle["payload"]["rubric"] if i["item_id"] == "HX.01")
+    assert effective_authority(conn, bundle, item, "L3", "G3_limited") == "suggest"
+    critical = next(i for i in bundle["payload"]["rubric"] if i["item_id"] == "HX.04")
+    assert effective_authority(conn, bundle, critical, "L3", "G3_limited") == "extract"
     conn.close()

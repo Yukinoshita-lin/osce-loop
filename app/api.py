@@ -34,10 +34,21 @@ from .domain.bundle import (
 )
 from .domain.fairness import fairness_report
 from .domain.gates import evaluate_gates
-from .domain.governance import latest_self_check, run_self_check
+from .domain.governance import (
+    emergency_stop_active,
+    governance_status,
+    latest_self_check,
+    publish_model_card,
+    register_approval,
+    run_appeal_drill,
+    run_self_check,
+    run_termination_drill,
+    set_emergency_stop,
+    set_release_stage,
+)
 from .domain.practice import build_practice_report
 from .domain.risk import RISK_ORDER, escalate_risk
-from .domain.rubric import AUTHORITY_LABELS, PHASE_LABELS
+from .domain.rubric import AUTHORITY_LABELS, PHASE_LABELS, cap_authority
 from .domain.slots import DialogueStateMachine, SPController
 from .domain.spqa import certify_bundle, ensure_certification, latest_certification
 from .domain.stats import domain_scores, quality_report
@@ -68,6 +79,11 @@ def get_conn():
 
 def _stage(conn) -> str:
     return db.get_state(conn, "release_stage", "G0_offline") or "G0_offline"
+
+
+def _ensure_not_stopped(conn) -> None:
+    if emergency_stop_active(conn):
+        raise HTTPException(423, "终止开关已激活，当前写操作被阻断")
 
 
 def _bundle_or_404(conn, bundle_id: str) -> dict[str, Any]:
@@ -218,6 +234,7 @@ def _priority(routing: dict[str, Any]) -> int:
         "integrity_gap": 0,
         "critical_negative": 1,
         "near_cutoff": 2,
+        "l3_human_confirmation": 2,
         "appeal": 3,
         "confidence_below_floor": 4,
         "item_disagreement": 5,
@@ -314,6 +331,7 @@ def attempt_detail(attempt_id: str, conn=Depends(get_conn)):
 
 @app.post("/api/attempts/{attempt_id}/appeal")
 def appeal_attempt(attempt_id: str, conn=Depends(get_conn)):
+    _ensure_not_stopped(conn)
     attempt = _attempt_row(conn, attempt_id)
     if attempt["status"] == "published":
         raise HTTPException(400, "已发布场次需通过考务申诉流程重新开启")
@@ -354,6 +372,7 @@ class RiskBody(BaseModel):
 
 @app.post("/api/attempts/{attempt_id}/risk-level")
 def raise_attempt_risk(attempt_id: str, body: RiskBody, conn=Depends(get_conn)):
+    _ensure_not_stopped(conn)
     if body.risk_level not in RISK_ORDER:
         raise HTTPException(400, "非法风险等级")
     try:
@@ -376,6 +395,7 @@ class SignoffBody(BaseModel):
 
 @app.post("/api/attempts/{attempt_id}/signoff")
 def signoff_attempt(attempt_id: str, body: SignoffBody, conn=Depends(get_conn)):
+    _ensure_not_stopped(conn)
     attempt = _attempt_row(conn, attempt_id)
     if attempt["status"] == "published":
         raise HTTPException(400, "该场次已发布")
@@ -423,6 +443,7 @@ class PublishBody(BaseModel):
 
 @app.post("/api/attempts/{attempt_id}/publish")
 def publish_attempt(attempt_id: str, body: PublishBody, conn=Depends(get_conn)):
+    _ensure_not_stopped(conn)
     attempt = _attempt_row(conn, attempt_id)
     if not attempt["signed_off_by"]:
         raise HTTPException(400, "缺少 human_signoff，成绩不可发布")
@@ -514,6 +535,7 @@ REASON_CODES = ("证据不足", "判定过严", "判定过宽", "行为锚歧义
 
 @app.post("/api/review/{record_id}/action")
 def review_action(record_id: str, body: ReviewBody, conn=Depends(get_conn)):
+    _ensure_not_stopped(conn)
     row = conn.execute("SELECT * FROM score_records WHERE record_id = ?", (record_id,)).fetchone()
     if not row:
         raise HTTPException(404, "评分记录不存在")
@@ -621,11 +643,14 @@ def bundle_detail(bundle_id: str, conn=Depends(get_conn)):
             "SELECT * FROM authority_overrides WHERE bundle_id = ? AND item_id = ?",
             (bundle_id, item["item_id"]),
         ).fetchone()
+        l3_authority = cap_authority(item, "L3", "G3_limited")
         items.append(
             {
                 **item,
                 "effective_authority": authority,
                 "authority_label": AUTHORITY_LABELS.get(authority, authority),
+                "l3_authority": l3_authority,
+                "l3_authority_label": AUTHORITY_LABELS.get(l3_authority, l3_authority),
                 "override": dict(override) if override else None,
             }
         )
@@ -734,6 +759,7 @@ def quality(conn=Depends(get_conn)):
         "fairness": fairness_report(conn),
         "ab": ab_report(conn),
         "latest_self_check": latest_self_check(conn),
+        "governance": governance_status(conn),
         "versions": {
             "model": db.get_state(conn, "model_version", MODEL_VERSION),
             "prompt": db.get_state(conn, "prompt_version", PROMPT_VERSION),
@@ -810,6 +836,86 @@ class GovernanceBody(BaseModel):
 def governance_self_check(body: GovernanceBody, conn=Depends(get_conn)):
     result = run_self_check(conn, actor=body.actor, apply=body.apply)
     return {"ok": True, **result}
+
+
+class TerminationBody(BaseModel):
+    active: bool
+    reason: str = ""
+    actor: str = "考务"
+
+
+@app.post("/api/governance/termination-switch")
+def termination_switch(body: TerminationBody, conn=Depends(get_conn)):
+    result = set_emergency_stop(conn, active=body.active, reason=body.reason, actor=body.actor)
+    return {"ok": True, **result}
+
+
+class DrillBody(BaseModel):
+    actor: str = "考务"
+    attempt_id: str | None = None
+
+
+@app.post("/api/governance/drills/termination")
+def termination_drill(body: DrillBody, conn=Depends(get_conn)):
+    return {"ok": True, "drill": run_termination_drill(conn, actor=body.actor)}
+
+
+@app.post("/api/governance/drills/appeal")
+def appeal_drill(body: DrillBody, conn=Depends(get_conn)):
+    try:
+        result = run_appeal_drill(conn, actor=body.actor, attempt_id=body.attempt_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "drill": result}
+
+
+class ApprovalBody(BaseModel):
+    approval_type: str = "ethics_and_data"
+    approver: str = "伦理委员会"
+    note: str = ""
+
+
+@app.post("/api/governance/approvals")
+def create_approval(body: ApprovalBody, conn=Depends(get_conn)):
+    return {"ok": True, "approval": register_approval(
+        conn, approval_type=body.approval_type, approver=body.approver, note=body.note
+    )}
+
+
+class ModelCardBody(BaseModel):
+    actor: str = "系统"
+
+
+@app.post("/api/governance/model-card/publish")
+def publish_card(body: ModelCardBody, conn=Depends(get_conn)):
+    try:
+        result = publish_model_card(conn, actor=body.actor)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "model_card": result}
+
+
+class StageBody(BaseModel):
+    stage: str
+    actor: str = "系统"
+    reason: str = ""
+
+
+@app.post("/api/governance/release-stage")
+def release_stage(body: StageBody, conn=Depends(get_conn)):
+    try:
+        result = set_release_stage(conn, stage=body.stage, actor=body.actor, reason=body.reason)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, **result}
+
+
+@app.get("/api/governance/status")
+def governance(conn=Depends(get_conn)):
+    status = governance_status(conn)
+    report = quality_report(conn)
+    status["gates"] = evaluate_gates(conn, report, _stage(conn))["gates"]
+    return status
 
 
 @app.get("/api/audit")
@@ -894,6 +1000,7 @@ class SpMessageBody(BaseModel):
 
 @app.post("/api/sp/sessions/{session_id}/message")
 def sp_message(session_id: str, body: SpMessageBody, conn=Depends(get_conn)):
+    _ensure_not_stopped(conn)
     row = conn.execute("SELECT * FROM sp_sessions WHERE session_id = ?", (session_id,)).fetchone()
     if not row:
         raise HTTPException(404, "会话不存在")
@@ -1015,6 +1122,7 @@ def sp_certifications(conn=Depends(get_conn), bundle_id: str | None = None):
 
 @app.post("/api/sp/sessions/{session_id}/finish")
 def finish_sp_session(session_id: str, conn=Depends(get_conn)):
+    _ensure_not_stopped(conn)
     row = conn.execute("SELECT * FROM sp_sessions WHERE session_id = ?", (session_id,)).fetchone()
     if not row:
         raise HTTPException(404, "会话不存在")

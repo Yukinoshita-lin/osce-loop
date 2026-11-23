@@ -24,6 +24,7 @@ const REASON_COLOR = {
   risk_escalation: 'red',
   critical_negative: 'red',
   near_cutoff: 'amber',
+  l3_human_confirmation: 'amber',
   confidence_below_floor: 'amber',
   item_disagreement: 'amber',
   appeal: 'purple',
@@ -181,7 +182,13 @@ async function route() {
 async function viewOverview() {
   const data = await api('/api/overview');
   setPendingBadge(data.stats.pending || 0);
-  $('#stage-pill').textContent = data.release_stage === 'G0_offline' ? 'G0 离线副驾' : data.release_stage;
+  const stageLabels = {
+    G0_offline: 'G0 离线副驾',
+    G1_practice: 'G1 练习沙箱',
+    G2_simulation: 'G2 模拟考',
+    G3_limited: 'G3 有限高利害',
+  };
+  $('#stage-pill').textContent = stageLabels[data.release_stage] || data.release_stage;
   const qwkClass = data.stats.qwk_ai >= 0.7 ? 'teal' : data.stats.qwk_ai >= 0.6 ? 'amber' : 'red';
   const routingMax = Math.max(1, ...data.routing.map((r) => r.count));
   const gate = data.p0_gate;
@@ -650,6 +657,7 @@ async function viewBundle() {
       <td>${item.critical ? '<span class="pill red">关键</span>' : '<span class="muted tiny">—</span>'}</td>
       <td><span class="pill ${item.effective_authority === 'none' ? 'muted' : item.effective_authority === 'extract' ? 'blue' : 'teal'}">${esc(item.authority_label)}</span>
         ${item.override ? `<div class="tiny" style="color:var(--amber);margin-top:2px">已降级：${esc(item.override.reason)}</div>` : ''}</td>
+      <td><span class="pill ${item.l3_authority === 'none' ? 'muted' : item.l3_authority === 'extract' ? 'blue' : 'teal'}">${esc(item.l3_authority_label)}</span></td>
       <td class="tiny muted">${esc(item.guideline_ref)}</td>
     </tr>`).join('');
   const slotRows = data.derived.slots.map((s) => `
@@ -708,7 +716,7 @@ async function viewBundle() {
       <div class="card-title">评分项与项级 AI 权限<span class="sub">${data.items.length} 项 · 权限最小粒度是评分项</span></div>
       <div class="tbl-wrap">
         <table>
-          <thead><tr><th>评分项</th><th>可观测行为锚</th><th>证据 / 阶段</th><th class="num">权重</th><th>关键项</th><th>有效 AI 权限</th><th>指南引用</th></tr></thead>
+          <thead><tr><th>评分项</th><th>可观测行为锚</th><th>证据 / 阶段</th><th class="num">权重</th><th>关键项</th><th>当前 AI 权限</th><th>L3 权限</th><th>指南引用</th></tr></thead>
           <tbody>${itemsRows}</tbody>
         </table>
       </div>
@@ -1145,11 +1153,65 @@ function selfCheckHtml(selfCheck) {
   `;
 }
 
+function p3SectionHtml(gov, gates) {
+  const g3 = (gates || []).find((g) => g.id === 'G3');
+  const stage = gov.release_stage || 'G0_offline';
+  const stageLabel = {
+    G0_offline: 'G0 离线副驾',
+    G1_practice: 'G1 练习沙箱',
+    G2_simulation: 'G2 模拟考',
+    G3_limited: 'G3 有限高利害',
+  }[stage] || stage;
+  const switchDrill = gov.switch_drill;
+  const appeal = gov.appeal_drills || {};
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">P3 治理准备<span class="sub">有限高利害 · 一次只放开一档</span></div>
+      <div class="attempt-strip">
+        <span>当前阶段 <b>${esc(stageLabel)}</b></span>
+        <span>终止开关 <b>${gov.emergency_stop ? '<span style="color:var(--red)">已激活</span>' : '正常'}</b></span>
+        ${g3 ? `<span>G3 闸门 ${gateStatusPill(g3.status)}</span>` : ''}
+        ${stage === 'G3_limited' ? '<span class="pill teal">L3 非关键项已开放 AI 建议</span>' : '<span class="pill muted">L3 仅证据提取</span>'}
+      </div>
+      <div class="grid c2" style="margin-top:12px">
+        <div>
+          <div class="version-row"><span class="k">终止开关演练</span><span class="v">${switchDrill ? (switchDrill.passed ? '<span class="pill teal">通过</span>' : '<span class="pill red">未通过</span>') + ` · ${num(switchDrill.duration_ms, 0)}ms` : '<span class="pill muted">未演练</span>'}</span></div>
+          <div class="version-row"><span class="k">申诉流程演练</span><span class="v">${appeal.passed || 0} / 2 次通过</span></div>
+          <div class="version-row"><span class="k">伦理与数据合规</span><span class="v">${gov.ethics_approved ? '<span class="pill teal">已批准</span>' : '<span class="pill red">未批准</span>'}</span></div>
+          <div class="version-row"><span class="k">模型卡公开</span><span class="v">${gov.model_card_public ? '<span class="pill teal">已公开</span>' : '<span class="pill red">未公开</span>'}</span></div>
+        </div>
+        <div>
+          <div class="btn-row">
+            <button class="btn small" data-action="termination-drill">终止开关演练</button>
+            <button class="btn small" data-action="appeal-drill">申诉流程演练</button>
+            <button class="btn small" data-action="approve-ethics">登记伦理批准</button>
+            <button class="btn small" data-action="publish-model-card">公开模型卡</button>
+          </div>
+          <div class="sep"></div>
+          <div class="btn-row">
+            <button class="btn primary" data-action="release-g3" ${stage === 'G3_limited' ? 'disabled' : ''}>升级到 G3 有限高利害</button>
+            <span class="tiny muted">${stage === 'G3_limited' ? '已启用；L3 仅非关键 utterance/action 项可建议，且全部人工确认。' : '需 G0–G2 全部通过且 G3 六项指标达标。'}</span>
+          </div>
+        </div>
+      </div>
+      <div class="sep"></div>
+      <div class="tiny muted">G3 放行条件：QWK ≥ 0.80 · 关键项漏判 = 0 · 终止开关演练通过 · 申诉演练 ≥ 2 次 · 伦理与数据合规批准 · 模型卡公开。</div>
+      <div class="tiny muted" style="margin-top:4px">${esc((gov.model_card || {}).card_id ? '模型卡：' + gov.model_card.card_id : '')}</div>
+    </div>`;
+}
+
 async function viewQuality() {
   const data = await api('/api/quality');
   const audit = await api('/api/audit?limit=30');
   const report = data.report;
   const gates = data.gates.gates;
+  const stageLabels = {
+    G0_offline: 'G0 离线副驾',
+    G1_practice: 'G1 练习沙箱',
+    G2_simulation: 'G2 模拟考',
+    G3_limited: 'G3 有限高利害',
+  };
+  $('#stage-pill').textContent = stageLabels[(data.governance || {}).release_stage] || (data.governance || {}).release_stage || 'G0 离线副驾';
   const qwkClass = report.qwk_ai >= 0.7 ? 'teal' : report.qwk_ai >= 0.6 ? 'amber' : 'red';
   const alerts = (data.gates.alerts || []).map((a) => `
     <div class="alert ${a.level === 'danger' ? 'danger' : ''}"><b>${esc(a.title)}</b><p>${esc(a.detail)}</p></div>`).join('');
@@ -1165,7 +1227,11 @@ async function viewQuality() {
           if (c.value !== null && c.value !== undefined) {
             if (c.key === 'subgroup_gap') value = num(c.value, 3) + ' SD';
             else if (c.key === 'near_improvement') value = num(c.value * 100, 1) + 'pp';
+            else if (c.key === 'switch_drill' || c.key === 'ethics' || c.key === 'model_card') value = c.value >= 1 ? '通过' : '未完成';
+            else if (c.key === 'appeal_drill') value = `${c.value}/2`;
             else if (c.key === 'evidence_rate' || c.key === 'edit_rate' || c.key === 'teacher_hours' || c.key === 'sp_fact_error' || c.key === 'persona_pass') value = pct(c.value, c.value < 0.1 ? 1 : 0);
+            else if (c.key === 'sus') value = num(c.value, 1);
+            else if (c.key === 'critical_miss') value = num(c.value, 0);
             else if (c.key === 'avg_review_seconds') value = num(c.value, 2) + 's';
             else if (c.key === 'p95_latency') value = num(c.value * 1000, 0) + ' ms';
             else value = num(c.value, 2);
@@ -1181,6 +1247,7 @@ async function viewQuality() {
   const modelCards = data.model_cards.map((c) => `
     <div class="card tight" style="margin-bottom:8px">
       <div class="card-title" style="margin-bottom:4px">${esc(c.capability)}<span class="sub">${esc(c.model_version)}</span></div>
+      <div class="attempt-strip" style="margin-bottom:4px">${c.is_public ? '<span class="pill teal">已公开</span>' : '<span class="pill amber">未公开</span>'} ${c.published_at ? `<span class="tiny muted">${fmtTime(c.published_at)}</span>` : ''}</div>
       <div class="tiny muted">QWK ${num(c.metrics.qwk_ai, 3)} · 证据 ${pct(c.metrics.evidence_rate, 0)} · 编辑率 ${pct(c.metrics.edit_rate, 0)} · n=${c.metrics.sample_size}</div>
       <div class="tiny" style="color:var(--amber);margin-top:4px">${esc(c.limitations)}</div>
     </div>`).join('');
@@ -1207,6 +1274,8 @@ async function viewQuality() {
       ${abSectionHtml(data.ab)}
       ${fairnessSectionHtml(data.fairness)}
     </div>
+
+    ${p3SectionHtml(data.governance || {}, gates)}
 
     <div class="grid c2" style="margin-bottom:16px">
       <div class="card">
@@ -1277,6 +1346,79 @@ document.addEventListener('click', async (e) => {
       toast(result.applied
         ? `治理自检完成：${result.applied_changes.length} 个评分项权限自动降级`
         : `治理自检完成：${result.trigger_summary}`);
+      await viewQuality();
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'termination-drill') {
+    try {
+      const result = await api('/api/governance/drills/termination', {
+        method: 'POST',
+        body: { actor: state.reviewer || '考务' },
+      });
+      toast(result.drill.passed ? `终止开关演练通过 · ${num(result.drill.duration_ms, 0)}ms` : '终止开关演练未通过');
+      await viewQuality();
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'appeal-drill') {
+    try {
+      const result = await api('/api/governance/drills/appeal', {
+        method: 'POST',
+        body: { actor: state.reviewer || '考务' },
+      });
+      toast(result.drill.passed ? '申诉全流程演练通过' : '申诉演练存在未通过步骤');
+      await viewQuality();
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'approve-ethics') {
+    try {
+      await api('/api/governance/approvals', {
+        method: 'POST',
+        body: {
+          approval_type: 'ethics_and_data',
+          approver: state.reviewer || '伦理委员会',
+          note: 'P3 伦理与数据合规批准（演示）',
+        },
+      });
+      toast('伦理与数据合规批准已登记');
+      await viewQuality();
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'publish-model-card') {
+    try {
+      await api('/api/governance/model-card/publish', {
+        method: 'POST',
+        body: { actor: state.reviewer || '系统' },
+      });
+      toast('模型卡已公开');
+      await viewQuality();
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'release-g3') {
+    try {
+      const result = await api('/api/governance/release-stage', {
+        method: 'POST',
+        body: {
+          stage: 'G3_limited',
+          actor: state.reviewer || '系统',
+          reason: 'G3 六项指标达标，有限开放非关键项 AI 建议',
+        },
+      });
+      toast(`已升级：${result.old_stage} → ${result.new_stage}`);
       await viewQuality();
     } catch (err) {
       toast(err.message, true);

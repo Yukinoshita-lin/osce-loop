@@ -238,9 +238,18 @@ def cap_authority(
     if risk_level in ("L0", "L1") and release_stage in ("G0_offline", "G1_practice"):
         ceiling = "decide"
     if risk_level == "L3":
-        ceiling = "extract"
+        # P3 有限高利害：只有完成 G3 放行后，才允许非关键 utterance/action 项给建议分
+        if release_stage != "G3_limited":
+            ceiling = "extract"
+        elif item.get("critical"):
+            ceiling = "extract"
+        elif item.get("evidence_type") in ("utterance", "action"):
+            ceiling = "suggest"
+        else:
+            ceiling = "extract"
     if item.get("critical") and AUTHORITY_ORDER[authority] > AUTHORITY_ORDER["suggest"]:
-        ceiling = "suggest"
+        if AUTHORITY_ORDER[ceiling] > AUTHORITY_ORDER["suggest"]:
+            ceiling = "suggest"
     if AUTHORITY_ORDER[authority] <= AUTHORITY_ORDER[ceiling]:
         return authority
     return ceiling

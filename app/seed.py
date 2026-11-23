@@ -231,7 +231,7 @@ def build_bundle_payload() -> dict[str, Any]:
                 "entities": ["不少汗", "恶心", "喘气"],
                 "disclosure": "on_direct_ask",
             },
-            probe={"positive": ["出汗", "恶心", "呼吸", "伴随", "冷汗", "想吐"], "partial": ["还有.*不舒服"]},
+            probe={"positive": ["出汗", "恶心", "呼吸", "伴随", "冷汗", "想吐", "虚汗", "反胃"], "partial": ["还有.*不舒服"]},
             feedback_alt="可追加：“有没有出汗、恶心或者喘不上气？”",
         ),
         _item(
@@ -879,7 +879,7 @@ def seed_if_empty(conn) -> bool:
                 bundle["bundle_id"],
                 meta["code"],
                 meta["name"],
-                "SES-2026-A" if index <= 7 else "SES-2026-B",
+                "SES-2026-A" if index <= 5 else ("SES-2026-B" if index <= 9 else "SES-2026-C"),
                 "L2",
                 MEDIA_ID,
                 MEDIA_URL,
@@ -939,6 +939,7 @@ def seed_if_empty(conn) -> bool:
         "sp_model_version": SP_MODEL_VERSION,
         "sp_prompt_version": SP_PROMPT_VERSION,
         "release_stage": "G0_offline",
+        "sus_score": "78.5",
         "seeded_at": db.now_iso(),
     }.items():
         db.set_state(conn, key, value)
@@ -1076,8 +1077,8 @@ def _write_model_card(conn) -> None:
         "sample_size": report["counts"]["records"],
     }
     conn.execute(
-        "INSERT INTO model_cards(card_id, capability, model_version, prompt_version, metrics, limitations, created_at) "
-        "VALUES(?,?,?,?,?,?,?)",
+        "INSERT INTO model_cards(card_id, capability, model_version, prompt_version, metrics, limitations, "
+        "is_public, published_at, created_at) VALUES(?,?,?,?,?,?,?,?,?)",
         (
             db.new_id("mc"),
             "score.suggest",
@@ -1085,6 +1086,8 @@ def _write_model_card(conn) -> None:
             PROMPT_VERSION,
             json.dumps(metrics, ensure_ascii=False),
             "演示数据为合成录像；真实部署必须用本地金标准重新校准阈值。ASR 对非标准口音的词错率会直接压低证据召回。",
+            0,
+            None,
             db.now_iso(),
         ),
     )
