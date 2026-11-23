@@ -48,6 +48,8 @@ const state = {
   reviewStartedAt: 0,
   sp: null,
   feedbackId: null,
+  bundleCurrent: null,
+  bundlePayload: null,
 };
 
 /* ---------- utils ---------- */
@@ -1172,6 +1174,10 @@ async function viewBundle() {
     return;
   }
   const data = await api(`/api/bundles/${encodeURIComponent(list[0].bundle_id)}`);
+  state.bundleCurrent = data;
+  state.bundlePayload = null;
+  const [major, minor] = String(data.version || '1.0').split('.');
+  const nextVersion = `${major || 1}.${(Number(minor) || 0) + 1}`;
   const checks = data.validation.checks.map((c) => `
     <div class="check-card ${c.status}">
       <div class="ch"><span>${esc(c.label)}</span>${c.status === 'pass' ? '<span class="pill teal">通过</span>' : c.status === 'warn' ? '<span class="pill amber">待核验</span>' : '<span class="pill red">阻断</span>'}</div>
@@ -1209,6 +1215,19 @@ async function viewBundle() {
         <p>评分表不是流程的终点产物，而是贯穿全链路的契约。冻结瞬间派生信息槽、证据探针、检查点与反馈模板，共享同一 bundle_version。</p>
       </div>
       <div><span class="pill teal">${esc(data.status)}</span> <span class="pill">v${esc(data.version)}</span></div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-title">站包提案校验与冻结<span class="sub">冻结即不可变 · 相同内容不会重复入库</span></div>
+      <div class="btn-row" style="flex-wrap:wrap;gap:8px;align-items:center">
+        <button class="btn small" data-action="bundle-export">下载当前站包 JSON</button>
+        <input id="bundle-file" class="input" type="file" accept="application/json,.json" style="max-width:260px">
+        <input id="bundle-version" class="input" style="max-width:100px" value="${nextVersion}" aria-label="新版本号">
+        <input id="bundle-reason" class="input" style="max-width:240px" value="站包修订" aria-label="冻结原因">
+        <button class="btn small" data-action="bundle-validate">校验提案</button>
+        <button class="btn small primary" data-action="bundle-freeze">签字冻结</button>
+      </div>
+      <div id="bundle-proposal-result" class="tiny muted" style="margin-top:8px">先下载当前站包作为模板，修改后上传；校验通过才能冻结。新站包需重新完成 SP 认证。</div>
     </div>
 
     <div class="grid c2" style="margin-bottom:14px">
@@ -1274,6 +1293,30 @@ async function viewBundle() {
       </div>
     </div>
   `;
+  const fileInput = $('#bundle-file');
+  if (fileInput) {
+    fileInput.addEventListener('change', async () => {
+      const box = $('#bundle-proposal-result');
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) {
+        state.bundlePayload = null;
+        return;
+      }
+      try {
+        const payload = JSON.parse(await file.text());
+        if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+          throw new Error('站包 JSON 顶层必须是对象');
+        }
+        state.bundlePayload = payload;
+        box.className = 'tiny';
+        box.innerHTML = `<span class="pill blue">已载入</span> ${esc(file.name)} · ${Array.isArray(payload.rubric) ? payload.rubric.length : 0} 个评分项，待校验`;
+      } catch (err) {
+        state.bundlePayload = null;
+        box.className = 'tiny';
+        box.innerHTML = `<span style="color:var(--red)">文件解析失败：${esc(err.message)}</span>`;
+      }
+    });
+  }
 }
 
 /* ---------- feedback ---------- */
@@ -2099,6 +2142,81 @@ document.addEventListener('click', async (e) => {
           : `<span class="pill red">异常</span> 第 ${result.index} 条（${esc(result.broken_at)}）${esc(result.message)}`;
       }
       toast(result.ok ? `审计链完整：${result.total} 条` : '审计链校验失败', !result.ok);
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'bundle-export') {
+    const bundle = state.bundleCurrent;
+    if (!bundle) return;
+    const blob = new Blob([JSON.stringify(bundle.payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${bundle.station_id}-bundle-template.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast(`已导出站包模板：${bundle.station_id}`);
+    return;
+  }
+  if (action === 'bundle-validate') {
+    const box = $('#bundle-proposal-result');
+    if (!state.bundlePayload) {
+      toast('请先上传站包 JSON 文件', true);
+      return;
+    }
+    try {
+      const result = await api('/api/bundles/validate', {
+        method: 'POST',
+        body: { payload: state.bundlePayload },
+      });
+      const v = result.validation;
+      const counts = result.derived_counts || {};
+      const checksHtml = v.checks.map((c) => `
+        <div style="margin-top:4px">
+          <span class="pill ${c.status === 'pass' ? 'teal' : c.status === 'warn' ? 'amber' : 'red'}">${esc(c.label)}</span>
+          <span>${c.status === 'pass' ? '通过' : esc((c.issues || [])[0] || '待人工核验')}</span>
+        </div>`).join('');
+      box.className = 'tiny';
+      box.innerHTML = `
+        <div>${v.can_freeze ? '<span class="pill teal">可冻结</span>' : '<span class="pill red">存在阻断项</span>'}
+          ${counts.items || 0} 个评分项 · 派生 ${counts.slots || 0} 个信息槽 / ${counts.probes || 0} 个探针</div>
+        ${checksHtml}
+        ${v.blocking.length ? `<div style="margin-top:4px;color:var(--red)">${esc(v.blocking.slice(0, 3).join('；'))}</div>` : ''}`;
+      toast(v.can_freeze ? '校验通过，可签字冻结' : `校验未通过：${v.blocking.length} 个阻断项`, !v.can_freeze);
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'bundle-freeze') {
+    if (!state.bundlePayload) {
+      toast('请先上传站包 JSON 文件', true);
+      return;
+    }
+    const version = ($('#bundle-version')?.value || '').trim();
+    const reason = ($('#bundle-reason')?.value || '').trim() || '站包修订';
+    if (!/^\d+\.\d+$/.test(version)) {
+      toast('版本号格式应为 主版本.次版本，例如 1.1', true);
+      return;
+    }
+    try {
+      const result = await api('/api/bundles/freeze', {
+        method: 'POST',
+        body: {
+          payload: state.bundlePayload,
+          version,
+          reason,
+          supersedes: state.bundleCurrent ? state.bundleCurrent.bundle_id : null,
+        },
+      });
+      toast(result.created
+        ? `已冻结 ${result.bundle.bundle_id} v${result.bundle.version}`
+        : '相同内容已存在，未重复冻结');
+      await viewBundle();
     } catch (err) {
       toast(err.message, true);
     }

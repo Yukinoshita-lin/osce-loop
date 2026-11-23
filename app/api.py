@@ -52,6 +52,7 @@ from .domain.auth import (
 from .domain.bundle import (
     apply_authority_reset,
     effective_authority,
+    freeze_bundle,
     get_bundle,
     list_bundles,
     list_overrides,
@@ -86,7 +87,7 @@ from .domain.media import backfill_media_hashes
 from .domain.practice import build_practice_report
 from .domain.retention import purge_expired, refresh_retention, retention_overview
 from .domain.risk import RISK_ORDER, escalate_risk
-from .domain.rubric import AUTHORITY_LABELS, PHASE_LABELS, cap_authority
+from .domain.rubric import AUTHORITY_LABELS, PHASE_LABELS, cap_authority, derive_assets, validate_bundle
 from .domain.scheduling import (
     ensure_schedule_inputs,
     generate_schedule,
@@ -1069,6 +1070,62 @@ def bundle_detail(bundle_id: str, conn=Depends(get_conn)):
                 "SELECT * FROM audit_events WHERE object_id = ? ORDER BY created_at DESC", (bundle_id,)
             ).fetchall()
         ),
+    }
+
+
+class BundlePayloadBody(BaseModel):
+    payload: dict[str, Any]
+
+
+class BundleFreezeBody(BaseModel):
+    payload: dict[str, Any]
+    version: str = Field(default="1.0", pattern=r"^\d+\.\d+$")
+    supersedes: str | None = None
+    reason: str = Field(default="站包修订", min_length=1, max_length=200)
+
+
+@app.post("/api/bundles/validate")
+def validate_bundle_proposal(body: BundlePayloadBody):
+    validation = validate_bundle(body.payload)
+    try:
+        counts = derive_assets(body.payload)["counts"]
+    except (KeyError, TypeError, ValueError):
+        counts = None
+    return {"validation": validation, "derived_counts": counts}
+
+
+@app.post("/api/bundles/freeze")
+def freeze_bundle_proposal(body: BundleFreezeBody, request: Request, conn=Depends(get_conn)):
+    _ensure_not_stopped(conn)
+    if body.supersedes and not get_bundle(conn, body.supersedes):
+        raise HTTPException(400, "supersedes 指向的站包不存在")
+    total_before = conn.execute("SELECT COUNT(*) AS n FROM bundles").fetchone()["n"]
+    try:
+        bundle = freeze_bundle(
+            conn,
+            body.payload,
+            actor=request.state.user["display_name"],
+            version=body.version,
+            supersedes=body.supersedes,
+            reason=body.reason,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    total_after = conn.execute("SELECT COUNT(*) AS n FROM bundles").fetchone()["n"]
+    return {
+        "ok": True,
+        "created": total_after > total_before,
+        "bundle": {
+            "bundle_id": bundle["bundle_id"],
+            "station_id": bundle["station_id"],
+            "title": bundle["title"],
+            "version": bundle["version"],
+            "bundle_hash": bundle["bundle_hash"],
+            "frozen_at": bundle["frozen_at"],
+            "supersedes": bundle["supersedes"],
+        },
+        "validation": bundle["validation"],
+        "derived_counts": bundle["derived"]["counts"],
     }
 
 

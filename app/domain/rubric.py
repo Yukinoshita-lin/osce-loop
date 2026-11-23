@@ -134,6 +134,15 @@ def validate_bundle(payload: dict[str, Any]) -> dict[str, Any]:
     issues: list[str] = []
     seen: set[str] = set()
 
+    required_issues: list[str] = []
+    if not _text(payload.get("station_id")):
+        required_issues.append("payload 缺少 station_id")
+    if not _text(payload.get("title")):
+        required_issues.append("payload 缺少 title")
+    if not rubric:
+        required_issues.append("rubric 不得为空，至少包含一个评分项")
+    issues.extend(required_issues)
+
     for item in rubric:
         item_id = item.get("item_id")
         if item_id in seen:
@@ -169,7 +178,7 @@ def validate_bundle(payload: dict[str, Any]) -> dict[str, Any]:
     if missing_refs:
         issues.append(f"考生指令引用了不存在的评分项: {', '.join(missing_refs)}")
     slot_issues = [i for i in issues if "缺少证据探针" in i or "weight" in i or "evidence_type" in i or "phase 非法" in i]
-    consistency_status = "fail" if missing_refs else ("warn" if slot_issues else "pass")
+    consistency_status = "fail" if (missing_refs or required_issues) else ("warn" if slot_issues else "pass")
 
     def status_of(entries: list[str]) -> str:
         return "fail" if entries else "pass"

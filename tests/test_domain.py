@@ -88,6 +88,20 @@ def test_vague_anchor_blocks_freeze():
     assert any("不可判定" in issue for issue in validation["blocking"])
 
 
+def test_incomplete_bundle_payload_is_blocked():
+    missing_station = build_bundle_payload()
+    missing_station["station_id"] = ""
+    validation = validate_bundle(missing_station)
+    assert validation["can_freeze"] is False
+    assert any("station_id" in issue for issue in validation["blocking"])
+
+    empty_rubric = build_bundle_payload()
+    empty_rubric["rubric"] = []
+    validation = validate_bundle(empty_rubric)
+    assert validation["can_freeze"] is False
+    assert any("rubric" in issue for issue in validation["blocking"])
+
+
 def test_observability_requires_verifiable_verb():
     ok, why = is_observable("询问胸痛的部位与性质")
     assert ok and why == "ok"
