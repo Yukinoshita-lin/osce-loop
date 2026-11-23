@@ -1775,6 +1775,36 @@ function susSectionHtml(sus) {
     </div>`;
 }
 
+function calibrationSectionHtml(cal) {
+  const items = cal.items || [];
+  const bands = cal.confidence_bands || [];
+  const lowItems = items.slice(0, 6);
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">金标准校准<span class="sub">导入人工标签 · 重算 QWK</span></div>
+      <div class="attempt-strip" style="margin-bottom:8px">
+        <span>金标准 <b>${cal.gold_count || 0}</b> / AI ${cal.ai_count || 0}</span>
+        <span>覆盖率 <b>${pct(cal.coverage, 0)}</b></span>
+        <span>AI–金标准 QWK <b>${num(cal.qwk_ai, 3)}</b></span>
+        <span>建议置信下限 <b>${cal.recommended_confidence_floor == null ? '样本不足' : num(cal.recommended_confidence_floor, 2)}</b></span>
+      </div>
+      ${lowItems.length ? `<div class="version-row"><span class="k">一致率最低项</span><span class="v">${lowItems.map((i) => `${esc(i.item_id)} ${pct(i.exact_agreement, 0)} (n=${i.n})`).join(' · ')}</span></div>` : ''}
+      <div class="tiny muted">置信扫描：${bands.length ? bands.map((b) => `≥${num(b.floor, 1)} ${b.accuracy === null ? '—' : pct(b.accuracy, 0)}`).join(' · ') : '样本不足'}</div>
+      <details style="margin-top:8px">
+        <summary class="small" style="cursor:pointer;color:var(--teal)">导入金标准 CSV / JSON</summary>
+        <form id="calibration-form" style="margin-top:10px">
+          <label class="field">文件（列：attempt_id, item_id, gold_score）
+            <input class="input" type="file" name="file" accept=".csv,.json" required>
+          </label>
+          <div class="btn-row" style="margin-top:10px">
+            <button class="btn primary" type="submit">导入并重算</button>
+            <span class="tiny muted">只更新 gold_score，不改最终分；导入批次写入审计链。</span>
+          </div>
+        </form>
+      </details>
+    </div>`;
+}
+
 async function viewQuality() {
   const [data, audit, retention] = await Promise.all([
     api('/api/quality'),
@@ -1859,6 +1889,8 @@ async function viewQuality() {
 
     ${susSectionHtml(data.sus || {})}
 
+    ${calibrationSectionHtml(data.calibration || {})}
+
     <div class="card" style="margin-bottom:16px">
       <div class="card-title">媒体留存治理<span class="sub">成绩永久 · 音视频分级留存 · 删除留痕</span></div>
       <div class="grid c4" style="margin-bottom:10px">
@@ -1935,6 +1967,29 @@ async function viewQuality() {
       </div>
     </div>
   `;
+  const calibrationForm = $('#calibration-form');
+  if (calibrationForm) {
+    calibrationForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const button = calibrationForm.querySelector('button[type="submit"]');
+      if (!calibrationForm.querySelector('input[name="file"]').files.length) {
+        toast('请选择金标准文件', true);
+        return;
+      }
+      button.disabled = true;
+      button.textContent = '导入并重算中…';
+      try {
+        const result = await apiForm('/api/calibration/import', new FormData(calibrationForm));
+        toast(`金标准已导入 ${result.updated} 条；AI QWK ${num(result.report.qwk_ai, 3)}`);
+        await viewQuality();
+      } catch (err) {
+        toast(err.message, true);
+      } finally {
+        button.disabled = false;
+        button.textContent = '导入并重算';
+      }
+    });
+  }
   const susForm = $('#sus-form');
   if (susForm) {
     susForm.addEventListener('submit', async (e) => {

@@ -1,6 +1,7 @@
 """FastAPI 接口：复核工作台、反馈、质量闸门与 SP 演练。"""
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from contextlib import asynccontextmanager
@@ -55,6 +56,7 @@ from .domain.bundle import (
     list_bundles,
     list_overrides,
 )
+from .domain.calibration import calibration_report, import_gold_scores, parse_gold_file
 from .domain.fairness import fairness_report
 from .domain.gates import evaluate_gates
 from .domain.governance import (
@@ -1155,6 +1157,7 @@ def quality(conn=Depends(get_conn)):
         "ai_provider": scoring_provider_info(),
         "asr_provider": build_asr_provider().info,
         "sus": sus_summary(conn),
+        "calibration": calibration_report(conn),
         "audit_anchors": db.list_audit_anchors(conn, limit=5),
         "versions": {
             "model": db.get_state(conn, "model_version", MODEL_VERSION),
@@ -1168,6 +1171,40 @@ def quality(conn=Depends(get_conn)):
 class SusBody(BaseModel):
     answers: list[int]
     participant_label: str | None = None
+
+
+MAX_GOLD_BYTES = 5 * 1024 * 1024
+
+
+@app.post("/api/calibration/import")
+async def calibration_import(
+    request: Request,
+    file: UploadFile = File(...),
+    conn=Depends(get_conn),
+):
+    _ensure_not_stopped(conn)
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "金标准文件为空")
+    if len(raw) > MAX_GOLD_BYTES:
+        raise HTTPException(413, "金标准文件超过 5MB 限制")
+    try:
+        rows = parse_gold_file(file.filename or "gold.csv", raw)
+        summary = import_gold_scores(
+            conn,
+            rows,
+            actor=request.state.user["display_name"],
+            filename=file.filename or "gold.csv",
+            file_hash="sha256:" + hashlib.sha256(raw).hexdigest(),
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, **summary, "report": calibration_report(conn)}
+
+
+@app.get("/api/calibration/report")
+def calibration_report_api(conn=Depends(get_conn)):
+    return calibration_report(conn)
 
 
 @app.post("/api/quality/sus")
