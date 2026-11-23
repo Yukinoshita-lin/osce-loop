@@ -6,11 +6,11 @@ import json
 import os
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from .config import AUDIT_ANCHOR_PATH, DB_PATH
+from .config import AUDIT_ANCHOR_PATH, DB_PATH, SP_CERT_VALID_DAYS
 
 
 SCHEMA = """
@@ -172,6 +172,7 @@ CREATE TABLE IF NOT EXISTS sp_certifications (
     actor TEXT NOT NULL,
     status TEXT NOT NULL,
     report TEXT NOT NULL,
+    valid_until TEXT,
     created_at TEXT NOT NULL
 );
 
@@ -408,6 +409,22 @@ def _migrate(conn: sqlite3.Connection) -> None:
     ).fetchone()["n"]
     if missing:
         _backfill_audit_chain(conn)
+
+    cert_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(sp_certifications)").fetchall()
+    }
+    if "valid_until" not in cert_columns:
+        conn.execute("ALTER TABLE sp_certifications ADD COLUMN valid_until TEXT")
+        for row in conn.execute("SELECT cert_id, created_at FROM sp_certifications").fetchall():
+            try:
+                created = datetime.fromisoformat(row["created_at"])
+            except (TypeError, ValueError):
+                continue
+            valid_until = created + timedelta(days=SP_CERT_VALID_DAYS)
+            conn.execute(
+                "UPDATE sp_certifications SET valid_until = ? WHERE cert_id = ?",
+                (valid_until.isoformat(timespec="seconds"), row["cert_id"]),
+            )
 
 
 def rows_to_dicts(rows: Iterable[sqlite3.Row]) -> list[dict[str, Any]]:

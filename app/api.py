@@ -1622,6 +1622,7 @@ def sp_certifications(conn=Depends(get_conn), bundle_id: str | None = None):
                 "actor": row["actor"],
                 "status": row["status"],
                 "created_at": row["created_at"],
+                "valid_until": row["valid_until"],
                 "checks": report.get("checks", []),
                 "red_team": {
                     "case_count": report.get("red_team", {}).get("case_count"),

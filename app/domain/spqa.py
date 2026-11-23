@@ -5,9 +5,11 @@ import json
 import statistics
 import time
 from collections import Counter
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .. import db
+from ..config import SP_CERT_VALID_DAYS
 from .bundle import list_bundles
 from .slots import DialogueStateMachine, SPController, scan_leaks
 
@@ -304,11 +306,16 @@ def run_certification(bundle: dict[str, Any]) -> dict[str, Any]:
 def certify_bundle(conn, bundle: dict[str, Any], actor: str = "SP 认证员") -> dict[str, Any]:
     report = run_certification(bundle)
     cert_id = db.new_id("cert")
+    created = datetime.fromisoformat(report["created_at"])
+    valid_until = (created + timedelta(days=SP_CERT_VALID_DAYS)).isoformat(timespec="seconds")
     report["cert_id"] = cert_id
     report["actor"] = actor
+    report["valid_until"] = valid_until
+    report["expired"] = False
+    report["days_remaining"] = SP_CERT_VALID_DAYS
     conn.execute(
-        "INSERT INTO sp_certifications(cert_id, bundle_id, persona_version, actor, status, report, created_at) "
-        "VALUES(?,?,?,?,?,?,?)",
+        "INSERT INTO sp_certifications(cert_id, bundle_id, persona_version, actor, status, report, "
+        "valid_until, created_at) VALUES(?,?,?,?,?,?,?,?)",
         (
             cert_id,
             bundle["bundle_id"],
@@ -316,6 +323,7 @@ def certify_bundle(conn, bundle: dict[str, Any], actor: str = "SP 认证员") ->
             actor,
             report["status"],
             json.dumps(report, ensure_ascii=False),
+            valid_until,
             report["created_at"],
         ),
     )
@@ -352,7 +360,23 @@ def _attach_persona_state(conn, row) -> dict[str, Any]:
     current_hash = bundle_row["bundle_hash"] if bundle_row else None
     data["current_persona_version"] = current_hash
     data["stale"] = bool(current_hash and row["persona_version"] != current_hash)
-    data["valid"] = data["status"] == "certified" and not data["stale"]
+    data["valid_until"] = row["valid_until"]
+    expires = None
+    if row["valid_until"]:
+        try:
+            expires = datetime.fromisoformat(row["valid_until"])
+        except ValueError:
+            expires = None
+    if expires is None:
+        data["expired"] = True
+        data["days_remaining"] = 0
+    else:
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        remaining = expires - datetime.now(timezone.utc)
+        data["expired"] = remaining.total_seconds() <= 0
+        data["days_remaining"] = max(0, int(remaining.total_seconds() // 86400))
+    data["valid"] = data["status"] == "certified" and not data["stale"] and not data["expired"]
     return data
 
 
@@ -377,7 +401,7 @@ def certification_for_bundle(conn, bundle: dict[str, Any]) -> dict[str, Any] | N
         return None
     cert["stale"] = cert["persona_version"] != bundle["bundle_hash"]
     cert["current_persona_version"] = bundle["bundle_hash"]
-    cert["valid"] = cert["status"] == "certified" and not cert["stale"]
+    cert["valid"] = cert["status"] == "certified" and not cert["stale"] and not cert["expired"]
     return cert
 
 

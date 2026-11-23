@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 from .ab import ab_report
@@ -121,7 +122,7 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
     cert_row = None
     if current_bundle:
         cert_row = conn.execute(
-            "SELECT report, persona_version FROM sp_certifications WHERE bundle_id = ? "
+            "SELECT report, persona_version, valid_until FROM sp_certifications WHERE bundle_id = ? "
             "ORDER BY created_at DESC, rowid DESC LIMIT 1",
             (current_bundle["bundle_id"],),
         ).fetchone()
@@ -130,6 +131,22 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
         elif cert_row["persona_version"] != current_bundle["bundle_hash"]:
             sp_cert_issue = "stale"
             cert_row = None
+        else:
+            expires = None
+            if cert_row["valid_until"]:
+                try:
+                    expires = datetime.fromisoformat(cert_row["valid_until"])
+                except ValueError:
+                    expires = None
+            if expires is None:
+                sp_cert_issue = "expired"
+                cert_row = None
+            else:
+                if expires.tzinfo is None:
+                    expires = expires.replace(tzinfo=timezone.utc)
+                if expires <= datetime.now(timezone.utc):
+                    sp_cert_issue = "expired"
+                    cert_row = None
     sp_cert = json.loads(cert_row["report"]) if cert_row else None
     sp_fact_error = None
     sp_persona_pass = None
@@ -246,6 +263,14 @@ def evaluate_gates(conn, report: dict[str, Any], current_stage: str) -> dict[str
                 "level": "danger",
                 "title": "SP 认证未覆盖当前 persona_version",
                 "detail": "认证仍绑定旧 persona_version，G1 的 SP 指标按未采集处理；需重新运行红队与一致性抽测。",
+            }
+        )
+    elif values.get("sp_cert_issue") == "expired":
+        alerts.append(
+            {
+                "level": "danger",
+                "title": "SP 认证已过期",
+                "detail": "认证有效期已结束，G1 的 SP 指标按未采集处理；需按季度更新红队用例并重新认证。",
             }
         )
     overrides = conn.execute("SELECT COUNT(*) AS n FROM authority_overrides").fetchone()["n"]
