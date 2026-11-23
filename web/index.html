@@ -17,15 +17,15 @@
         </div>
       </div>
       <nav class="nav" id="nav">
-        <a href="#/overview" data-view="overview"><span class="nav-no">01</span>总览</a>
-        <a href="#/review" data-view="review"><span class="nav-no">02</span>复核队列<span class="nav-badge" id="nav-pending">0</span></a>
-        <a href="#/ingest" data-view="ingest"><span class="nav-no">03</span>录像录入</a>
-        <a href="#/schedule" data-view="schedule"><span class="nav-no">04</span>考务编排</a>
-        <a href="#/execution" data-view="execution"><span class="nav-no">05</span>考试执行</a>
-        <a href="#/bundle" data-view="bundle"><span class="nav-no">06</span>站包契约</a>
-        <a href="#/feedback" data-view="feedback"><span class="nav-no">07</span>反馈报告</a>
-        <a href="#/sp" data-view="sp"><span class="nav-no">08</span>SP 演练</a>
-        <a href="#/quality" data-view="quality"><span class="nav-no">09</span>质量与闸门</a>
+        <a href="#/overview" data-view="overview" data-roles="admin,exam_manager,examiner,auditor"><span class="nav-no">01</span>总览</a>
+        <a href="#/review" data-view="review" data-roles="admin,exam_manager,examiner"><span class="nav-no">02</span>复核队列<span class="nav-badge" id="nav-pending">0</span></a>
+        <a href="#/ingest" data-view="ingest" data-roles="admin,exam_manager"><span class="nav-no">03</span>录像录入</a>
+        <a href="#/schedule" data-view="schedule" data-roles="admin,exam_manager"><span class="nav-no">04</span>考务编排</a>
+        <a href="#/execution" data-view="execution" data-roles="admin,exam_manager,examiner"><span class="nav-no">05</span>考试执行</a>
+        <a href="#/bundle" data-view="bundle" data-roles="admin,exam_manager,examiner,auditor,student"><span class="nav-no">06</span>站包契约</a>
+        <a href="#/feedback" data-view="feedback" data-roles="admin,exam_manager,examiner,auditor,student"><span class="nav-no">07</span>反馈报告</a>
+        <a href="#/sp" data-view="sp" data-roles="admin,exam_manager,examiner,student"><span class="nav-no">08</span>SP 演练</a>
+        <a href="#/quality" data-view="quality" data-roles="admin,exam_manager,auditor"><span class="nav-no">09</span>质量与闸门</a>
       </nav>
       <div class="sidebar-foot">
         <div class="foot-line"><span class="dot teal"></span>离线历史录像</div>
@@ -41,7 +41,12 @@
         </div>
         <div class="topbar-right">
           <div class="stage-pill" id="stage-pill">G0 离线副驾</div>
-          <label class="reviewer-box">
+          <div class="user-box" id="user-box" hidden>
+            <span id="user-name" class="tiny"></span>
+            <span id="user-role" class="pill teal"></span>
+            <button class="link-btn" id="logout-btn">退出</button>
+          </div>
+          <label class="reviewer-box" id="reviewer-box">
             <span>复核人</span>
             <input id="reviewer-input" maxlength="20" placeholder="主治 张蕾">
           </label>
@@ -56,6 +61,31 @@
     </div>
   </div>
   <div id="toast" class="toast"></div>
+  <div id="auth-gate" class="auth-gate">
+    <div class="auth-card">
+      <div class="brand" style="padding:0 0 18px">
+        <div class="brand-mark">OL</div>
+        <div>
+          <div class="brand-name">OSCE·Loop</div>
+          <div class="brand-sub">P0–P3 评分与治理工作台</div>
+        </div>
+      </div>
+      <h2>登录</h2>
+      <p class="tiny muted">按角色进入：管理员、考务、考官、审计员、学生。</p>
+      <form id="login-form">
+        <label class="field">用户名<input class="input" id="login-username" autocomplete="username" value="admin" required></label>
+        <label class="field" style="margin-top:10px">密码<input class="input" type="password" id="login-password" autocomplete="current-password" value="admin123" required></label>
+        <div id="login-error" class="violation" style="display:none"></div>
+        <button class="btn primary" type="submit" style="width:100%;margin-top:14px">进入工作台</button>
+      </form>
+      <div class="sep"></div>
+      <div class="tiny muted" style="line-height:1.9">
+        演示账号（生产部署必须替换）：<br>
+        admin / admin123 · 考务 exam / exam123<br>
+        reviewer / review123 · auditor / audit123 · student / student123
+      </div>
+    </div>
+  </div>
   <script src="/static/app.js"></script>
 </body>
 </html>

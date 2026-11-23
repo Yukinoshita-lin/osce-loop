@@ -8,8 +8,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -28,6 +28,14 @@ from .config import (
     WEB_DIR,
 )
 from .domain.ab import ab_report
+from .domain.auth import (
+    authenticate,
+    create_session,
+    ensure_users,
+    resolve_token,
+    revoke_token,
+    rbac_allowed,
+)
 from .domain.bundle import (
     apply_authority_reset,
     effective_authority,
@@ -83,17 +91,12 @@ async def lifespan(app: FastAPI):
     apply_startup_governance(conn)
     ensure_certification(conn)
     ensure_schedule_inputs(conn)
+    ensure_users(conn)
     conn.close()
     yield
 
 
 app = FastAPI(title="OSCE·Loop", version="0.1.0", lifespan=lifespan)
-
-UPLOAD_DIR = MEDIA_DIR / "uploads"
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-ALLOWED_MEDIA_EXTENSIONS = {".wav", ".mp3", ".m4a", ".ogg", ".flac", ".mp4", ".webm", ".mov"}
-MAX_MEDIA_BYTES = 200 * 1024 * 1024
-MAX_TRANSCRIPT_BYTES = 10 * 1024 * 1024
 
 
 def get_conn():
@@ -102,6 +105,105 @@ def get_conn():
         yield conn
     finally:
         conn.close()
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    path = request.url.path
+    bearer = ""
+    header = request.headers.get("Authorization", "")
+    if header.startswith("Bearer "):
+        bearer = header[7:].strip()
+    media_token = request.cookies.get("osceloop_session", "") if path.startswith("/media/") else ""
+    if path.startswith("/api/") and path.rstrip("/") != "/api/auth/login":
+        token = bearer or request.cookies.get("osceloop_session", "")
+        if not token:
+            return JSONResponse({"detail": "未登录或会话已过期"}, status_code=401)
+        conn = db.connect()
+        try:
+            user = resolve_token(conn, token)
+        finally:
+            conn.close()
+        if not user:
+            return JSONResponse({"detail": "未登录或会话已过期"}, status_code=401)
+        if not rbac_allowed(request.method, path, user["role"]):
+            return JSONResponse(
+                {"detail": f"角色 {user['role_label']} 无权执行该操作"},
+                status_code=403,
+            )
+        request.state.user = user
+        request.state.token = token
+    elif path.startswith("/media/"):
+        token = media_token or bearer
+        if not token:
+            return JSONResponse({"detail": "未登录或会话已过期"}, status_code=401)
+        conn = db.connect()
+        try:
+            user = resolve_token(conn, token)
+        finally:
+            conn.close()
+        if not user:
+            return JSONResponse({"detail": "未登录或会话已过期"}, status_code=401)
+        request.state.user = user
+        request.state.token = token
+    return await call_next(request)
+
+
+class LoginBody(BaseModel):
+    username: str = Field(min_length=1)
+    password: str = Field(min_length=1)
+
+
+@app.post("/api/auth/login")
+def login(body: LoginBody, response: Response, conn=Depends(get_conn)):
+    user = authenticate(conn, body.username, body.password)
+    if not user:
+        raise HTTPException(401, "用户名或密码错误")
+    session = create_session(conn, user["user_id"])
+    response.set_cookie(
+        "osceloop_session",
+        session["token"],
+        max_age=8 * 3600,
+        httponly=True,
+        samesite="lax",
+        path="/",
+    )
+    db.append_audit(
+        conn,
+        actor=user["username"],
+        action="auth.login",
+        object_type="User",
+        object_id=user["user_id"],
+        after={"role": user["role"]},
+    )
+    return {**session, "user": user}
+
+
+@app.get("/api/auth/me")
+def me(request: Request):
+    return request.state.user
+
+
+@app.post("/api/auth/logout")
+def logout(request: Request, response: Response, conn=Depends(get_conn)):
+    user = request.state.user
+    revoke_token(conn, getattr(request.state, "token", ""))
+    response.delete_cookie("osceloop_session", path="/")
+    db.append_audit(
+        conn,
+        actor=user["username"],
+        action="auth.logout",
+        object_type="User",
+        object_id=user["user_id"],
+        after=None,
+    )
+    return {"ok": True}
+
+UPLOAD_DIR = MEDIA_DIR / "uploads"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+ALLOWED_MEDIA_EXTENSIONS = {".wav", ".mp3", ".m4a", ".ogg", ".flac", ".mp4", ".webm", ".mov"}
+MAX_MEDIA_BYTES = 200 * 1024 * 1024
+MAX_TRANSCRIPT_BYTES = 10 * 1024 * 1024
 
 
 def _stage(conn) -> str:

@@ -35,6 +35,8 @@ const REASON_COLOR = {
 };
 
 const state = {
+  token: localStorage.getItem('osceloop.token') || '',
+  user: null,
   reviewer: localStorage.getItem('osceloop.reviewer') || '主治 张蕾',
   queue: null,
   queueFilter: { search: '', reason: '' },
@@ -99,10 +101,14 @@ function gateStatusPill(status) {
 }
 async function api(path, options = {}) {
   const opts = {
-    headers: { 'Content-Type': 'application/json' },
     ...options,
+    headers: { ...(options.headers || {}) },
   };
-  if (opts.body && typeof opts.body !== 'string') opts.body = JSON.stringify(opts.body);
+  if (state.token) opts.headers.Authorization = `Bearer ${state.token}`;
+  if (opts.body && typeof opts.body !== 'string') {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(opts.body);
+  }
   const res = await fetch(path, opts);
   if (!res.ok) {
     let detail = res.statusText;
@@ -110,18 +116,22 @@ async function api(path, options = {}) {
       const data = await res.json();
       detail = data.detail || detail;
     } catch (e) { /* ignore */ }
+    if (res.status === 401 && !path.includes('/api/auth/login')) handleUnauthorized();
     throw new Error(detail);
   }
   return res.json();
 }
 async function apiForm(path, formData) {
-  const res = await fetch(path, { method: 'POST', body: formData });
+  const headers = {};
+  if (state.token) headers.Authorization = `Bearer ${state.token}`;
+  const res = await fetch(path, { method: 'POST', body: formData, headers });
   if (!res.ok) {
     let detail = res.statusText;
     try {
       const data = await res.json();
       detail = data.detail || detail;
     } catch (e) { /* ignore */ }
+    if (res.status === 401) handleUnauthorized();
     throw new Error(detail);
   }
   return res.json();
@@ -160,6 +170,60 @@ function dataAttr(value) {
   return esc(value);
 }
 
+/* ---------- auth ---------- */
+function showAuthGate() {
+  const gate = $('#auth-gate');
+  if (gate) gate.classList.remove('hidden');
+  const input = $('#login-username');
+  if (input) setTimeout(() => input.focus(), 60);
+}
+function hideAuthGate() {
+  const gate = $('#auth-gate');
+  if (gate) gate.classList.add('hidden');
+}
+function clearAuth() {
+  state.token = '';
+  state.user = null;
+  localStorage.removeItem('osceloop.token');
+}
+function handleUnauthorized() {
+  if (!state.token && !state.user) return;
+  clearAuth();
+  $('#user-box').hidden = true;
+  showAuthGate();
+  toast('登录已失效，请重新登录', true);
+}
+function firstAllowedRoute() {
+  const link = $$('#nav a').find((a) => !a.hidden);
+  return link ? link.getAttribute('href') : '#/sp';
+}
+function applyRoleNav() {
+  if (!state.user) return;
+  $$('#nav a').forEach((a) => {
+    const roles = (a.dataset.roles || '').split(',');
+    a.hidden = !roles.includes(state.user.role);
+  });
+  const current = location.hash || '#/overview';
+  const link = $$('#nav a').find((a) => a.getAttribute('href') === current);
+  if (!link || link.hidden) {
+    location.hash = firstAllowedRoute();
+  }
+}
+function setUser(user) {
+  state.user = user;
+  $('#user-box').hidden = false;
+  $('#user-name').textContent = user.display_name;
+  $('#user-role').textContent = user.role_label;
+  const canReview = ['admin', 'exam_manager', 'examiner'].includes(user.role);
+  $('#reviewer-box').hidden = !canReview;
+  if (canReview) {
+    state.reviewer = user.display_name;
+    $('#reviewer-input').value = user.display_name;
+    localStorage.setItem('osceloop.reviewer', state.reviewer);
+  }
+  applyRoleNav();
+}
+
 /* ---------- router ---------- */
 const ROUTES = {
   overview: { title: '总览', render: viewOverview },
@@ -180,7 +244,16 @@ function currentRoute() {
 }
 
 async function route() {
+  if (!state.user) {
+    showAuthGate();
+    return;
+  }
   const name = currentRoute();
+  const link = $(`#nav a[data-view="${name}"]`);
+  if (link && link.hidden) {
+    location.hash = firstAllowedRoute();
+    return;
+  }
   const def = ROUTES[name];
   setActiveNav(name);
   setTitle(def.title);
@@ -2151,5 +2224,54 @@ $('#reviewer-input').addEventListener('change', (e) => {
   state.reviewer = e.target.value.trim() || '主治 张蕾';
   localStorage.setItem('osceloop.reviewer', state.reviewer);
 });
+$('#login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errorBox = $('#login-error');
+  errorBox.style.display = 'none';
+  try {
+    const data = await api('/api/auth/login', {
+      method: 'POST',
+      body: {
+        username: $('#login-username').value.trim(),
+        password: $('#login-password').value,
+      },
+    });
+    state.token = data.token;
+    localStorage.setItem('osceloop.token', data.token);
+    setUser(data.user);
+    hideAuthGate();
+    if (!location.hash || !ROUTES[currentRoute()]) location.hash = firstAllowedRoute();
+    await route();
+    toast(`已登录：${data.user.display_name} · ${data.user.role_label}`);
+  } catch (err) {
+    errorBox.textContent = err.message;
+    errorBox.style.display = '';
+  }
+});
+$('#logout-btn').addEventListener('click', async () => {
+  try {
+    await api('/api/auth/logout', { method: 'POST', body: {} });
+  } catch (e) { /* ignore */ }
+  clearAuth();
+  $('#user-box').hidden = true;
+  showAuthGate();
+});
 window.addEventListener('hashchange', route);
-route();
+
+async function boot() {
+  if (state.token) {
+    try {
+      const user = await api('/api/auth/me');
+      setUser(user);
+      hideAuthGate();
+      if (!location.hash) location.hash = firstAllowedRoute();
+      await route();
+      return;
+    } catch (err) {
+      clearAuth();
+    }
+  }
+  showAuthGate();
+}
+
+boot();
