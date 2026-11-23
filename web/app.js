@@ -114,6 +114,18 @@ async function api(path, options = {}) {
   }
   return res.json();
 }
+async function apiForm(path, formData) {
+  const res = await fetch(path, { method: 'POST', body: formData });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const data = await res.json();
+      detail = data.detail || detail;
+    } catch (e) { /* ignore */ }
+    throw new Error(detail);
+  }
+  return res.json();
+}
 let toastTimer = null;
 function toast(message, isError = false) {
   const el = $('#toast');
@@ -152,6 +164,7 @@ function dataAttr(value) {
 const ROUTES = {
   overview: { title: '总览', render: viewOverview },
   review: { title: '复核队列', render: viewReview },
+  ingest: { title: '录像录入', render: viewIngest },
   bundle: { title: '站包契约', render: viewBundle },
   feedback: { title: '反馈报告', render: viewFeedback },
   sp: { title: 'SP 演练', render: viewSP },
@@ -632,6 +645,163 @@ async function submitReview(action, score, reason) {
   } catch (err) {
     toast(err.message, true);
   }
+}
+
+/* ---------- ingest ---------- */
+const SAMPLE_TRANSCRIPT = [
+  { speaker: 'patient', start_ms: 0, end_ms: 6000, text: '大夫，我胸口疼得厉害……' },
+  { speaker: 'candidate', start_ms: 7000, end_ms: 12000, text: '您好，我是急诊科张医生，请问您怎么称呼？' },
+  { speaker: 'patient', start_ms: 12500, end_ms: 16000, text: '我叫王建国，今年六十五。' },
+  { speaker: 'candidate', start_ms: 17000, end_ms: 23000, text: '您能说说胸口具体哪个位置疼吗？是压榨样还是刺痛？' },
+  { speaker: 'patient', start_ms: 23500, end_ms: 29000, text: '胸口正中，压着疼，像有块石头。' },
+  { speaker: 'candidate', start_ms: 30000, end_ms: 36000, text: '疼了多久了？活动以后会不会加重？' },
+  { speaker: 'patient', start_ms: 36500, end_ms: 41000, text: '从早上八点开始，两个多小时了，爬楼后更厉害。' },
+  { speaker: 'candidate', start_ms: 42000, end_ms: 49000, text: '这种疼会不会向肩膀、左臂或者下巴放射？' },
+  { speaker: 'patient', start_ms: 49500, end_ms: 55000, text: '会窜到左边胳膊，下巴也发紧。' },
+  { speaker: 'candidate', start_ms: 56000, end_ms: 62000, text: '有没有出汗、恶心或者呼吸困难？' },
+  { speaker: 'patient', start_ms: 62500, end_ms: 68000, text: '出了不少汗，有点恶心。' },
+  { speaker: 'candidate', start_ms: 69000, end_ms: 75000, text: '我先给您听诊一下，然后做心电图和心电监护。' },
+  { speaker: 'patient', start_ms: 75500, end_ms: 79000, text: '行，听您的。' },
+  { speaker: 'candidate', start_ms: 80000, end_ms: 88000, text: '持续胸痛伴出汗是危险信号，需要马上处理。我总结一下……' },
+];
+
+async function viewIngest() {
+  const bundles = await api('/api/bundles');
+  if (!bundles.length) {
+    $('#view').innerHTML = '<div class="empty">尚无冻结站包，无法录入</div>';
+    return;
+  }
+  const bundle = bundles[0];
+  $('#view').innerHTML = `
+    <div class="view-head">
+      <div>
+        <h2>录像录入</h2>
+        <p>P0 离线入口：上传历史录像与带时间戳转写，系统解析说话人、阶段并跑完整评分与风险路由。</p>
+      </div>
+      <div class="btn-row">
+        <button class="btn small" data-action="download-sample">下载 JSON 转写样例</button>
+      </div>
+    </div>
+    <div class="grid c1-2">
+      <div class="card">
+        <div class="card-title">录入规则<span class="sub">不接触在考考生</span></div>
+        <ul class="small dim" style="padding-left:18px;line-height:1.9">
+          <li>转写支持 <code>JSON</code>、<code>SRT</code>、<code>VTT</code>，必须带时间戳。</li>
+          <li>SRT/VTT 建议每句前加“医生：”或“患者：”，否则按患者/考生交替推断。</li>
+          <li>媒体支持 wav / mp3 / m4a / mp4 / webm，最大 200MB；未上传媒体时该场次全部转人工。</li>
+          <li>当前 ASR 未接入，需先获得离线转写；评分器为 Mock，真实部署可替换网关适配器。</li>
+        </ul>
+        <div class="sep"></div>
+        <div class="card-title" style="margin-bottom:5px">当前站包</div>
+        <div class="version-row"><span class="k">${esc(bundle.station_id)}</span><span class="v">v${esc(bundle.version)}</span></div>
+        <div class="small dim">${esc(bundle.title)}</div>
+        <div class="sep"></div>
+        <div class="tiny muted">JSON 样例字段：speaker / start_ms / end_ms / text；可选 phase 与 asr_confidence。</div>
+      </div>
+      <div class="card">
+        <div class="card-title">上传与评分<span class="sub">录入后自动进入复核队列</span></div>
+        <form id="ingest-form">
+          <input type="hidden" name="bundle_id" value="${dataAttr(bundle.bundle_id)}">
+          <div class="grid c2">
+            <label class="field">考生编号
+              <input class="input" name="candidate_code" value="C2026-UPLOAD" maxlength="40">
+            </label>
+            <label class="field">考生姓名
+              <input class="input" name="candidate_name" value="演示考生" maxlength="40">
+            </label>
+          </div>
+          <div class="grid c2" style="margin-top:10px">
+            <label class="field">用途风险级
+              <select class="input" name="risk_level">
+                <option value="L1">L1 形成性练习</option>
+                <option value="L2" selected>L2 模拟考</option>
+                <option value="L3">L3 高利害（需 G3 放行）</option>
+              </select>
+            </label>
+            <label class="field">录入人
+              <input class="input" name="actor" value="${dataAttr(state.reviewer)}" maxlength="20">
+            </label>
+          </div>
+          <label class="field" style="margin-top:10px">转写文件（JSON / SRT / VTT）
+            <input class="input" type="file" name="transcript_file" accept=".json,.srt,.vtt" required>
+          </label>
+          <label class="field" style="margin-top:10px">音视频文件（可选）
+            <input class="input" type="file" name="media_file" accept="audio/*,video/*">
+          </label>
+          <div class="btn-row" style="margin-top:14px">
+            <button class="btn primary" type="submit" id="ingest-submit">解析并运行评分</button>
+            <span class="tiny muted">评分完成后写入审计链</span>
+          </div>
+        </form>
+        <div id="ingest-result"></div>
+      </div>
+    </div>
+  `;
+  const form = $('#ingest-form');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const button = $('#ingest-submit');
+    const fileInput = form.querySelector('input[name="transcript_file"]');
+    if (!fileInput.files || !fileInput.files.length) {
+      toast('请选择转写文件', true);
+      return;
+    }
+    button.disabled = true;
+    button.textContent = '解析与评分中…';
+    try {
+      const data = await apiForm('/api/attempts/ingest', new FormData(form));
+      renderIngestResult(data);
+      toast(`已录入 ${data.attempt.candidate_code}，待复核 ${data.attempt.pending} 项`);
+    } catch (err) {
+      toast(err.message, true);
+    } finally {
+      button.disabled = false;
+      button.textContent = '解析并运行评分';
+    }
+  });
+}
+
+function renderIngestResult(data) {
+  const a = data.attempt;
+  const t = data.transcript;
+  const warnings = (t.warnings || []).map((w) => `<div class="violation">${esc(w)}</div>`).join('');
+  const box = $('#ingest-result');
+  if (!box) return;
+  box.innerHTML = `
+    <div class="sep"></div>
+    <div class="card-title">录入结果<span class="sub">${esc(a.status)}</span></div>
+    <div class="attempt-strip" style="margin-bottom:8px">
+      <span>${esc(a.candidate_code)} · ${esc(a.candidate_name)}</span>
+      <span>风险 ${esc(a.risk_level)}</span>
+      <span>转写 ${t.utterances} 句</span>
+      <span>考生 ${t.candidate_utterances} / 患者 ${t.patient_utterances}</span>
+      <span>${data.media ? '媒体已上传' : '无媒体'}</span>
+    </div>
+    <div class="grid c3" style="margin-bottom:10px">
+      <div class="kpi"><div class="k">AI 暂定总分</div><div class="v">${num(a.ai_total, 1)}</div><div class="d">待复核 ${a.pending} 项</div></div>
+      <div class="kpi"><div class="k">关键项待复核</div><div class="v">${a.critical_pending}</div><div class="d">风险路由已生效</div></div>
+      <div class="kpi"><div class="k">证据媒体</div><div class="v" style="font-size:16px">${data.media ? '可回放' : '不可回放'}</div><div class="d">${data.media ? esc(data.media.filename) : 'integrity_gap'}</div></div>
+    </div>
+    ${data.integrity_gap ? '<div class="alert danger"><b>缺少媒体文件</b><p>该场次已被标记 integrity_gap，全部记录进入人工复核。</p></div>' : ''}
+    ${warnings}
+    <div class="btn-row">
+      <button class="btn primary small" data-action="open-feedback" data-attempt="${dataAttr(a.attempt_id)}">查看反馈报告</button>
+      <a class="btn small" href="#/review">进入复核队列</a>
+    </div>
+    <div class="tiny muted" style="margin-top:8px">bundle ${esc(a.bundle_id)} · ${esc(a.bundle_hash || '')}</div>
+  `;
+}
+
+function downloadSampleTranscript() {
+  const blob = new Blob([JSON.stringify(SAMPLE_TRANSCRIPT, null, 2)], { type: 'application/json;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'osce_sample_transcript.json';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 /* ---------- bundle ---------- */
@@ -1324,6 +1494,15 @@ document.addEventListener('click', async (e) => {
   const el = e.target.closest('[data-action]');
   if (!el) return;
   const action = el.dataset.action;
+  if (action === 'download-sample') {
+    downloadSampleTranscript();
+    return;
+  }
+  if (action === 'open-feedback') {
+    state.feedbackId = el.dataset.attempt;
+    location.hash = '#/feedback';
+    return;
+  }
   if (action === 'risk-escalate') {
     const reason = prompt('升级为 L3 将清空该场次最终分，并让全部评分记录进入人工复核。请输入升级理由：');
     if (!reason) return;

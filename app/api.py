@@ -4,9 +4,10 @@ from __future__ import annotations
 import json
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -19,6 +20,7 @@ from .config import (
     MODEL_VERSION,
     PROMPT_VERSION,
     REASON_LABELS,
+    RISK_LEVELS,
     ROUTE_LABELS,
     SP_MODEL_VERSION,
     SP_PROMPT_VERSION,
@@ -46,12 +48,14 @@ from .domain.governance import (
     set_emergency_stop,
     set_release_stage,
 )
+from .domain.ingest import create_ingested_attempt
 from .domain.practice import build_practice_report
 from .domain.risk import RISK_ORDER, escalate_risk
 from .domain.rubric import AUTHORITY_LABELS, PHASE_LABELS, cap_authority
 from .domain.slots import DialogueStateMachine, SPController
 from .domain.spqa import certify_bundle, ensure_certification, latest_certification
 from .domain.stats import domain_scores, quality_report
+from .domain.transcript import parse_transcript
 from .seed import apply_startup_governance, seed_if_empty
 
 
@@ -67,6 +71,12 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="OSCE·Loop", version="0.1.0", lifespan=lifespan)
+
+UPLOAD_DIR = MEDIA_DIR / "uploads"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+ALLOWED_MEDIA_EXTENSIONS = {".wav", ".mp3", ".m4a", ".ogg", ".flac", ".mp4", ".webm", ".mov"}
+MAX_MEDIA_BYTES = 200 * 1024 * 1024
+MAX_TRANSCRIPT_BYTES = 10 * 1024 * 1024
 
 
 def get_conn():
@@ -290,6 +300,104 @@ def overview(conn=Depends(get_conn)):
 def attempts(conn=Depends(get_conn)):
     rows = db.rows_to_dicts(conn.execute("SELECT * FROM attempts ORDER BY attempt_id").fetchall())
     return [_attempt_summary(conn, a) for a in rows]
+
+
+async def _save_media(upload: UploadFile | None) -> dict[str, Any] | None:
+    if not upload or not upload.filename:
+        return None
+    suffix = Path(upload.filename).suffix.lower()
+    if suffix not in ALLOWED_MEDIA_EXTENSIONS:
+        raise HTTPException(400, f"不支持的媒体格式：{suffix or '未知'}")
+    media_id = db.new_id("media")
+    stored_name = f"{media_id}{suffix}"
+    target = UPLOAD_DIR / stored_name
+    total = 0
+    try:
+        with target.open("wb") as output:
+            while True:
+                chunk = await upload.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_MEDIA_BYTES:
+                    raise HTTPException(413, "媒体文件超过 200MB 限制")
+                output.write(chunk)
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
+    return {
+        "media_id": media_id,
+        "media_url": f"/media/uploads/{stored_name}",
+        "filename": upload.filename,
+        "size_bytes": total,
+    }
+
+
+@app.post("/api/attempts/ingest")
+async def ingest_attempt(
+    bundle_id: str = Form(""),
+    candidate_code: str = Form(""),
+    candidate_name: str = Form(""),
+    risk_level: str = Form("L2"),
+    actor: str = Form("考务录入"),
+    transcript_file: UploadFile = File(...),
+    media_file: UploadFile | None = File(None),
+    conn=Depends(get_conn),
+):
+    _ensure_not_stopped(conn)
+    if risk_level not in RISK_LEVELS:
+        raise HTTPException(400, "非法风险等级")
+    bundle = _resolve_bundle(conn, bundle_id)
+    raw = await transcript_file.read()
+    if not raw:
+        raise HTTPException(400, "转写文件为空")
+    if len(raw) > MAX_TRANSCRIPT_BYTES:
+        raise HTTPException(413, "转写文件超过 10MB 限制")
+    try:
+        parsed = parse_transcript(transcript_file.filename or "transcript.txt", raw)
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(400, f"转写解析失败：{exc}") from exc
+    if not parsed["utterances"]:
+        raise HTTPException(400, "转写没有有效 utterance")
+
+    media = await _save_media(media_file)
+    code = candidate_code.strip() or f"C-UPLOAD-{db.new_id('cu')[-6:].upper()}"
+    name = candidate_name.strip() or "未命名考生"
+    gateway = CapabilityGateway(
+        conn,
+        MockScoringProvider(),
+        db.get_state(conn, "model_version", MODEL_VERSION),
+        db.get_state(conn, "prompt_version", PROMPT_VERSION),
+    )
+    attempt_id = create_ingested_attempt(
+        conn,
+        gateway,
+        bundle=bundle,
+        transcript=parsed["utterances"],
+        candidate_code=code,
+        candidate_name=name,
+        risk_level=risk_level,
+        release_stage=_stage(conn),
+        media_id=(media or {}).get("media_id") or "upload_no_media",
+        media_url=(media or {}).get("media_url"),
+        media_filename=(media or {}).get("filename"),
+        actor=actor,
+    )
+    attempt = _attempt_summary(conn, _attempt_row(conn, attempt_id))
+    return {
+        "ok": True,
+        "attempt": attempt,
+        "transcript": {
+            "format": parsed["format"],
+            "utterances": len(parsed["utterances"]),
+            "candidate_utterances": parsed["candidate_utterances"],
+            "patient_utterances": parsed["patient_utterances"],
+            "duration_ms": parsed["duration_ms"],
+            "warnings": parsed["warnings"],
+        },
+        "media": media,
+        "integrity_gap": not bool(media),
+    }
 
 
 @app.get("/api/attempts/{attempt_id}")

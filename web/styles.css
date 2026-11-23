@@ -198,6 +198,11 @@ a { color: var(--teal); text-decoration: none; }
   border-radius: 6px; padding: 6px 9px; font-size: 12px; font-family: var(--sans); outline: none;
 }
 .input:focus { border-color: rgba(63, 214, 192, .45); }
+input[type="file"].input { padding: 6px 8px; color: var(--text-mute); font-size: 11px; }
+input[type="file"].input::file-selector-button {
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text-dim);
+  border-radius: 5px; padding: 4px 9px; margin-right: 9px; font-size: 11px; cursor: pointer;
+}
 label.field { display: flex; flex-direction: column; gap: 5px; font-size: 11px; color: var(--text-mute); }
 
 code, .mono { font-family: var(--mono); font-size: .92em; }
