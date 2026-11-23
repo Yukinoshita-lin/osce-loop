@@ -83,6 +83,7 @@ from .domain.scheduling import (
 from .domain.slots import DialogueStateMachine, SPController
 from .domain.spqa import certification_for_bundle, certify_bundle, ensure_certification
 from .domain.stats import domain_scores, quality_report
+from .domain.sus import submit_sus, sus_summary
 from .domain.transcript import parse_transcript
 from .seed import apply_startup_governance, seed_if_empty
 
@@ -1101,6 +1102,7 @@ def quality(conn=Depends(get_conn)):
         "governance": governance_status(conn),
         "ai_provider": scoring_provider_info(),
         "asr_provider": build_asr_provider().info,
+        "sus": sus_summary(conn),
         "audit_anchors": db.list_audit_anchors(conn, limit=5),
         "versions": {
             "model": db.get_state(conn, "model_version", MODEL_VERSION),
@@ -1109,6 +1111,25 @@ def quality(conn=Depends(get_conn)):
             "sp_prompt": db.get_state(conn, "sp_prompt_version", SP_PROMPT_VERSION),
         },
     }
+
+
+class SusBody(BaseModel):
+    answers: list[int]
+    participant_label: str | None = None
+
+
+@app.post("/api/quality/sus")
+def quality_sus(body: SusBody, request: Request, conn=Depends(get_conn)):
+    try:
+        record = submit_sus(
+            conn,
+            answers=body.answers,
+            participant_label=(body.participant_label or "").strip()[:40] or None,
+            actor=request.state.user["display_name"],
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "response": record, "sus": sus_summary(conn)}
 
 
 def _count_by(rows: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:

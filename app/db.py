@@ -183,6 +183,14 @@ CREATE TABLE IF NOT EXISTS sp_reports (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS sus_responses (
+    response_id TEXT PRIMARY KEY,
+    participant_label TEXT,
+    answers TEXT NOT NULL,
+    score REAL NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS candidate_profiles (
     attempt_id TEXT PRIMARY KEY,
     gender TEXT,

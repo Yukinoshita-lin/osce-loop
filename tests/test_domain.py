@@ -351,6 +351,7 @@ def test_gate_g1_uses_sp_certification(conn):
     assert values["persona_pass"] is not None
     assert values["p95_latency"] is not None
     assert values["p0_incidents"] == 0
+    assert values["sus"] == 80.0
 
 
 def test_fairness_report_has_groups_and_corrective_actions(conn):

@@ -25,6 +25,7 @@ from .config import (
 from .domain.bundle import apply_authority_reset, freeze_bundle
 from .domain.rubric import PHASE_RANK
 from .domain.stats import quality_report
+from .domain.sus import compute_sus
 
 MEDIA_ID = "v_demo_chest_pain"
 MEDIA_FILE = MEDIA_DIR / "demo_chest_pain.wav"
@@ -940,10 +941,23 @@ def seed_if_empty(conn) -> bool:
         "sp_model_version": SP_MODEL_VERSION,
         "sp_prompt_version": SP_PROMPT_VERSION,
         "release_stage": "G0_offline",
-        "sus_score": "78.5",
+        "sus_score": "80.0",
         "seeded_at": db.now_iso(),
     }.items():
         db.set_state(conn, key, value)
+    demo_answers = [5, 2, 4, 1, 4, 2, 4, 2, 4, 2]
+    conn.execute(
+        "INSERT INTO sus_responses(response_id, participant_label, answers, score, created_at) "
+        "VALUES(?,?,?,?,?)",
+        (
+            db.new_id("sus"),
+            "演示样本",
+            json.dumps(demo_answers),
+            compute_sus(demo_answers),
+            db.now_iso(),
+        ),
+    )
+    conn.commit()
     return True
 
 

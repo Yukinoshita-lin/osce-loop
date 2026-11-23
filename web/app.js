@@ -1735,6 +1735,46 @@ function p3SectionHtml(gov, gates) {
     </div>`;
 }
 
+function susSectionHtml(sus) {
+  const items = sus.items || [];
+  const count = sus.count || 0;
+  const options = ['', '1', '2', '3', '4', '5']
+    .map((v) => v === ''
+      ? '<option value="">请选择</option>'
+      : `<option value="${v}">${v}</option>`)
+    .join('');
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">SUS 可用性采集<span class="sub">10 项 · 1–5 分 · 自动折算 0–100</span></div>
+      <div class="attempt-strip" style="margin-bottom:8px">
+        <span>样本 <b>${count}</b></span>
+        <span>均值 <b>${num(sus.average, 1)}</b></span>
+        <span>最近 ${sus.latest_at ? fmtTime(sus.latest_at) : '—'}</span>
+        ${count ? '' : '<span class="pill amber">尚无真实问卷</span>'}
+      </div>
+      ${count ? `<div class="tiny muted" style="margin-bottom:8px">最近分数：${(sus.recent_scores || []).map((v) => num(v, 1)).join(' · ')}</div>`
+        : '<div class="tiny muted" style="margin-bottom:8px">尚未采集真实问卷，G1 暂用旧版配置值；至少录入一份问卷后自动切换为样本均值。</div>'}
+      <details>
+        <summary class="small" style="cursor:pointer;color:var(--teal)">录入一份 SUS 问卷</summary>
+        <form id="sus-form" style="margin-top:10px">
+          <label class="field">受访者标签
+            <input class="input" name="participant_label" maxlength="40" placeholder="如：2026 春 练习学生">
+          </label>
+          <div class="grid c2" style="margin-top:10px">
+            ${items.map((text, i) => `
+              <label class="field">${i + 1}. ${esc(text)}
+                <select class="input" name="sus_${i + 1}" required>${options}</select>
+              </label>`).join('')}
+          </div>
+          <div class="btn-row" style="margin-top:12px">
+            <button class="btn primary" type="submit">提交问卷</button>
+            <span class="tiny muted">提交后写入审计链并计入 G1 的 SUS 均值。</span>
+          </div>
+        </form>
+      </details>
+    </div>`;
+}
+
 async function viewQuality() {
   const [data, audit, retention] = await Promise.all([
     api('/api/quality'),
@@ -1817,6 +1857,8 @@ async function viewQuality() {
 
     <div class="gates" style="margin-bottom:16px">${gateCards}</div>
 
+    ${susSectionHtml(data.sus || {})}
+
     <div class="card" style="margin-bottom:16px">
       <div class="card-title">媒体留存治理<span class="sub">成绩永久 · 音视频分级留存 · 删除留痕</span></div>
       <div class="grid c4" style="margin-bottom:10px">
@@ -1891,6 +1933,29 @@ async function viewQuality() {
       </div>
     </div>
   `;
+  const susForm = $('#sus-form');
+  if (susForm) {
+    susForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const selects = Array.from(susForm.querySelectorAll('select[name^="sus_"]'));
+      const answers = selects.map((s) => Number(s.value));
+      if (answers.length !== 10 || answers.some((a) => !Number.isInteger(a) || a < 1 || a > 5)) {
+        toast('请完成全部 10 项 SUS 评分', true);
+        return;
+      }
+      const label = susForm.querySelector('input[name="participant_label"]').value;
+      try {
+        const result = await api('/api/quality/sus', {
+          method: 'POST',
+          body: { answers, participant_label: label },
+        });
+        toast(`SUS 已提交：${num(result.response.score, 1)} 分 · 样本均值 ${num(result.sus.average, 1)}`);
+        await viewQuality();
+      } catch (err) {
+        toast(err.message, true);
+      }
+    });
+  }
 }
 
 function renderRetentionPreview(result) {

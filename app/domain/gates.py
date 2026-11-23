@@ -8,6 +8,7 @@ from typing import Any
 from .ab import ab_report
 from .bundle import list_bundles
 from .fairness import fairness_report
+from .sus import sus_summary
 
 GATES = [
     {
@@ -98,8 +99,14 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
         "SELECT COUNT(*) AS n FROM data_sheets WHERE is_public = 1"
     ).fetchone()["n"]
     version_complete = version_stamped == ai_records and ai_records > 0
-    sus_row = conn.execute("SELECT value FROM system_state WHERE key = 'sus_score'").fetchone()
-    sus_score = float(sus_row["value"]) if sus_row else None
+    sus = sus_summary(conn)
+    if sus["count"]:
+        sus_score = sus["average"]
+        sus_source = "responses"
+    else:
+        sus_row = conn.execute("SELECT value FROM system_state WHERE key = 'sus_score'").fetchone()
+        sus_score = float(sus_row["value"]) if sus_row else None
+        sus_source = "legacy" if sus_row else None
     switch_row = conn.execute(
         "SELECT passed FROM switch_drills ORDER BY created_at DESC LIMIT 1"
     ).fetchone()
@@ -172,6 +179,7 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
         "persona_pass": sp_persona_pass,
         "p95_latency": sp_p95_latency,
         "sus": sus_score,
+        "sus_source": sus_source,
         "p0_incidents": sp_p0,
         "sp_cert_issue": sp_cert_issue,
         "near_improvement": ab.get("comparison", {}).get("near_improvement"),
@@ -271,6 +279,14 @@ def evaluate_gates(conn, report: dict[str, Any], current_stage: str) -> dict[str
                 "level": "danger",
                 "title": "SP 认证已过期",
                 "detail": "认证有效期已结束，G1 的 SP 指标按未采集处理；需按季度更新红队用例并重新认证。",
+            }
+        )
+    if values.get("sus_source") == "legacy":
+        alerts.append(
+            {
+                "level": "warn",
+                "title": "SUS 仍为旧版配置值",
+                "detail": "当前未采集真实 SUS 问卷，G1 使用历史配置值；请在质量页录入至少一份 10 项问卷。",
             }
         )
     overrides = conn.execute("SELECT COUNT(*) AS n FROM authority_overrides").fetchone()["n"]
