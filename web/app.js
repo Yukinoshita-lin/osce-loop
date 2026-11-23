@@ -165,6 +165,7 @@ const ROUTES = {
   overview: { title: '总览', render: viewOverview },
   review: { title: '复核队列', render: viewReview },
   ingest: { title: '录像录入', render: viewIngest },
+  schedule: { title: '考务编排', render: viewSchedule },
   bundle: { title: '站包契约', render: viewBundle },
   feedback: { title: '反馈报告', render: viewFeedback },
   sp: { title: 'SP 演练', render: viewSP },
@@ -802,6 +803,130 @@ function downloadSampleTranscript() {
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/* ---------- schedule ---------- */
+async function viewSchedule() {
+  const [inputs, latest] = await Promise.all([
+    api('/api/schedule/inputs'),
+    api('/api/schedule/latest'),
+  ]);
+  const schedule = latest.schedule;
+  const today = schedule ? schedule.exam_date : new Date().toISOString().slice(0, 10);
+  $('#view').innerHTML = `
+    <div class="view-head">
+      <div>
+        <h2>考务编排</h2>
+        <p>S4：在房间、SP、考官与时长约束下生成轮转排考，检查每位考生的加权难度、顺序效应与疲劳风险。</p>
+      </div>
+      <div class="attempt-strip">
+        <span>考生 <b>${inputs.candidates.length}</b></span>
+        <span>考站 <b>${inputs.stations.length}</b></span>
+        <span>资源 <b>${inputs.resources.rooms} 房 / ${inputs.resources.sps} SP / ${inputs.resources.examiners} 考官</b></span>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">排考参数<span class="sub">硬约束优先，软约束用于均衡</span></div>
+      <form id="schedule-form" class="btn-row" style="align-items:flex-end;gap:10px;flex-wrap:wrap">
+        <label class="field">考试日期<input class="input" type="date" name="exam_date" value="${dataAttr(today)}"></label>
+        <label class="field">轮次数<input class="input" type="number" name="rounds" min="1" max="${inputs.stations.length}" value="${schedule ? schedule.rounds : 6}"></label>
+        <label class="field">轮间缓冲（分钟）<input class="input" type="number" name="buffer_min" min="0" max="30" value="${schedule ? schedule.buffer_min : 2}"></label>
+        <label class="field">随机种子<input class="input" type="number" name="seed" value="${schedule ? schedule.seed : 2026}"></label>
+        <button class="btn primary" type="submit" id="schedule-submit">生成排考表</button>
+      </form>
+      <div class="tiny muted" style="margin-top:8px">每位考生从考站集合中抽取 ${schedule ? schedule.rounds : 6} 站；同一轮同一考站只安排一名考生。</div>
+    </div>
+    <div id="schedule-body">${schedule ? scheduleHtml(schedule) : '<div class="empty">尚未生成排考表。点击“生成排考表”开始。</div>'}</div>
+  `;
+  $('#schedule-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const button = $('#schedule-submit');
+    const body = {
+      exam_date: form.exam_date.value || today,
+      rounds: Number(form.rounds.value),
+      buffer_min: Number(form.buffer_min.value),
+      seed: Number(form.seed.value),
+    };
+    button.disabled = true;
+    button.textContent = '求解中…';
+    try {
+      const data = await api('/api/schedule/generate', { method: 'POST', body });
+      $('#schedule-body').innerHTML = scheduleHtml(data.schedule);
+      toast(`排考完成：难度差 ${data.schedule.quality.difficulty_spread} · ${data.schedule.quality.warnings.length} 条预警`);
+    } catch (err) {
+      toast(err.message, true);
+    } finally {
+      button.disabled = false;
+      button.textContent = '生成排考表';
+    }
+  });
+}
+
+function scheduleHtml(schedule) {
+  const rounds = schedule.rounds_detail || [];
+  const candidates = schedule.candidates || [];
+  const quality = schedule.quality || {};
+  const resources = schedule.resources || {};
+  const warningHtml = (quality.warnings || []).map((w) => `<div class="alert ${quality.status === 'review' ? '' : 'danger'}" style="margin-bottom:6px"><b>预警</b><p>${esc(w)}</p></div>`).join('');
+  const usage = {};
+  const slotLookup = {};
+  rounds.forEach((round) => round.slots.forEach((slot) => {
+    usage[slot.station_name] = (usage[slot.station_name] || 0) + 1;
+    slotLookup[`${slot.candidate_id}:${round.round}`] = slot;
+  }));
+  return `
+    <div class="grid c4" style="margin-bottom:16px">
+      <div class="kpi"><div class="k">总时长</div><div class="v">${num(quality.total_minutes, 0)}<small>分钟</small></div><div class="d">${rounds.length} 轮 · 缓冲 ${schedule.buffer_min} 分钟</div></div>
+      <div class="kpi ${quality.difficulty_spread <= 1 ? 'teal' : 'amber'}"><div class="k">加权难度差</div><div class="v">${num(quality.difficulty_spread, 2)}</div><div class="d">目标 ${num(quality.target_difficulty, 2)} · 阈值 ≤1.0</div></div>
+      <div class="kpi ${quality.late_difficulty_spread <= 1 ? 'teal' : 'amber'}"><div class="k">后两轮难度差</div><div class="v">${num(quality.late_difficulty_spread, 2)}</div><div class="d">顺序效应检查</div></div>
+      <div class="kpi ${quality.warnings.length ? 'amber' : 'teal'}"><div class="k">预警</div><div class="v">${quality.warnings.length}</div><div class="d">${esc(schedule.exam_date)} · ${quality.status === 'ok' ? '可直接使用' : '需人工确认'}</div></div>
+    </div>
+    ${warningHtml}
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">考生排考表<span class="sub">${candidates.length} 名考生 · ${rounds.length} 轮</span></div>
+      <div class="tbl-wrap">
+        <table class="schedule-table">
+          <thead><tr><th>考生</th><th>特殊需求</th>${rounds.map((r) => `<th>第 ${r.round} 轮<div class="tiny muted">${r.start_min}–${r.end_min}′</div></th>`).join('')}<th class="num">难度合计</th></tr></thead>
+          <tbody>
+            ${candidates.map((c) => `
+              <tr>
+                <td><div class="mono tiny muted">${esc(c.candidate_id)}</div><div>${esc(c.name)}</div></td>
+                <td>${c.extra_time_min ? `<span class="pill amber">延长 ${c.extra_time_min}′</span>` : ''} ${c.quiet_room ? '<span class="pill blue">安静候考</span>' : ''} ${!c.extra_time_min && !c.quiet_room ? '<span class="muted tiny">—</span>' : ''}</td>
+                ${rounds.map((r) => {
+                  const slot = (c.stations || []).find((s) => s.round === r.round);
+                  const detail = slotLookup[`${c.candidate_id}:${r.round}`];
+                  return `<td>${slot ? `<div style="font-weight:600">${esc(slot.station_name)}</div><div class="tiny muted">${detail ? `${detail.start_min}–${detail.end_min}′` : `${slot.duration_min}′`} · ${num(slot.difficulty, 2)}</div>` : '<span class="muted">—</span>'}</td>`;
+                }).join('')}
+                <td class="num">${num(c.total_difficulty, 2)}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="grid c2">
+      <div class="card">
+        <div class="card-title">资源占用<span class="sub">房间 / SP / 考官</span></div>
+        <div class="version-row"><span class="k">房间</span><span class="v">${resources.rooms.used}/${resources.rooms.count} 使用 · 峰值 ${num(resources.rooms.max_minutes, 0)} 分钟</span></div>
+        <div class="version-row"><span class="k">SP</span><span class="v">${resources.sps.used}/${resources.sps.count} 使用 · 峰值 ${num(resources.sps.max_minutes, 0)} 分钟</span></div>
+        <div class="version-row"><span class="k">考官</span><span class="v">${resources.examiners.used}/${resources.examiners.count} 使用 · 峰值 ${num(resources.examiners.max_minutes, 0)} 分钟</span></div>
+        <div class="sep"></div>
+        <div class="card-title" style="margin-bottom:6px">考站使用次数</div>
+        <div class="strength-list">${Object.entries(usage).map(([name, count]) => `<span class="pill">${esc(name)} · ${count}</span>`).join('')}</div>
+      </div>
+      <div class="card">
+        <div class="card-title">排考纪律<span class="sub">软约束与人工保留</span></div>
+        <ul class="small dim" style="padding-left:18px;line-height:1.9">
+          <li>硬约束：同一考生不重复考站、同一轮同一考站仅一名考生。</li>
+          <li>软约束：每位考生的加权难度总和尽量接近目标值。</li>
+          <li>顺序效应：检查后两轮难度差，避免高难站集中在末尾。</li>
+          <li>特殊需求：延长与安静候考区由考务人工确认最终安排。</li>
+          <li>疲劳：同一考官连续评分超过 ${quality.fatigue_limit_min || 240} 分钟会触发预警。</li>
+        </ul>
+        <div class="sep"></div>
+        <div class="tiny muted">当前算法为确定性回溯 + 难度均衡启发式；真实部署可替换为 CP-SAT 或整数规划求解器。</div>
+      </div>
+    </div>`;
 }
 
 /* ---------- bundle ---------- */

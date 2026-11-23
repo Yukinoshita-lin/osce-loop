@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import time
 from contextlib import asynccontextmanager
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +53,12 @@ from .domain.ingest import create_ingested_attempt
 from .domain.practice import build_practice_report
 from .domain.risk import RISK_ORDER, escalate_risk
 from .domain.rubric import AUTHORITY_LABELS, PHASE_LABELS, cap_authority
+from .domain.scheduling import (
+    ensure_schedule_inputs,
+    generate_schedule,
+    latest_schedule,
+    schedule_inputs,
+)
 from .domain.slots import DialogueStateMachine, SPController
 from .domain.spqa import certify_bundle, ensure_certification, latest_certification
 from .domain.stats import domain_scores, quality_report
@@ -66,6 +73,7 @@ async def lifespan(app: FastAPI):
     seed_if_empty(conn)
     apply_startup_governance(conn)
     ensure_certification(conn)
+    ensure_schedule_inputs(conn)
     conn.close()
     yield
 
@@ -933,6 +941,39 @@ def fairness(conn=Depends(get_conn)):
 @app.get("/api/ab")
 def ab(conn=Depends(get_conn)):
     return ab_report(conn)
+
+
+@app.get("/api/schedule/inputs")
+def get_schedule_inputs(conn=Depends(get_conn)):
+    ensure_schedule_inputs(conn)
+    return schedule_inputs(conn)
+
+
+class ScheduleBody(BaseModel):
+    exam_date: str | None = None
+    rounds: int = 6
+    buffer_min: int = 2
+    seed: int = 2026
+
+
+@app.post("/api/schedule/generate")
+def gen_schedule(body: ScheduleBody, conn=Depends(get_conn)):
+    try:
+        schedule = generate_schedule(
+            conn,
+            exam_date=body.exam_date or date.today().isoformat(),
+            rounds=body.rounds,
+            buffer_min=body.buffer_min,
+            seed=body.seed,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "schedule": schedule}
+
+
+@app.get("/api/schedule/latest")
+def get_latest_schedule(conn=Depends(get_conn)):
+    return {"schedule": latest_schedule(conn)}
 
 
 class GovernanceBody(BaseModel):

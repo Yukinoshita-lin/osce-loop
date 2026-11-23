@@ -236,6 +236,33 @@ CREATE TABLE IF NOT EXISTS data_sheets (
     published_at TEXT,
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS schedule_stations (
+    station_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    duration_min INTEGER NOT NULL,
+    difficulty REAL NOT NULL,
+    room_type TEXT,
+    equipment TEXT,
+    sp_type TEXT,
+    examiner_type TEXT
+);
+
+CREATE TABLE IF NOT EXISTS schedule_candidates (
+    candidate_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    extra_time_min INTEGER NOT NULL DEFAULT 0,
+    quiet_room INTEGER NOT NULL DEFAULT 0,
+    note TEXT
+);
+
+CREATE TABLE IF NOT EXISTS exam_schedules (
+    schedule_id TEXT PRIMARY KEY,
+    exam_date TEXT NOT NULL,
+    params TEXT NOT NULL,
+    schedule TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 
