@@ -618,6 +618,40 @@ ATTEMPT_META = [
     {"code": "C2026-013", "name": "唐若溪", "profile": "mid", "asr": 0.90},
 ]
 
+# 演示用 A/B 分组：AI 辅助组 vs 纯人工组，刻意让两组都包含高低分与边缘案例
+AB_GROUPS: dict[int, str] = {
+    1: "ai_assisted",
+    2: "human_only",
+    3: "human_only",
+    4: "ai_assisted",
+    5: "ai_assisted",
+    6: "ai_assisted",
+    7: "human_only",
+    8: "ai_assisted",
+    9: "human_only",
+    10: "ai_assisted",
+    11: "human_only",
+    12: "human_only",
+    13: "ai_assisted",
+}
+
+# 合成考生亚组，仅用于公平性监测演示；真实系统不得向评分员暴露这些字段
+CANDIDATE_PROFILES: list[dict[str, str]] = [
+    {"gender": "女", "origin": "城市", "language": "普通话"},
+    {"gender": "男", "origin": "城市", "language": "方言口音"},
+    {"gender": "男", "origin": "农村", "language": "方言口音"},
+    {"gender": "女", "origin": "农村", "language": "方言口音"},
+    {"gender": "男", "origin": "城市", "language": "普通话"},
+    {"gender": "女", "origin": "城市", "language": "普通话"},
+    {"gender": "男", "origin": "城市", "language": "普通话"},
+    {"gender": "男", "origin": "农村", "language": "方言口音"},
+    {"gender": "女", "origin": "农村", "language": "方言口音"},
+    {"gender": "男", "origin": "农村", "language": "普通话"},
+    {"gender": "女", "origin": "城市", "language": "方言口音"},
+    {"gender": "男", "origin": "农村", "language": "普通话"},
+    {"gender": "女", "origin": "农村", "language": "普通话"},
+]
+
 SPECIAL_UTTERANCES: dict[tuple[str, str], str] = {
     ("C2026-004", "HX.03"): "皮肤别的地方有没有起疹子？",
     ("C2026-007", "HX.05"): "家里人有心脏病吗？",
@@ -837,8 +871,9 @@ def seed_if_empty(conn) -> bool:
         appeal = meta["code"] == "C2026-013"
         conn.execute(
             "INSERT INTO attempts(attempt_id, bundle_id, candidate_code, candidate_name, session_id, risk_level, "
-            "media_id, media_url, duration_ms, integrity_gap, integrity_note, appeal, asr_confidence, status, created_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "media_id, media_url, duration_ms, integrity_gap, integrity_note, appeal, asr_confidence, status, "
+            "ab_group, created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 attempt_id,
                 bundle["bundle_id"],
@@ -854,8 +889,14 @@ def seed_if_empty(conn) -> bool:
                 1 if appeal else 0,
                 meta["asr"],
                 "scored",
+                AB_GROUPS.get(index, "ai_assisted"),
                 db.now_iso(),
             ),
+        )
+        profile_row = CANDIDATE_PROFILES[index - 1]
+        conn.execute(
+            "INSERT INTO candidate_profiles(attempt_id, gender, origin, language, created_at) VALUES(?,?,?,?,?)",
+            (attempt_id, profile_row["gender"], profile_row["origin"], profile_row["language"], db.now_iso()),
         )
         conn.execute(
             "INSERT INTO transcripts(attempt_id, payload, created_at) VALUES(?,?,?)",
@@ -890,6 +931,7 @@ def seed_if_empty(conn) -> bool:
         conn.commit()
 
     _seed_reviews(conn)
+    _seed_ab_reviews(conn)
     _write_model_card(conn)
     for key, value in {
         "model_version": MODEL_VERSION,
@@ -980,6 +1022,48 @@ def _seed_reviews(conn) -> None:
         elif pending == 0 and attempt["status"] not in ("published",):
             conn.execute("UPDATE attempts SET status = 'reviewed' WHERE attempt_id = ?", (attempt["attempt_id"],))
         conn.commit()
+
+
+def _seed_ab_reviews(conn) -> None:
+    """生成演示用 A/B 评分记录：AI 辅助组与纯人工组的耗时、QWK 与通过率对照。"""
+    attempts = [dict(r) for r in conn.execute("SELECT * FROM attempts ORDER BY attempt_id").fetchall()]
+    for attempt in attempts:
+        group = attempt.get("ab_group") or "ai_assisted"
+        records = conn.execute(
+            "SELECT * FROM score_records WHERE attempt_id = ? ORDER BY item_id",
+            (attempt["attempt_id"],),
+        ).fetchall()
+        for record in records:
+            gold = int(record["gold_score"] or 0)
+            digest = int(hashlib.sha256(f"ab:{record['record_id']}".encode()).hexdigest()[:4], 16)
+            if group == "human_only":
+                noise = 1 if digest % 100 < 18 else 0
+                score = max(0, min(2, gold - noise))
+                seconds = 105 + digest % 45
+                reviewer = "纯人工评分"
+            else:
+                score = record["final_score"]
+                if score is None:
+                    score = record["ai_score"]
+                if score is None:
+                    score = gold
+                seconds = 45 + digest % 30
+                reviewer = "AI 辅助复核"
+            conn.execute(
+                "INSERT INTO ab_reviews(review_id, attempt_id, item_id, group_name, score, reviewer, "
+                "seconds_spent, created_at) VALUES(?,?,?,?,?,?,?,?)",
+                (
+                    db.new_id("abr"),
+                    attempt["attempt_id"],
+                    record["item_id"],
+                    group,
+                    int(score),
+                    reviewer,
+                    float(seconds),
+                    db.now_iso(),
+                ),
+            )
+    conn.commit()
 
 
 def _write_model_card(conn) -> None:

@@ -21,6 +21,7 @@ const STATUS = {
 
 const REASON_COLOR = {
   integrity_gap: 'red',
+  risk_escalation: 'red',
   critical_negative: 'red',
   near_cutoff: 'amber',
   confidence_below_floor: 'amber',
@@ -138,6 +139,7 @@ function attemptFlags(a) {
   if (a.integrity_gap) flags.push('<span class="pill red">integrity_gap</span>');
   if (a.near_cutoff) flags.push('<span class="pill amber">near_cutoff</span>');
   if (a.appeal) flags.push('<span class="pill purple">申诉中</span>');
+  if (a.risk_escalated_at) flags.push('<span class="pill red">已升级</span>');
   if (a.critical_pending) flags.push(`<span class="pill red">关键项 ${a.critical_pending}</span>`);
   return flags.join(' ');
 }
@@ -428,6 +430,8 @@ function renderWorkbench(data) {
       <span>待复核 <b>${attempt.pending ?? '—'}</b></span>
       ${attempt.integrity_gap ? '<span class="pill red">integrity_gap</span>' : ''}
       ${attempt.near_cutoff ? '<span class="pill amber">near_cutoff</span>' : ''}
+      ${attempt.risk_level !== 'L3' && attempt.status !== 'published' ? `<button class="btn small danger" data-action="risk-escalate" data-attempt="${dataAttr(attempt.attempt_id)}">升级为 L3</button>` : ''}
+      ${attempt.risk_escalated_at ? `<span class="pill red">风险已上调 · ${esc(fmtTime(attempt.risk_escalated_at))}</span>` : ''}
     </div>
 
     <div class="wb-grid">
@@ -1063,6 +1067,84 @@ async function sendSpMessage(text) {
 }
 
 /* ---------- quality ---------- */
+function fairPill(status) {
+  if (status === 'pass') return '<span class="pill teal">通过</span>';
+  if (status === 'fail') return '<span class="pill red">超阈值</span>';
+  return '<span class="pill muted">样本不足</span>';
+}
+
+function abSectionHtml(ab) {
+  const groups = ab.groups || [];
+  const c = ab.comparison || {};
+  const teacherPass = c.teacher_hours_reduction !== null && c.teacher_hours_reduction >= c.teacher_target;
+  const nearPass = c.near_improvement !== null && c.near_improvement >= c.near_target;
+  return `
+    <div class="card">
+      <div class="card-title">A/B 对照<span class="sub">AI 辅助组 vs 纯人工组</span></div>
+      <div class="tbl-wrap" style="margin-bottom:10px">
+        <table>
+          <thead><tr><th>组别</th><th class="num">场次</th><th class="num">评分项</th><th class="num">平均分</th><th class="num">通过率</th><th class="num">QWK</th><th class="num">边缘一致</th><th class="num">单条耗时</th><th class="num">工时</th></tr></thead>
+          <tbody>
+            ${groups.map((g) => `<tr>
+              <td>${esc(g.name)}</td>
+              <td class="num">${g.attempts}</td>
+              <td class="num">${g.items}</td>
+              <td class="num">${num(g.mean_score, 1)}</td>
+              <td class="num">${pct(g.pass_rate, 0)}</td>
+              <td class="num">${num(g.qwk, 3)}</td>
+              <td class="num">${pct(g.near_cutoff_agreement, 0)}</td>
+              <td class="num">${num(g.avg_seconds_per_item, 1)}s</td>
+              <td class="num">${num(g.teacher_hours, 2)}h</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="version-row"><span class="k">教师评分工时下降</span><span class="v">${pct(c.teacher_hours_reduction, 1)} ${teacherPass ? '<span class="pill teal">达标</span>' : '<span class="pill red">未达标</span>'}</span></div>
+      <div class="version-row"><span class="k">边缘案例一致率提升</span><span class="v">${c.near_improvement === null ? '—' : num(c.near_improvement * 100, 1) + 'pp'} ${nearPass ? '<span class="pill teal">达标</span>' : '<span class="pill red">未达标</span>'}</span></div>
+      <div class="version-row"><span class="k">QWK 差值</span><span class="v">${num(c.qwk_delta, 3)}</span></div>
+      <div class="version-row"><span class="k">平均分差值</span><span class="v">${num(c.score_delta, 1)}</span></div>
+      ${c.score_delta !== null && Math.abs(c.score_delta) > 10 ? `<div class="alert" style="margin-top:8px"><b>分组基线不平衡</b><p>两组平均分差 ${num(c.score_delta, 1)} 分。教师工时与 QWK 结论需经随机化或协变量校正后再解读。</p></div>` : ''}
+      <div class="tiny muted" style="margin-top:6px">${esc(ab.note)}</div>
+    </div>`;
+}
+
+function fairnessSectionHtml(fairness) {
+  const dims = fairness.dimensions || [];
+  const editDims = (fairness.edit_rate || {}).dimensions || [];
+  return `
+    <div class="card">
+      <div class="card-title">公平性监测<span class="sub">阈值 ≤0.15 SD · 编辑率 ≤5pp</span></div>
+      ${dims.map((d) => `
+        <div class="version-row"><span class="k">${esc(d.label)}</span><span class="v">${d.gap_sd === null ? '样本不足' : num(d.gap_sd, 3) + ' SD'} ${fairPill(d.status)}</span></div>
+        <div class="tiny muted">${(d.groups || []).map((g) => `${esc(g.name)} n=${g.n} 均分 ${num(g.mean, 1)}`).join(' · ')}</div>
+        ${d.status === 'fail' ? `<div class="violation">纠正路径：${esc(d.corrective_action)}</div>` : ''}
+      `).join('')}
+      <div class="sep"></div>
+      <div class="card-title" style="margin-bottom:5px">评分员编辑率差异</div>
+      ${editDims.map((d) => `
+        <div class="version-row"><span class="k">${esc(d.label)}</span><span class="v">${d.gap_pp === null ? '样本不足' : num(d.gap_pp, 1) + 'pp'} ${fairPill(d.status)}</span></div>
+        <div class="tiny muted">${(d.groups || []).map((g) => `${esc(g.group)} ${pct(g.edit_rate, 0)} (n=${g.n})`).join(' · ')}</div>
+        ${d.status === 'fail' ? `<div class="violation">纠正路径：${esc(d.corrective_action)}</div>` : ''}
+      `).join('')}
+      <div class="sep"></div>
+      <div class="tiny muted">反馈可及性：${esc((fairness.feedback_accessibility || {}).note || '未采集')}</div>
+      <div class="tiny muted" style="margin-top:4px">${esc(fairness.note)}</div>
+    </div>`;
+}
+
+function selfCheckHtml(selfCheck) {
+  if (!selfCheck) {
+    return '<div class="tiny muted">尚未运行治理自检。自检会检查 QWK、证据缺口、亚组差异、版本戳与教师工时。</div>';
+  }
+  return `
+    <div class="attempt-strip" style="margin-bottom:6px"><span>最近 <b>${fmtTime(selfCheck.created_at)}</b></span><span>${esc(selfCheck.trigger_summary)}</span>${selfCheck.applied ? '<span class="pill red">已自动降级</span>' : '<span class="pill muted">未触发降级</span>'}</div>
+    ${(selfCheck.checks || []).map((c) => `
+      <div class="version-row"><span class="k">${esc(c.label)}</span><span class="v">${c.value === null ? '—' : (c.key === 'integrity_gap' ? pct(c.value, 1) : c.key === 'subgroup_gap' ? num(c.value, 3) + ' SD' : c.key === 'teacher_hours' ? pct(c.value, 1) : num(c.value, 3))} ${fairPill(c.status)}</span></div>
+    `).join('')}
+    ${(selfCheck.changes || []).length ? `<div class="violation">已降级 ${selfCheck.changes.length} 个评分项；需重新校准后回升。</div>` : ''}
+  `;
+}
+
 async function viewQuality() {
   const data = await api('/api/quality');
   const audit = await api('/api/audit?limit=30');
@@ -1081,7 +1163,9 @@ async function viewQuality() {
         ${gate.criteria.map((c) => {
           let value = '—';
           if (c.value !== null && c.value !== undefined) {
-            if (c.key === 'evidence_rate' || c.key === 'edit_rate' || c.key === 'subgroup_gap' || c.key === 'near_improvement' || c.key === 'teacher_hours' || c.key === 'sp_fact_error' || c.key === 'persona_pass') value = pct(c.value, c.value < 0.1 ? 1 : 0);
+            if (c.key === 'subgroup_gap') value = num(c.value, 3) + ' SD';
+            else if (c.key === 'near_improvement') value = num(c.value * 100, 1) + 'pp';
+            else if (c.key === 'evidence_rate' || c.key === 'edit_rate' || c.key === 'teacher_hours' || c.key === 'sp_fact_error' || c.key === 'persona_pass') value = pct(c.value, c.value < 0.1 ? 1 : 0);
             else if (c.key === 'avg_review_seconds') value = num(c.value, 2) + 's';
             else if (c.key === 'p95_latency') value = num(c.value * 1000, 0) + ' ms';
             else value = num(c.value, 2);
@@ -1104,7 +1188,10 @@ async function viewQuality() {
   $('#view').innerHTML = `
     <div class="view-head">
       <div><h2>质量与闸门</h2><p>闸门不是“专家看过觉得可以”，而是带数字的放行条件；达不到就不放行，且降级自动生效。</p></div>
-      <div class="btn-row"><button class="btn amber small" data-action="version-bump">模拟模型版本变更</button></div>
+      <div class="btn-row">
+        <button class="btn amber small" data-action="self-check">运行治理自检</button>
+        <button class="btn small" data-action="version-bump">模拟模型版本变更</button>
+      </div>
     </div>
     ${alerts}
     <div class="grid c4" style="margin-bottom:16px">
@@ -1117,6 +1204,11 @@ async function viewQuality() {
     <div class="gates" style="margin-bottom:16px">${gateCards}</div>
 
     <div class="grid c2" style="margin-bottom:16px">
+      ${abSectionHtml(data.ab)}
+      ${fairnessSectionHtml(data.fairness)}
+    </div>
+
+    <div class="grid c2" style="margin-bottom:16px">
       <div class="card">
         <div class="card-title">版本治理<span class="sub">变更即降级，禁止静默升级</span></div>
         <div class="version-row"><span class="k">score model</span><span class="v">${esc(data.versions.model)}</span></div>
@@ -1126,6 +1218,10 @@ async function viewQuality() {
         <div class="sep"></div>
         <div class="card-title" style="margin-bottom:6px">权限覆盖</div>
         ${overrides}
+        <div class="sep"></div>
+        <div class="card-title">治理自检<span class="sub">异常自动降级</span></div>
+        ${selfCheckHtml(data.latest_self_check)}
+        <div class="btn-row" style="margin-top:8px"><button class="btn small primary" data-action="self-check">运行治理自检</button></div>
       </div>
       <div class="card">
         <div class="card-title">AI 调用<span class="sub">网关唯一出口</span></div>
@@ -1157,6 +1253,36 @@ document.addEventListener('click', async (e) => {
   const el = e.target.closest('[data-action]');
   if (!el) return;
   const action = el.dataset.action;
+  if (action === 'risk-escalate') {
+    const reason = prompt('升级为 L3 将清空该场次最终分，并让全部评分记录进入人工复核。请输入升级理由：');
+    if (!reason) return;
+    try {
+      await api(`/api/attempts/${encodeURIComponent(el.dataset.attempt)}/risk-level`, {
+        method: 'POST',
+        body: { risk_level: 'L3', reason, actor: state.reviewer || '考务' },
+      });
+      toast('风险等级已上调为 L3，该场次全部记录进入人工复核');
+      await viewReview();
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'self-check') {
+    try {
+      const result = await api('/api/governance/self-check', {
+        method: 'POST',
+        body: { apply: true, actor: state.reviewer || '系统' },
+      });
+      toast(result.applied
+        ? `治理自检完成：${result.applied_changes.length} 个评分项权限自动降级`
+        : `治理自检完成：${result.trigger_summary}`);
+      await viewQuality();
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
   if (action === 'signoff' || action === 'publish') {
     const reviewer = ($('#reviewer-input').value || '').trim();
     if (!reviewer) return toast('请先填写复核人', true);

@@ -4,6 +4,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from .ab import ab_report
+from .fairness import fairness_report
+
 GATES = [
     {
         "id": "G0",
@@ -102,6 +105,8 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
         p95_ms = red_team.get("p95_latency_ms")
         sp_p95_latency = round(p95_ms / 1000, 3) if p95_ms is not None else None
         sp_p0 = red_team.get("p0_incidents")
+    ab = ab_report(conn)
+    fairness = fairness_report(conn)
     return {
         "qwk_ai": report.get("qwk_ai"),
         "evidence_rate": (report.get("evidence") or {}).get("rate"),
@@ -115,9 +120,9 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
         "p95_latency": sp_p95_latency,
         "sus": None,
         "p0_incidents": sp_p0 if sp_p0 is not None else 0,
-        "near_improvement": None,
-        "subgroup_gap": None,
-        "teacher_hours": None,
+        "near_improvement": ab.get("comparison", {}).get("near_improvement"),
+        "subgroup_gap": fairness.get("overall_gap_sd"),
+        "teacher_hours": ab.get("comparison", {}).get("teacher_hours_reduction"),
         "switch_drill": None,
         "appeal_drill": None,
         "ethics": None,

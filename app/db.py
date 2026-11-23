@@ -45,6 +45,9 @@ CREATE TABLE IF NOT EXISTS attempts (
     status TEXT NOT NULL DEFAULT 'scored',
     ai_total REAL,
     near_cutoff INTEGER NOT NULL DEFAULT 0,
+    ab_group TEXT NOT NULL DEFAULT 'ai_assisted',
+    risk_escalated_at TEXT,
+    risk_escalation_reason TEXT,
     signed_off_by TEXT,
     signed_off_at TEXT,
     published_at TEXT,
@@ -166,6 +169,35 @@ CREATE TABLE IF NOT EXISTS sp_reports (
     report TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS candidate_profiles (
+    attempt_id TEXT PRIMARY KEY,
+    gender TEXT,
+    origin TEXT,
+    language TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ab_reviews (
+    review_id TEXT PRIMARY KEY,
+    attempt_id TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    group_name TEXT NOT NULL,
+    score INTEGER NOT NULL,
+    reviewer TEXT,
+    seconds_spent REAL,
+    created_at TEXT NOT NULL,
+    UNIQUE (attempt_id, item_id)
+);
+
+CREATE TABLE IF NOT EXISTS governance_checks (
+    check_id TEXT PRIMARY KEY,
+    actor TEXT NOT NULL,
+    trigger_summary TEXT NOT NULL,
+    applied INTEGER NOT NULL DEFAULT 0,
+    detail TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -189,7 +221,21 @@ def connect(db_path: Path | str | None = None) -> sqlite3.Connection:
 
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    _migrate(conn)
     conn.commit()
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """兼容已存在的演示数据库：SQLite 无法通过 CREATE TABLE IF NOT EXISTS 加列。"""
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(attempts)").fetchall()}
+    additions = {
+        "ab_group": "TEXT NOT NULL DEFAULT 'ai_assisted'",
+        "risk_escalated_at": "TEXT",
+        "risk_escalation_reason": "TEXT",
+    }
+    for column, ddl in additions.items():
+        if column not in existing:
+            conn.execute(f"ALTER TABLE attempts ADD COLUMN {column} {ddl}")
 
 
 def rows_to_dicts(rows: Iterable[sqlite3.Row]) -> list[dict[str, Any]]:

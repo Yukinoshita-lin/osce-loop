@@ -37,6 +37,7 @@ REASON_LABELS = {
     "manual_only": "该项 AI 无权限，人工评分",
     "extract_only": "AI 仅提取证据，人工评分",
     "ai_refusal": "AI 拒答（无法定位证据）",
+    "risk_escalation": "风险等级上调，全站人工",
 }
 
 ROUTE_LABELS = {

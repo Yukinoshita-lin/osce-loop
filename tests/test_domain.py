@@ -18,8 +18,12 @@ from app.domain.rubric import (
     validate_bundle,
     validate_rubric_item,
 )
+from app.domain.ab import ab_report
+from app.domain.fairness import fairness_report
 from app.domain.gates import evaluate_gates
+from app.domain.governance import run_self_check
 from app.domain.practice import build_practice_report
+from app.domain.risk import escalate_risk
 from app.domain.routing import is_near_cutoff, route_item, sampling_hit
 from app.domain.slots import DialogueStateMachine, SPController, scan_leaks
 from app.domain.spqa import (
@@ -332,3 +336,109 @@ def test_gate_g1_uses_sp_certification(conn):
     assert values["persona_pass"] is not None
     assert values["p95_latency"] is not None
     assert values["p0_incidents"] == 0
+
+
+def test_fairness_report_has_groups_and_corrective_actions(conn):
+    report = fairness_report(conn)
+    assert report["sample"]["attempts"] == 13
+    assert report["overall_gap_sd"] is not None
+    assert len(report["dimensions"]) == 3
+    for dim in report["dimensions"]:
+        assert dim["groups"]
+        assert dim["status"] in ("pass", "fail", "insufficient")
+        assert dim["corrective_action"]
+    assert len(report["edit_rate"]["dimensions"]) == 3
+    assert report["feedback_accessibility"]["status"] == "unmeasured"
+
+
+def test_ab_report_compares_groups(conn):
+    report = ab_report(conn)
+    groups = {g["key"]: g for g in report["groups"]}
+    assert groups["ai_assisted"]["attempts"] == 7
+    assert groups["human_only"]["attempts"] == 6
+    assert groups["ai_assisted"]["items"] == 105
+    assert groups["human_only"]["items"] == 90
+    assert report["comparison"]["teacher_hours_reduction"] is not None
+    assert report["comparison"]["teacher_hours_reduction"] >= 0.40
+    assert report["comparison"]["near_improvement"] is not None
+    assert report["comparison"]["near_improvement"] > 0
+    assert groups["ai_assisted"]["teacher_hours"] < groups["human_only"]["teacher_hours"]
+
+
+def test_g2_gate_uses_ab_and_fairness_metrics(conn):
+    report = quality_report(conn)
+    gates = evaluate_gates(conn, report, "G0_offline")
+    g2 = next(g for g in gates["gates"] if g["id"] == "G2")
+    values = {c["key"]: c["value"] for c in g2["criteria"]}
+    assert values["teacher_hours"] is not None
+    assert values["near_improvement"] is not None
+    assert values["subgroup_gap"] is not None
+    assert values["qwk_ai"] is not None
+    assert g2["status"] == "pass"
+
+
+def test_risk_escalation_is_upward_only(seeded_path, tmp_path):
+    path = tmp_path / "risk.db"
+    shutil.copy(seeded_path, path)
+    conn = db.connect(path)
+    result = escalate_risk(
+        conn,
+        attempt_id="att_2026_001",
+        new_level="L3",
+        reason="测试风险升级",
+        actor="考务",
+    )
+    assert result["old_level"] == "L2"
+    assert result["new_level"] == "L3"
+    attempt = conn.execute("SELECT * FROM attempts WHERE attempt_id = 'att_2026_001'").fetchone()
+    assert attempt["risk_level"] == "L3"
+    assert attempt["status"] == "pending_review"
+    pending = conn.execute(
+        "SELECT COUNT(*) AS n FROM score_records WHERE attempt_id = 'att_2026_001' "
+        "AND status IN ('pending_review','manual_pending')"
+    ).fetchone()["n"]
+    assert pending == 15
+    finals = conn.execute(
+        "SELECT COUNT(*) AS n FROM score_records WHERE attempt_id = 'att_2026_001' AND final_score IS NOT NULL"
+    ).fetchone()["n"]
+    assert finals == 0
+    with pytest.raises(ValueError):
+        escalate_risk(conn, attempt_id="att_2026_001", new_level="L2", reason="试图降级", actor="考务")
+    with pytest.raises(ValueError):
+        escalate_risk(conn, attempt_id="att_2026_002", new_level="L3", reason="已发布", actor="考务")
+    audit = conn.execute(
+        "SELECT COUNT(*) AS n FROM audit_events WHERE action = 'attempt.risk_escalation'"
+    ).fetchone()["n"]
+    assert audit == 1
+    conn.close()
+
+
+def test_governance_self_check_passes_core_metrics(conn):
+    result = run_self_check(conn, actor="test", apply=True)
+    checks = {c["key"]: c for c in result["checks"]}
+    assert checks["qwk"]["status"] == "pass"
+    assert checks["subgroup_gap"]["status"] == "pass"
+    assert checks["teacher_hours"]["status"] == "pass"
+    assert checks["version_stamp"]["status"] == "pass"
+    assert result["applied_changes"] == []
+
+
+def test_governance_auto_downgrade_on_low_qwk(seeded_path, tmp_path):
+    path = tmp_path / "governance_low_qwk.db"
+    shutil.copy(seeded_path, path)
+    conn = db.connect(path)
+    conn.execute(
+        "UPDATE score_records SET ai_score = CASE WHEN ai_score IS NULL THEN NULL ELSE 2 - ai_score END"
+    )
+    conn.commit()
+    result = run_self_check(conn, actor="test", apply=True)
+    checks = {c["key"]: c for c in result["checks"]}
+    assert checks["qwk"]["status"] == "fail"
+    assert result["applied_changes"]
+    overrides = conn.execute("SELECT COUNT(*) AS n FROM authority_overrides").fetchone()["n"]
+    assert overrides > 0
+    audit = conn.execute(
+        "SELECT COUNT(*) AS n FROM audit_events WHERE action = 'authority.auto_downgrade'"
+    ).fetchone()["n"]
+    assert audit >= 1
+    conn.close()

@@ -24,6 +24,7 @@ from .config import (
     SP_PROMPT_VERSION,
     WEB_DIR,
 )
+from .domain.ab import ab_report
 from .domain.bundle import (
     apply_authority_reset,
     effective_authority,
@@ -31,8 +32,11 @@ from .domain.bundle import (
     list_bundles,
     list_overrides,
 )
+from .domain.fairness import fairness_report
 from .domain.gates import evaluate_gates
+from .domain.governance import latest_self_check, run_self_check
 from .domain.practice import build_practice_report
+from .domain.risk import RISK_ORDER, escalate_risk
 from .domain.rubric import AUTHORITY_LABELS, PHASE_LABELS
 from .domain.slots import DialogueStateMachine, SPController
 from .domain.spqa import certify_bundle, ensure_certification, latest_certification
@@ -136,6 +140,9 @@ def _attempt_summary(conn, attempt: dict[str, Any]) -> dict[str, Any]:
         "candidate_name": attempt["candidate_name"],
         "session_id": attempt["session_id"],
         "risk_level": attempt["risk_level"],
+        "ab_group": attempt.get("ab_group"),
+        "risk_escalated_at": attempt.get("risk_escalated_at"),
+        "risk_escalation_reason": attempt.get("risk_escalation_reason"),
         "status": attempt["status"],
         "station_title": bundle["payload"].get("title"),
         "bundle_id": bundle["bundle_id"],
@@ -207,6 +214,7 @@ def _record_public(conn, record: dict[str, Any], bundle: dict[str, Any], attempt
 
 def _priority(routing: dict[str, Any]) -> int:
     order = {
+        "risk_escalation": 0,
         "integrity_gap": 0,
         "critical_negative": 1,
         "near_cutoff": 2,
@@ -336,6 +344,30 @@ def appeal_attempt(attempt_id: str, conn=Depends(get_conn)):
         after={"status": "pending_review", "appeal": True},
     )
     return {"ok": True, "attempt": _attempt_summary(conn, _attempt_row(conn, attempt_id))}
+
+
+class RiskBody(BaseModel):
+    risk_level: str
+    reason: str = Field(min_length=1)
+    actor: str = "考务"
+
+
+@app.post("/api/attempts/{attempt_id}/risk-level")
+def raise_attempt_risk(attempt_id: str, body: RiskBody, conn=Depends(get_conn)):
+    if body.risk_level not in RISK_ORDER:
+        raise HTTPException(400, "非法风险等级")
+    try:
+        result = escalate_risk(
+            conn,
+            attempt_id=attempt_id,
+            new_level=body.risk_level,
+            reason=body.reason,
+            actor=body.actor,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    attempt = _attempt_row(conn, attempt_id)
+    return {"ok": True, "escalation": result, "attempt": _attempt_summary(conn, attempt)}
 
 
 class SignoffBody(BaseModel):
@@ -699,6 +731,9 @@ def quality(conn=Depends(get_conn)):
         },
         "overrides": list_overrides(conn),
         "sp_certification": latest_certification(conn),
+        "fairness": fairness_report(conn),
+        "ab": ab_report(conn),
+        "latest_self_check": latest_self_check(conn),
         "versions": {
             "model": db.get_state(conn, "model_version", MODEL_VERSION),
             "prompt": db.get_state(conn, "prompt_version", PROMPT_VERSION),
@@ -754,6 +789,27 @@ def version_bump(body: VersionBody, conn=Depends(get_conn)):
         "changes": changes,
         "overrides": list_overrides(conn),
     }
+
+
+@app.get("/api/fairness")
+def fairness(conn=Depends(get_conn)):
+    return fairness_report(conn)
+
+
+@app.get("/api/ab")
+def ab(conn=Depends(get_conn)):
+    return ab_report(conn)
+
+
+class GovernanceBody(BaseModel):
+    apply: bool = True
+    actor: str = "系统"
+
+
+@app.post("/api/governance/self-check")
+def governance_self_check(body: GovernanceBody, conn=Depends(get_conn)):
+    result = run_self_check(conn, actor=body.actor, apply=body.apply)
+    return {"ok": True, **result}
 
 
 @app.get("/api/audit")
