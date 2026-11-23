@@ -535,6 +535,7 @@ function renderWorkbench(data) {
       ${attempt.near_cutoff ? '<span class="pill amber">near_cutoff</span>' : ''}
       ${attempt.risk_level !== 'L3' && attempt.status !== 'published' ? `<button class="btn small danger" data-action="risk-escalate" data-attempt="${dataAttr(attempt.attempt_id)}">升级为 L3</button>` : ''}
       ${attempt.risk_escalated_at ? `<span class="pill red">风险已上调 · ${esc(fmtTime(attempt.risk_escalated_at))}</span>` : ''}
+      <button class="btn small" data-action="export-attempt" data-attempt="${dataAttr(attempt.attempt_id)}">导出申诉包</button>
     </div>
 
     <div class="wb-grid">
@@ -2047,6 +2048,25 @@ document.addEventListener('click', async (e) => {
   if (action === 'open-feedback') {
     state.feedbackId = el.dataset.attempt;
     location.hash = '#/feedback';
+    return;
+  }
+  if (action === 'export-attempt') {
+    const attemptId = el.dataset.attempt;
+    try {
+      const data = await api(`/api/attempts/${encodeURIComponent(attemptId)}/export`);
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${attemptId}-appeal-package.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast(`申诉包已导出：${data.package_hash.slice(0, 18)}…`);
+    } catch (err) {
+      toast(err.message, true);
+    }
     return;
   }
   if (action === 'risk-escalate') {

@@ -57,6 +57,7 @@ from .domain.bundle import (
     list_overrides,
 )
 from .domain.calibration import calibration_report, import_gold_scores, parse_gold_file
+from .domain.export import build_attempt_package
 from .domain.fairness import fairness_report
 from .domain.gates import evaluate_gates
 from .domain.governance import (
@@ -664,6 +665,18 @@ async def ingest_attempt(
         "media": media,
         "integrity_gap": not bool(media),
     }
+
+
+@app.get("/api/attempts/{attempt_id}/export")
+def attempt_export(attempt_id: str, request: Request, conn=Depends(get_conn)):
+    attempt = _attempt_row(conn, attempt_id)
+    _ensure_attempt_access(request.state.user, attempt)
+    try:
+        return build_attempt_package(
+            conn, attempt_id, exported_by=request.state.user["display_name"]
+        )
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
 
 @app.get("/api/attempts/{attempt_id}")
