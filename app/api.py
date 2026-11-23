@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import db
+from .ai.asr import ASRError, build_asr_provider
 from .ai.base import CapabilityGateway
 from .ai.factory import build_scoring_provider, scoring_provider_info
 from .config import (
@@ -482,8 +483,15 @@ async def _save_media(upload: UploadFile | None) -> dict[str, Any] | None:
         "media_id": media_id,
         "media_url": f"/media/uploads/{stored_name}",
         "filename": upload.filename,
+        "media_filename": upload.filename,
+        "stored_name": stored_name,
         "size_bytes": total,
     }
+
+
+def _cleanup_media(media: dict[str, Any] | None) -> None:
+    if media and media.get("stored_name"):
+        (UPLOAD_DIR / media["stored_name"]).unlink(missing_ok=True)
 
 
 @app.post("/api/attempts/ingest")
@@ -493,27 +501,73 @@ async def ingest_attempt(
     candidate_name: str = Form(""),
     risk_level: str = Form("L2"),
     actor: str = Form("考务录入"),
-    transcript_file: UploadFile = File(...),
+    asr_language: str = Form("zh"),
+    asr_first_speaker: str = Form("patient"),
+    asr_speaker_map: str = Form(""),
+    transcript_file: UploadFile | None = File(None),
     media_file: UploadFile | None = File(None),
     conn=Depends(get_conn),
 ):
     _ensure_not_stopped(conn)
     if risk_level not in RISK_LEVELS:
         raise HTTPException(400, "非法风险等级")
+    if asr_first_speaker not in ("patient", "candidate"):
+        raise HTTPException(400, "asr_first_speaker 必须是 patient 或 candidate")
+    speaker_map = None
+    if asr_speaker_map.strip():
+        try:
+            speaker_map = json.loads(asr_speaker_map)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(400, "asr_speaker_map 必须是 JSON 对象") from exc
+        if not isinstance(speaker_map, dict):
+            raise HTTPException(400, "asr_speaker_map 必须是 JSON 对象")
     bundle = _resolve_bundle(conn, bundle_id)
-    raw = await transcript_file.read()
-    if not raw:
-        raise HTTPException(400, "转写文件为空")
-    if len(raw) > MAX_TRANSCRIPT_BYTES:
-        raise HTTPException(413, "转写文件超过 10MB 限制")
-    try:
-        parsed = parse_transcript(transcript_file.filename or "transcript.txt", raw)
-    except (ValueError, json.JSONDecodeError) as exc:
-        raise HTTPException(400, f"转写解析失败：{exc}") from exc
-    if not parsed["utterances"]:
-        raise HTTPException(400, "转写没有有效 utterance")
 
-    media = await _save_media(media_file)
+    media = None
+    asr_meta = None
+    if transcript_file is not None and transcript_file.filename:
+        raw = await transcript_file.read()
+        if not raw:
+            raise HTTPException(400, "转写文件为空")
+        if len(raw) > MAX_TRANSCRIPT_BYTES:
+            raise HTTPException(413, "转写文件超过 10MB 限制")
+        try:
+            parsed = parse_transcript(transcript_file.filename or "transcript.txt", raw)
+        except (ValueError, json.JSONDecodeError) as exc:
+            raise HTTPException(400, f"转写解析失败：{exc}") from exc
+        parsed["source"] = "upload"
+    else:
+        if media_file is None or not media_file.filename:
+            raise HTTPException(400, "请上传转写文件，或上传音视频并配置 ASR")
+        media = await _save_media(media_file)
+        asr_bundle = build_asr_provider()
+        if not asr_bundle.provider:
+            _cleanup_media(media)
+            reason = asr_bundle.info.get("reason") or "无可用的 ASR 服务"
+            raise HTTPException(400, f"未配置 ASR：{reason}")
+        try:
+            parsed = asr_bundle.provider.transcribe_media(
+                UPLOAD_DIR / media["stored_name"],
+                language=asr_language or "zh",
+                speaker_map=speaker_map,
+                first_speaker=asr_first_speaker,
+            )
+        except ASRError as exc:
+            _cleanup_media(media)
+            raise HTTPException(400, f"ASR 转写失败：{exc}") from exc
+        asr_meta = {
+            "provider": parsed.get("provider"),
+            "model_version": parsed.get("model_version"),
+            "language": asr_language or "zh",
+            "speaker_labels": parsed.get("speaker_labels"),
+        }
+
+    if not parsed.get("utterances"):
+        _cleanup_media(media)
+        raise HTTPException(400, "转写没有有效 utterance")
+    if media is None:
+        media = await _save_media(media_file)
+
     code = candidate_code.strip() or f"C-UPLOAD-{db.new_id('cu')[-6:].upper()}"
     name = candidate_name.strip() or "未命名考生"
     provider_bundle = build_scoring_provider()
@@ -537,6 +591,8 @@ async def ingest_attempt(
         media_url=(media or {}).get("media_url"),
         media_filename=(media or {}).get("filename"),
         media_size_bytes=(media or {}).get("size_bytes") or 0,
+        transcript_source=parsed.get("source", "upload"),
+        asr_model=(asr_meta or {}).get("model_version"),
         actor=actor,
     )
     attempt = _attempt_summary(conn, _attempt_row(conn, attempt_id))
@@ -550,6 +606,8 @@ async def ingest_attempt(
             "patient_utterances": parsed["patient_utterances"],
             "duration_ms": parsed["duration_ms"],
             "warnings": parsed["warnings"],
+            "source": parsed.get("source", "upload"),
+            "asr": asr_meta,
         },
         "media": media,
         "integrity_gap": not bool(media),
@@ -1030,6 +1088,7 @@ def quality(conn=Depends(get_conn)):
         "latest_self_check": latest_self_check(conn),
         "governance": governance_status(conn),
         "ai_provider": scoring_provider_info(),
+        "asr_provider": build_asr_provider().info,
         "audit_anchors": db.list_audit_anchors(conn, limit=5),
         "versions": {
             "model": db.get_state(conn, "model_version", MODEL_VERSION),

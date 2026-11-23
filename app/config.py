@@ -31,6 +31,16 @@ AI_TIMEOUT_SECONDS = float(os.getenv("OSCELOOP_AI_TIMEOUT_SECONDS", "30"))
 AI_MAX_RETRIES = int(os.getenv("OSCELOOP_AI_MAX_RETRIES", "1"))
 AI_FALLBACK = os.getenv("OSCELOOP_AI_FALLBACK", "mock").strip().lower()
 
+# ASR：默认关闭，需显式配置 OpenAI 兼容 /audio/transcriptions 服务。
+# 必须返回带说话人标签的分段转写，否则拒绝自动评分，避免角色错位。
+ASR_PROVIDER = os.getenv("OSCELOOP_ASR_PROVIDER", "off").strip().lower()
+ASR_BASE_URL = os.getenv("OSCELOOP_ASR_BASE_URL", "").strip()
+ASR_API_KEY = os.getenv("OSCELOOP_ASR_API_KEY", "").strip()
+ASR_MODEL = os.getenv("OSCELOOP_ASR_MODEL", "").strip()
+ASR_LANGUAGE = os.getenv("OSCELOOP_ASR_LANGUAGE", "zh").strip()
+ASR_TIMEOUT_SECONDS = float(os.getenv("OSCELOOP_ASR_TIMEOUT_SECONDS", "60"))
+ASR_MAX_RETRIES = int(os.getenv("OSCELOOP_ASR_MAX_RETRIES", "1"))
+
 # 当前能力闸门阶段。P0 为离线历史录像，尚未进入真实考生场景。
 RELEASE_STAGE = os.getenv("OSCELOOP_RELEASE_STAGE", "G0_offline")
 

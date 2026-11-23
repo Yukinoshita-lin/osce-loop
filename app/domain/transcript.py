@@ -27,6 +27,9 @@ PATIENT_ALIASES = (
     "patient",
     "家属",
 )
+_CANDIDATE_ALIASES_NORMALIZED = {alias.lower().replace(".", "") for alias in CANDIDATE_ALIASES}
+_PATIENT_ALIASES_NORMALIZED = {alias.lower().replace(".", "") for alias in PATIENT_ALIASES}
+_SPEAKER_TOKEN = re.compile(r"[^a-z0-9\u4e00-\u9fff]+")
 
 SPEAKER_PREFIX = re.compile(
     r"^\s*(医生|考生|医学生|Doctor|Dr\.?|Candidate|Student|Clinician|患者|病人|模拟患者|SP|Patient|家属)\s*[：:]\s*",
@@ -77,12 +80,20 @@ def _map_speaker(raw: str) -> str | None:
     value = (raw or "").strip().lower().replace(".", "")
     if not value:
         return None
-    if any(alias in value for alias in CANDIDATE_ALIASES):
+    tokens = [token for token in _SPEAKER_TOKEN.split(value) if token]
+    if value in _CANDIDATE_ALIASES_NORMALIZED or any(
+        token in _CANDIDATE_ALIASES_NORMALIZED for token in tokens
+    ):
         return "candidate"
-    if any(alias in value for alias in PATIENT_ALIASES):
+    if value in _PATIENT_ALIASES_NORMALIZED or any(
+        token in _PATIENT_ALIASES_NORMALIZED for token in tokens
+    ):
         return "patient"
-    if value in ("candidate", "doctor", "student", "医生", "考生"):
+    # 较长的别名允许多语言标签内嵌，例如“模拟患者A”；短别名 sp/dr 只做精确匹配。
+    if any(len(alias) >= 3 and alias in value for alias in _CANDIDATE_ALIASES_NORMALIZED):
         return "candidate"
+    if any(len(alias) >= 3 and alias in value for alias in _PATIENT_ALIASES_NORMALIZED):
+        return "patient"
     return None
 
 
@@ -239,6 +250,28 @@ def _parse_json(content: str, warnings: list[str]) -> list[dict[str, Any]]:
     return items
 
 
+def map_speaker(raw: str) -> str | None:
+    return _map_speaker(raw)
+
+
+def normalize_items(
+    raw_items: list[dict[str, Any]],
+    *,
+    fmt: str = "json",
+    warnings: list[str] | None = None,
+) -> dict[str, Any]:
+    warnings = [] if warnings is None else warnings
+    utterances = _normalize(raw_items, fmt=fmt, warnings=warnings)
+    return {
+        "format": fmt,
+        "utterances": utterances,
+        "warnings": warnings,
+        "duration_ms": max((u["end_ms"] for u in utterances), default=0),
+        "candidate_utterances": sum(1 for u in utterances if u["speaker"] == "candidate"),
+        "patient_utterances": sum(1 for u in utterances if u["speaker"] == "patient"),
+    }
+
+
 def parse_transcript(filename: str, content: bytes) -> dict[str, Any]:
     try:
         text = content.decode("utf-8-sig")
@@ -255,12 +288,4 @@ def parse_transcript(filename: str, content: bytes) -> dict[str, Any]:
     else:
         fmt = "srt"
         raw_items = _parse_srt(text, warnings)
-    utterances = _normalize(raw_items, fmt=fmt, warnings=warnings)
-    return {
-        "format": fmt,
-        "utterances": utterances,
-        "warnings": warnings,
-        "duration_ms": max((u["end_ms"] for u in utterances), default=0),
-        "candidate_utterances": sum(1 for u in utterances if u["speaker"] == "candidate"),
-        "patient_utterances": sum(1 for u in utterances if u["speaker"] == "patient"),
-    }
+    return normalize_items(raw_items, fmt=fmt, warnings=warnings)

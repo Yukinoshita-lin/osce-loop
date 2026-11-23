@@ -774,7 +774,8 @@ async function viewIngest() {
           <li>转写支持 <code>JSON</code>、<code>SRT</code>、<code>VTT</code>，必须带时间戳。</li>
           <li>SRT/VTT 建议每句前加“医生：”或“患者：”，否则按患者/考生交替推断。</li>
           <li>媒体支持 wav / mp3 / m4a / mp4 / webm，最大 200MB；未上传媒体时该场次全部转人工。</li>
-          <li>当前 ASR 未接入，需先获得离线转写；评分器为 Mock，真实部署可替换网关适配器。</li>
+          <li>未配置 ASR 时需上传转写；配置后只上传音视频即可自动转写，ASR 必须返回说话人标签。</li>
+          <li>评分提供方与超时/降级配置可在「质量与闸门」查看；Mock 为默认演示模式。</li>
         </ul>
         <div class="sep"></div>
         <div class="card-title" style="margin-bottom:5px">当前站包</div>
@@ -807,14 +808,25 @@ async function viewIngest() {
               <input class="input" name="actor" value="${dataAttr(state.reviewer)}" maxlength="20">
             </label>
           </div>
-          <label class="field" style="margin-top:10px">转写文件（JSON / SRT / VTT）
-            <input class="input" type="file" name="transcript_file" accept=".json,.srt,.vtt" required>
+          <label class="field" style="margin-top:10px">转写文件（可选；JSON / SRT / VTT）
+            <input class="input" type="file" name="transcript_file" accept=".json,.srt,.vtt">
           </label>
-          <label class="field" style="margin-top:10px">音视频文件（可选）
+          <label class="field" style="margin-top:10px">音视频文件（未上传转写时用于 ASR）
             <input class="input" type="file" name="media_file" accept="audio/*,video/*">
           </label>
+          <div class="grid c2" style="margin-top:10px">
+            <label class="field">ASR 语种
+              <input class="input" name="asr_language" value="zh" maxlength="10">
+            </label>
+            <label class="field">ASR 首个说话人
+              <select class="input" name="asr_first_speaker">
+                <option value="patient" selected>患者（SP 先开口）</option>
+                <option value="candidate">考生（医生先开口）</option>
+              </select>
+            </label>
+          </div>
           <div class="btn-row" style="margin-top:14px">
-            <button class="btn primary" type="submit" id="ingest-submit">解析并运行评分</button>
+            <button class="btn primary" type="submit" id="ingest-submit">解析/转写并运行评分</button>
             <span class="tiny muted">评分完成后写入审计链</span>
           </div>
         </form>
@@ -827,12 +839,13 @@ async function viewIngest() {
     e.preventDefault();
     const button = $('#ingest-submit');
     const fileInput = form.querySelector('input[name="transcript_file"]');
-    if (!fileInput.files || !fileInput.files.length) {
-      toast('请选择转写文件', true);
+    const mediaInput = form.querySelector('input[name="media_file"]');
+    if ((!fileInput.files || !fileInput.files.length) && (!mediaInput.files || !mediaInput.files.length)) {
+      toast('请上传转写文件，或上传音视频以使用 ASR', true);
       return;
     }
     button.disabled = true;
-    button.textContent = '解析与评分中…';
+    button.textContent = '解析、转写与评分中…';
     try {
       const data = await apiForm('/api/attempts/ingest', new FormData(form));
       renderIngestResult(data);
@@ -841,7 +854,7 @@ async function viewIngest() {
       toast(err.message, true);
     } finally {
       button.disabled = false;
-      button.textContent = '解析并运行评分';
+      button.textContent = '解析/转写并运行评分';
     }
   });
 }
@@ -859,6 +872,7 @@ function renderIngestResult(data) {
       <span>${esc(a.candidate_code)} · ${esc(a.candidate_name)}</span>
       <span>风险 ${esc(a.risk_level)}</span>
       <span>转写 ${t.utterances} 句</span>
+      <span>${t.source === 'asr' ? `ASR · ${esc((t.asr || {}).model_version || '自动转写')}` : '转写文件'}</span>
       <span>考生 ${t.candidate_utterances} / 患者 ${t.patient_utterances}</span>
       <span>${data.media ? '媒体已上传' : '无媒体'}</span>
     </div>
@@ -1773,6 +1787,7 @@ async function viewQuality() {
     </div>`).join('');
   const canPurge = state.user && ['admin', 'exam_manager'].includes(state.user.role);
   const provider = data.ai_provider || {};
+  const asr = data.asr_provider || {};
   const anchors = data.audit_anchors || [];
   const modelCards = data.model_cards.map((c) => `
     <div class="card tight" style="margin-bottom:8px">
@@ -1843,7 +1858,8 @@ async function viewQuality() {
         <div class="version-row"><span class="k">评分提供方</span><span class="v">${esc(provider.provider || 'mock-score')} · ${provider.configured ? '真实模型已配置' : '默认 Mock'}</span></div>
         <div class="version-row"><span class="k">降级兜底</span><span class="v">${esc(provider.fallback || '未启用')}</span></div>
         <div class="version-row"><span class="k">超时 / 重试</span><span class="v">${num(provider.timeout_seconds, 0)}s · ${provider.max_retries ?? 0} 次</span></div>
-        ${provider.reason ? `<div class="tiny muted" style="color:var(--amber)">${esc(provider.reason)}</div>` : ''}
+        <div class="version-row"><span class="k">ASR 提供方</span><span class="v">${esc(asr.provider || 'off')} · ${asr.configured ? esc(asr.model_version || '已配置') : '未启用'}</span></div>
+        ${asr.reason ? `<div class="tiny muted" style="color:var(--amber)">${esc(asr.reason)}</div>` : ''}
         <div class="sep"></div>
         <div class="version-row"><span class="k">调用次数</span><span class="v">${data.ai_calls.count}</span></div>
         <div class="version-row"><span class="k">P95 延迟</span><span class="v">${num(data.ai_calls.p95_latency_ms, 2)} ms</span></div>

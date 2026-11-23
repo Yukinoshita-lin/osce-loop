@@ -25,6 +25,8 @@ def create_ingested_attempt(
     media_url: str | None,
     media_filename: str | None,
     media_size_bytes: int = 0,
+    transcript_source: str = "upload",
+    asr_model: str | None = None,
     actor: str = "考务录入",
 ) -> str:
     if not transcript:
@@ -100,6 +102,8 @@ def create_ingested_attempt(
             "media_size_bytes": media_size_bytes,
             "retention_class": plan["retention_class"],
             "retain_until": plan["retain_until"],
+            "transcript_source": transcript_source,
+            "asr_model": asr_model,
             "integrity_gap": bool(integrity_gap),
         },
         model_version=gateway.model_version,
