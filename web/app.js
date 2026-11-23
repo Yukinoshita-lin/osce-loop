@@ -2171,10 +2171,25 @@ document.addEventListener('click', async (e) => {
     try {
       const result = await api('/api/bundles/validate', {
         method: 'POST',
-        body: { payload: state.bundlePayload },
+        body: {
+          payload: state.bundlePayload,
+          base_bundle_id: state.bundleCurrent ? state.bundleCurrent.bundle_id : null,
+        },
       });
       const v = result.validation;
       const counts = result.derived_counts || {};
+      const diff = result.diff;
+      const changesHtml = diff ? `
+        <div style="margin-top:6px">
+          <span class="pill purple">差异审阅</span>
+          <span>${diff.has_changes
+            ? `${diff.summary.changed_items} 项修改 · ${diff.summary.added_items} 项新增 · ${diff.summary.removed_items} 项删除${diff.summary.other_changes ? ` · ${diff.summary.other_changes} 处其他变更` : ''}`
+            : '与当前站包内容一致'}</span>
+          ${diff.station.length ? `<div style="margin-top:3px">${diff.station.map((s) => `${esc(s.field)}：${esc(s.before ?? '—')} → ${esc(s.after ?? '—')}`).join('；')}</div>` : ''}
+          ${diff.rubric.changed.length ? `<div>修改项：${diff.rubric.changed.map((c) => `${esc(c.item_id)}（${esc(c.fields.join('/'))}）`).join('、')}</div>` : ''}
+          ${diff.rubric.added.length ? `<div>新增项：${diff.rubric.added.map(esc).join('、')}</div>` : ''}
+          ${diff.rubric.removed.length ? `<div>删除项：${diff.rubric.removed.map(esc).join('、')}</div>` : ''}
+        </div>` : '';
       const checksHtml = v.checks.map((c) => `
         <div style="margin-top:4px">
           <span class="pill ${c.status === 'pass' ? 'teal' : c.status === 'warn' ? 'amber' : 'red'}">${esc(c.label)}</span>
@@ -2185,6 +2200,7 @@ document.addEventListener('click', async (e) => {
         <div>${v.can_freeze ? '<span class="pill teal">可冻结</span>' : '<span class="pill red">存在阻断项</span>'}
           ${counts.items || 0} 个评分项 · 派生 ${counts.slots || 0} 个信息槽 / ${counts.probes || 0} 个探针</div>
         ${checksHtml}
+        ${changesHtml}
         ${v.blocking.length ? `<div style="margin-top:4px;color:var(--red)">${esc(v.blocking.slice(0, 3).join('；'))}</div>` : ''}`;
       toast(v.can_freeze ? '校验通过，可签字冻结' : `校验未通过：${v.blocking.length} 个阻断项`, !v.can_freeze);
     } catch (err) {

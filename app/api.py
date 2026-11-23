@@ -51,6 +51,7 @@ from .domain.auth import (
 )
 from .domain.bundle import (
     apply_authority_reset,
+    diff_payloads,
     effective_authority,
     freeze_bundle,
     get_bundle,
@@ -1075,6 +1076,7 @@ def bundle_detail(bundle_id: str, conn=Depends(get_conn)):
 
 class BundlePayloadBody(BaseModel):
     payload: dict[str, Any]
+    base_bundle_id: str | None = None
 
 
 class BundleFreezeBody(BaseModel):
@@ -1085,13 +1087,19 @@ class BundleFreezeBody(BaseModel):
 
 
 @app.post("/api/bundles/validate")
-def validate_bundle_proposal(body: BundlePayloadBody):
+def validate_bundle_proposal(body: BundlePayloadBody, conn=Depends(get_conn)):
     validation = validate_bundle(body.payload)
     try:
         counts = derive_assets(body.payload)["counts"]
     except (KeyError, TypeError, ValueError):
         counts = None
-    return {"validation": validation, "derived_counts": counts}
+    diff = None
+    if body.base_bundle_id:
+        base = get_bundle(conn, body.base_bundle_id)
+        if not base:
+            raise HTTPException(400, "base_bundle_id 指向的站包不存在")
+        diff = diff_payloads(base["payload"], body.payload)
+    return {"validation": validation, "derived_counts": counts, "diff": diff}
 
 
 @app.post("/api/bundles/freeze")

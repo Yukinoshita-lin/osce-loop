@@ -10,7 +10,13 @@ import pytest
 from app import db
 from app.ai.base import Suggestion
 from app.ai.pipeline import _assert_schema
-from app.domain.bundle import apply_authority_reset, effective_authority, freeze_bundle, get_bundle
+from app.domain.bundle import (
+    apply_authority_reset,
+    diff_payloads,
+    effective_authority,
+    freeze_bundle,
+    get_bundle,
+)
 from app.domain.rubric import (
     cap_authority,
     derive_assets,
@@ -100,6 +106,30 @@ def test_incomplete_bundle_payload_is_blocked():
     validation = validate_bundle(empty_rubric)
     assert validation["can_freeze"] is False
     assert any("rubric" in issue for issue in validation["blocking"])
+
+
+def test_diff_payloads_reports_station_and_rubric_changes():
+    base = build_bundle_payload()
+    proposal = copy.deepcopy(base)
+    proposal["title"] = "急性胸痛：修订版"
+    proposal["rubric"][0]["anchor"]["positive"] += "，并复述患者姓名"
+    proposal["rubric"].pop(1)
+    added_item = copy.deepcopy(base["rubric"][2])
+    added_item["item_id"] = "NEW.01"
+    proposal["rubric"].append(added_item)
+
+    diff = diff_payloads(base, proposal)
+    assert diff["has_changes"] is True
+    assert diff["summary"]["station_changes"] == 1
+    assert diff["summary"]["changed_items"] == 1
+    assert diff["summary"]["removed_items"] == 1
+    assert diff["summary"]["added_items"] == 1
+    assert diff["station"][0]["field"] == "title"
+    assert diff["rubric"]["changed"][0]["item_id"] == "OP.01"
+    assert "anchor" in diff["rubric"]["changed"][0]["fields"]
+    assert diff["rubric"]["removed"] == ["OP.02"]
+    assert diff["rubric"]["added"] == ["NEW.01"]
+    assert diff_payloads(base, copy.deepcopy(base))["has_changes"] is False
 
 
 def test_observability_requires_verifiable_verb():

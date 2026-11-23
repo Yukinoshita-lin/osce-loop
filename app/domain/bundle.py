@@ -85,6 +85,81 @@ def freeze_bundle(
     return get_bundle(conn, bundle_id)
 
 
+SCALAR_FIELDS = (
+    "station_id",
+    "title",
+    "version",
+    "duration_min",
+    "pass_line",
+    "risk_level_default",
+)
+
+
+def diff_payloads(base: dict[str, Any], proposal: dict[str, Any]) -> dict[str, Any]:
+    """冻结前差异审阅：按评分项与指南条款结构化对比两份 payload。"""
+    station_changes = [
+        {"field": field, "before": base.get(field), "after": proposal.get(field)}
+        for field in SCALAR_FIELDS
+        if base.get(field) != proposal.get(field)
+    ]
+
+    base_items = {item.get("item_id"): item for item in base.get("rubric") or []}
+    new_items = {item.get("item_id"): item for item in proposal.get("rubric") or []}
+    added = sorted(new_items.keys() - base_items.keys(), key=str)
+    removed = sorted(base_items.keys() - new_items.keys(), key=str)
+    changed: list[dict[str, Any]] = []
+    for item_id in sorted(base_items.keys() & new_items.keys(), key=str):
+        before = base_items[item_id]
+        after = new_items[item_id]
+        if canonical_json(before) == canonical_json(after):
+            continue
+        fields = sorted(
+            key
+            for key in set(before) | set(after)
+            if canonical_json(before.get(key)) != canonical_json(after.get(key))
+        )
+        changed.append({"item_id": item_id, "fields": fields})
+
+    base_kb = {entry.get("ref"): entry for entry in base.get("guideline_kb") or [] if entry.get("ref")}
+    new_kb = {entry.get("ref"): entry for entry in proposal.get("guideline_kb") or [] if entry.get("ref")}
+    guideline_added = sorted(new_kb.keys() - base_kb.keys(), key=str)
+    guideline_removed = sorted(base_kb.keys() - new_kb.keys(), key=str)
+    guideline_changed = sorted(
+        (
+            ref
+            for ref in base_kb.keys() & new_kb.keys()
+            if canonical_json(base_kb[ref]) != canonical_json(new_kb[ref])
+        ),
+        key=str,
+    )
+
+    other_changes = [
+        field
+        for field in ("candidate_instructions", "instruction_item_refs", "extra_slots", "sp_profile")
+        if canonical_json(base.get(field)) != canonical_json(proposal.get(field))
+    ]
+    summary = {
+        "station_changes": len(station_changes),
+        "added_items": len(added),
+        "removed_items": len(removed),
+        "changed_items": len(changed),
+        "guideline_changes": len(guideline_added) + len(guideline_removed) + len(guideline_changed),
+        "other_changes": len(other_changes),
+    }
+    return {
+        "has_changes": any(summary.values()),
+        "summary": summary,
+        "station": station_changes,
+        "rubric": {"added": added, "removed": removed, "changed": changed},
+        "guidelines": {
+            "added": guideline_added,
+            "removed": guideline_removed,
+            "changed": guideline_changed,
+        },
+        "other_changes": other_changes,
+    }
+
+
 def get_bundle(conn, bundle_id: str) -> dict[str, Any] | None:
     row = conn.execute("SELECT * FROM bundles WHERE bundle_id = ?", (bundle_id,)).fetchone()
     if not row:
