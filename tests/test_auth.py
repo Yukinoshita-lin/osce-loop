@@ -9,6 +9,7 @@ from app.domain.auth import (
     create_session,
     ensure_users,
     hash_password,
+    media_allowed,
     resolve_token,
     revoke_token,
     rbac_allowed,
@@ -84,3 +85,22 @@ def test_student_user_is_bound_to_candidate(conn):
     student = authenticate(conn, "student", "student123")
     assert student["role"] == "student"
     assert student["candidate_code"] == "C2026-001"
+
+
+def test_media_access_is_limited_to_own_attempts(conn):
+    student = authenticate(conn, "student", "student123")
+    admin = authenticate(conn, "admin", "admin123")
+    for attempt_id, code, media_url in [
+        ("att-own", "C2026-001", "/media/own.wav"),
+        ("att-other", "C2026-002", "/media/other.wav"),
+    ]:
+        conn.execute(
+            "INSERT INTO attempts(attempt_id, bundle_id, candidate_code, candidate_name, session_id, risk_level, "
+            "media_url, duration_ms, integrity_gap, appeal, status, ab_group, created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (attempt_id, "bnd", code, "考生", "SES", "L1", media_url, 1000, 0, 0, "scored", "ai_assisted", db.now_iso()),
+        )
+    conn.commit()
+    assert media_allowed(conn, student, "/media/own.wav") is True
+    assert media_allowed(conn, student, "/media/other.wav") is False
+    assert media_allowed(conn, admin, "/media/other.wav") is True

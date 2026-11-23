@@ -32,6 +32,7 @@ from .domain.auth import (
     authenticate,
     create_session,
     ensure_users,
+    media_allowed,
     resolve_token,
     revoke_token,
     rbac_allowed,
@@ -140,6 +141,8 @@ async def auth_middleware(request: Request, call_next):
         conn = db.connect()
         try:
             user = resolve_token(conn, token)
+            if user and not media_allowed(conn, user, path):
+                return JSONResponse({"detail": "无权访问该媒体文件"}, status_code=403)
         finally:
             conn.close()
         if not user:
@@ -1289,6 +1292,11 @@ def audit(conn=Depends(get_conn), limit: int = Query(100, ge=1, le=500)):
     return db.rows_to_dicts(
         conn.execute("SELECT * FROM audit_events ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
     )
+
+
+@app.get("/api/audit/verify")
+def audit_verify(conn=Depends(get_conn)):
+    return db.verify_audit_chain(conn)
 
 
 @app.get("/api/sp/persona")

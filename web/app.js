@@ -1816,7 +1816,11 @@ async function viewQuality() {
         ${modelCards || '<div class="empty">暂无模型卡</div>'}
       </div>
       <div class="card">
-        <div class="card-title">审计事件<span class="sub">只追加 · 可追溯</span></div>
+        <div class="card-title">审计事件<span class="sub">只追加 · 哈希链可验证</span></div>
+        <div class="btn-row" style="margin-bottom:8px">
+          <button class="btn small" data-action="verify-audit">校验审计链</button>
+        </div>
+        <div id="audit-chain-result" class="tiny muted" style="margin-bottom:8px">尚未校验。校验会逐条重算 prev_hash 与事件哈希。</div>
         <div class="audit-list">${auditRows || '<div class="empty">暂无审计</div>'}</div>
       </div>
     </div>
@@ -1847,6 +1851,21 @@ document.addEventListener('click', async (e) => {
       });
       toast('风险等级已上调为 L3，该场次全部记录进入人工复核');
       await viewReview();
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'verify-audit') {
+    try {
+      const result = await api('/api/audit/verify');
+      const box = $('#audit-chain-result');
+      if (box) {
+        box.innerHTML = result.ok
+          ? `<span class="pill teal">完整</span> 共 ${result.total} 条事件，prev_hash 与事件哈希全部一致。`
+          : `<span class="pill red">异常</span> 第 ${result.index} 条（${esc(result.broken_at)}）${esc(result.message)}`;
+      }
+      toast(result.ok ? `审计链完整：${result.total} 条` : '审计链校验失败', !result.ok);
     } catch (err) {
       toast(err.message, true);
     }

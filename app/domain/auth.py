@@ -150,6 +150,19 @@ def revoke_token(conn, token: str) -> None:
     conn.commit()
 
 
+def media_allowed(conn, user: dict[str, Any], path: str) -> bool:
+    if user.get("role") != "student":
+        return True
+    candidate_code = user.get("candidate_code")
+    if not candidate_code:
+        return False
+    row = conn.execute(
+        "SELECT 1 FROM attempts WHERE media_url = ? AND candidate_code = ? LIMIT 1",
+        (path, candidate_code),
+    ).fetchone()
+    return row is not None
+
+
 def rbac_allowed(method: str, path: str, role: str) -> bool:
     if role == "admin":
         return True

@@ -1,6 +1,7 @@
 """SQLite 数据层：只做存取，业务规则放在 domain 中。"""
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import uuid
@@ -104,6 +105,8 @@ CREATE TABLE IF NOT EXISTS audit_events (
     after TEXT,
     model_version TEXT,
     prompt_version TEXT,
+    prev_hash TEXT,
+    event_hash TEXT,
     created_at TEXT NOT NULL
 );
 
@@ -374,6 +377,17 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if "candidate_code" not in user_columns:
         conn.execute("ALTER TABLE users ADD COLUMN candidate_code TEXT")
 
+    audit_columns = {row["name"] for row in conn.execute("PRAGMA table_info(audit_events)").fetchall()}
+    if "prev_hash" not in audit_columns:
+        conn.execute("ALTER TABLE audit_events ADD COLUMN prev_hash TEXT")
+    if "event_hash" not in audit_columns:
+        conn.execute("ALTER TABLE audit_events ADD COLUMN event_hash TEXT")
+    missing = conn.execute(
+        "SELECT COUNT(*) AS n FROM audit_events WHERE event_hash IS NULL"
+    ).fetchone()["n"]
+    if missing:
+        _backfill_audit_chain(conn)
+
 
 def rows_to_dicts(rows: Iterable[sqlite3.Row]) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
@@ -393,6 +407,80 @@ def set_state(conn: sqlite3.Connection, key: str, value: str) -> None:
     conn.commit()
 
 
+def _audit_event_hash(fields: dict[str, Any], prev_hash: str) -> str:
+    payload = {**fields, "prev_hash": prev_hash}
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def _backfill_audit_chain(conn: sqlite3.Connection) -> None:
+    rows = conn.execute("SELECT * FROM audit_events ORDER BY rowid").fetchall()
+    prev_hash = ""
+    for row in rows:
+        fields = {
+            "event_id": row["event_id"],
+            "actor": row["actor"],
+            "action": row["action"],
+            "object_type": row["object_type"],
+            "object_id": row["object_id"],
+            "before": row["before"],
+            "after": row["after"],
+            "model_version": row["model_version"],
+            "prompt_version": row["prompt_version"],
+            "created_at": row["created_at"],
+        }
+        event_hash = _audit_event_hash(fields, prev_hash)
+        conn.execute(
+            "UPDATE audit_events SET prev_hash = ?, event_hash = ? WHERE event_id = ?",
+            (prev_hash, event_hash, row["event_id"]),
+        )
+        prev_hash = event_hash
+    conn.commit()
+
+
+def verify_audit_chain(conn: sqlite3.Connection) -> dict[str, Any]:
+    rows = conn.execute("SELECT * FROM audit_events ORDER BY rowid").fetchall()
+    prev_hash = ""
+    for index, row in enumerate(rows, start=1):
+        if (row["prev_hash"] or "") != prev_hash:
+            return {
+                "ok": False,
+                "total": len(rows),
+                "broken_at": row["event_id"],
+                "index": index,
+                "message": "prev_hash 与上一条事件不一致",
+            }
+        fields = {
+            "event_id": row["event_id"],
+            "actor": row["actor"],
+            "action": row["action"],
+            "object_type": row["object_type"],
+            "object_id": row["object_id"],
+            "before": row["before"],
+            "after": row["after"],
+            "model_version": row["model_version"],
+            "prompt_version": row["prompt_version"],
+            "created_at": row["created_at"],
+        }
+        expected = _audit_event_hash(fields, prev_hash)
+        if (row["event_hash"] or "") != expected:
+            return {
+                "ok": False,
+                "total": len(rows),
+                "broken_at": row["event_id"],
+                "index": index,
+                "message": "事件内容与哈希不一致，疑似被篡改",
+            }
+        prev_hash = row["event_hash"]
+    return {
+        "ok": True,
+        "total": len(rows),
+        "broken_at": None,
+        "index": None,
+        "message": "审计链完整",
+    }
+
+
 def append_audit(
     conn: sqlite3.Connection,
     *,
@@ -406,20 +494,42 @@ def append_audit(
     prompt_version: str | None = None,
 ) -> str:
     event_id = new_id("ev")
+    timestamp = now_iso()
+    before_json = json.dumps(before, ensure_ascii=False) if before is not None else None
+    after_json = json.dumps(after, ensure_ascii=False) if after is not None else None
+    last = conn.execute(
+        "SELECT event_hash FROM audit_events ORDER BY rowid DESC LIMIT 1"
+    ).fetchone()
+    prev_hash = (last["event_hash"] or "") if last else ""
+    fields = {
+        "event_id": event_id,
+        "actor": actor,
+        "action": action,
+        "object_type": object_type,
+        "object_id": object_id,
+        "before": before_json,
+        "after": after_json,
+        "model_version": model_version,
+        "prompt_version": prompt_version,
+        "created_at": timestamp,
+    }
+    event_hash = _audit_event_hash(fields, prev_hash)
     conn.execute(
         "INSERT INTO audit_events(event_id, actor, action, object_type, object_id, before, after, "
-        "model_version, prompt_version, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        "model_version, prompt_version, prev_hash, event_hash, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             event_id,
             actor,
             action,
             object_type,
             object_id,
-            json.dumps(before, ensure_ascii=False) if before is not None else None,
-            json.dumps(after, ensure_ascii=False) if after is not None else None,
+            before_json,
+            after_json,
             model_version,
             prompt_version,
-            now_iso(),
+            prev_hash,
+            event_hash,
+            timestamp,
         ),
     )
     conn.commit()
