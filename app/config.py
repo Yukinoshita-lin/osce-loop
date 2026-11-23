@@ -37,6 +37,10 @@ AI_MODEL = os.getenv("OSCELOOP_AI_MODEL", "").strip()
 AI_TIMEOUT_SECONDS = float(os.getenv("OSCELOOP_AI_TIMEOUT_SECONDS", "30"))
 AI_MAX_RETRIES = int(os.getenv("OSCELOOP_AI_MAX_RETRIES", "1"))
 AI_FALLBACK = os.getenv("OSCELOOP_AI_FALLBACK", "mock").strip().lower()
+# 成本计量：单价未配置时只记录 Token/时长，不虚报金额。
+AI_INPUT_PRICE_PER_1K = float(os.getenv("OSCELOOP_AI_INPUT_PRICE_PER_1K", "0"))
+AI_OUTPUT_PRICE_PER_1K = float(os.getenv("OSCELOOP_AI_OUTPUT_PRICE_PER_1K", "0"))
+ASR_PRICE_PER_MINUTE = float(os.getenv("OSCELOOP_ASR_PRICE_PER_MINUTE", "0"))
 
 # ASR：默认关闭，需显式配置 OpenAI 兼容 /audio/transcriptions 服务。
 # 必须返回带说话人标签的分段转写，否则拒绝自动评分，避免角色错位。

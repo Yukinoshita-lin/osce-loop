@@ -53,6 +53,7 @@ VALID_OUTPUT = {
     "confidence": 0.91,
     "evidence": [{"utt_id": "u2", "quote": "疼多久了？有没有向肩膀放射？", "evidence_kind": "utterance"}],
     "rationale": "考生询问了持续时间与放射部位，命中阳性行为锚。",
+    "usage": {"prompt_tokens": 1000, "completion_tokens": 500},
 }
 
 
@@ -86,7 +87,10 @@ class FakeAI:
                 fake.requests.append(body)
                 status, payload = fake.responses.pop(0) if fake.responses else (500, {"error": "empty"})
                 if isinstance(payload, dict) and "choices" not in payload and "error" not in payload:
+                    usage = payload.get("usage")
                     payload = {"choices": [{"message": {"content": json.dumps(payload)}}]}
+                    if usage is not None:
+                        payload["usage"] = usage
                 raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
@@ -127,7 +131,9 @@ def _provider(fake_ai, max_retries: int = 0) -> HttpScoringProvider:
 
 def test_http_provider_scores_with_verifiable_evidence(fake_ai):
     fake_ai.enqueue(200, VALID_OUTPUT)
-    suggestion = _provider(fake_ai).score_item(item=ITEM, transcript=TRANSCRIPT, attempt_meta=ATTEMPT_META)
+    provider = _provider(fake_ai)
+    suggestion = provider.score_item(item=ITEM, transcript=TRANSCRIPT, attempt_meta=ATTEMPT_META)
+    assert provider.last_usage == {"prompt_tokens": 1000, "completion_tokens": 500}
     assert isinstance(suggestion, Suggestion)
     assert suggestion.score == 2
     assert suggestion.confidence == 0.91
@@ -245,6 +251,28 @@ def test_degraded_scores_are_forced_to_human_review(conn):
         assert row["status"] == "pending_review"
         assert row["final_score"] is None
         assert row["model_version"] == "mock-score-1.0"
+
+
+def test_gateway_records_tokens_and_cost(fake_ai, conn, monkeypatch):
+    monkeypatch.setattr("app.ai.base.AI_INPUT_PRICE_PER_1K", 0.01)
+    monkeypatch.setattr("app.ai.base.AI_OUTPUT_PRICE_PER_1K", 0.02)
+    fake_ai.enqueue(200, VALID_OUTPUT)
+    gateway = CapabilityGateway(conn, _provider(fake_ai), "test-model", "test-prompt")
+    response = gateway.score_item(
+        item=ITEM,
+        transcript=TRANSCRIPT,
+        attempt_meta=ATTEMPT_META,
+        subject_ref="att_cost:HX.01",
+    )
+    assert response["input_tokens"] == 1000
+    assert response["output_tokens"] == 500
+    assert response["cost_usd"] == 0.02
+    call = conn.execute("SELECT * FROM ai_calls ORDER BY rowid DESC LIMIT 1").fetchone()
+    assert call["input_tokens"] == 1000
+    assert call["output_tokens"] == 500
+    assert call["cost_usd"] == 0.02
+    detail = json.loads(call["detail"])
+    assert detail["input_tokens"] == 1000
 
 
 def test_gateway_without_fallback_raises_and_logs_error(fake_ai, conn):

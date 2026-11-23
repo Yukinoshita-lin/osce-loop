@@ -194,6 +194,17 @@ def test_asr_gateway_logs_call(fake_asr, audio_path, conn):
     assert detail["utterances"] == 2
     assert detail["candidate_utterances"] == 1
     assert detail["patient_utterances"] == 1
+    assert call["cost_usd"] == 0.0
+
+
+def test_asr_gateway_records_duration_cost(fake_asr, audio_path, conn, monkeypatch):
+    monkeypatch.setattr("app.ai.base.ASR_PRICE_PER_MINUTE", 0.6)
+    fake_asr.enqueue(200, ASR_OUTPUT)
+    gateway = CapabilityGateway(conn, _provider(fake_asr), "test-asr", "asr-prompt-1.0")
+    response = gateway.transcribe_media(media_path=audio_path, subject_ref="media:cost")
+    assert response["cost_usd"] == 0.06
+    call = conn.execute("SELECT * FROM ai_calls ORDER BY rowid DESC LIMIT 1").fetchone()
+    assert call["cost_usd"] == 0.06
 
 
 def test_asr_gateway_logs_error(fake_asr, audio_path, conn):

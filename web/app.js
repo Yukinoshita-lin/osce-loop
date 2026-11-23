@@ -1908,6 +1908,8 @@ async function viewQuality() {
         <div class="version-row"><span class="k">调用次数</span><span class="v">${data.ai_calls.count}</span></div>
         <div class="version-row"><span class="k">P95 延迟</span><span class="v">${num(data.ai_calls.p95_latency_ms, 2)} ms</span></div>
         <div class="version-row"><span class="k">平均延迟</span><span class="v">${num(data.ai_calls.avg_latency_ms, 2)} ms</span></div>
+        <div class="version-row"><span class="k">Token 输入 / 输出</span><span class="v">${data.ai_calls.input_tokens} / ${data.ai_calls.output_tokens}</span></div>
+        <div class="version-row"><span class="k">估算成本（USD）</span><span class="v">$${num(data.ai_calls.total_cost_usd, 4)}${data.ai_calls.pricing_configured ? '' : ' · 单价未配置'}</span></div>
         <div class="version-row"><span class="k">能力</span><span class="v">${data.ai_calls.by_capability.map((x) => `${esc(x.key)}:${x.count}`).join(' · ')}</span></div>
         <div class="version-row"><span class="k">状态</span><span class="v">${data.ai_calls.by_status.map((x) => `${esc(x.key)}:${x.count}`).join(' · ')}</span></div>
         <div class="sep"></div>

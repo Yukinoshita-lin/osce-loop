@@ -157,6 +157,7 @@ class HttpASRProvider:
         self.api_key = api_key
         self.timeout = max(1.0, float(timeout))
         self.max_retries = max(0, min(3, int(max_retries)))
+        self.last_usage: dict[str, Any] | None = None
 
     def transcribe_media(
         self,
@@ -169,6 +170,7 @@ class HttpASRProvider:
         media_path = Path(path)
         if not media_path.is_file():
             raise ASRError(f"媒体文件不存在：{media_path.name}")
+        self.last_usage = None
         segments = self._post(media_path, language=language)
         return normalize_asr_segments(
             segments,
@@ -218,6 +220,15 @@ class HttpASRProvider:
                     payload = json.loads(raw)
                 except json.JSONDecodeError as exc:
                     raise ASRError("ASR 响应不是合法 JSON") from exc
+                if isinstance(payload, dict):
+                    usage = payload.get("usage")
+                    if isinstance(usage, dict):
+                        self.last_usage = usage
+                    elif payload.get("duration") is not None:
+                        try:
+                            self.last_usage = {"duration_seconds": float(payload["duration"])}
+                        except (TypeError, ValueError):
+                            self.last_usage = None
                 return self._segments(payload)
             except urllib.error.HTTPError as exc:
                 reason = str(exc.reason or "")

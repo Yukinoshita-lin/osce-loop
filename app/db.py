@@ -151,6 +151,9 @@ CREATE TABLE IF NOT EXISTS ai_calls (
     subject_ref TEXT,
     latency_ms REAL NOT NULL,
     status TEXT NOT NULL,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    cost_usd REAL,
     detail TEXT,
     created_at TEXT NOT NULL
 );
@@ -428,6 +431,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
     ).fetchone()["n"]
     if missing:
         _backfill_audit_chain(conn)
+
+    call_columns = {row["name"] for row in conn.execute("PRAGMA table_info(ai_calls)").fetchall()}
+    if "input_tokens" not in call_columns:
+        conn.execute("ALTER TABLE ai_calls ADD COLUMN input_tokens INTEGER")
+    if "output_tokens" not in call_columns:
+        conn.execute("ALTER TABLE ai_calls ADD COLUMN output_tokens INTEGER")
+    if "cost_usd" not in call_columns:
+        conn.execute("ALTER TABLE ai_calls ADD COLUMN cost_usd REAL")
 
     cert_columns = {
         row["name"] for row in conn.execute("PRAGMA table_info(sp_certifications)").fetchall()
@@ -768,11 +779,15 @@ def log_ai_call(
     subject_ref: str | None,
     latency_ms: float,
     status: str,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    cost_usd: float | None = None,
     detail: Any = None,
 ) -> None:
     conn.execute(
         "INSERT INTO ai_calls(call_id, capability, model_version, prompt_version, subject_ref, "
-        "latency_ms, status, detail, created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+        "latency_ms, status, input_tokens, output_tokens, cost_usd, detail, created_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             new_id("call"),
             capability,
@@ -781,6 +796,9 @@ def log_ai_call(
             subject_ref,
             round(latency_ms, 2),
             status,
+            input_tokens,
+            output_tokens,
+            round(cost_usd, 6) if cost_usd is not None else None,
             json.dumps(detail, ensure_ascii=False) if detail is not None else None,
             now_iso(),
         ),

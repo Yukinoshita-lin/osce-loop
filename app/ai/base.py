@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from .. import db
+from ..config import AI_INPUT_PRICE_PER_1K, AI_OUTPUT_PRICE_PER_1K, ASR_PRICE_PER_MINUTE
 
 
 @dataclass
@@ -155,7 +156,15 @@ class CapabilityGateway:
             raise
 
         latency_ms = (time.perf_counter() - started) * 1000
-        detail.update({"status": status})
+        input_tokens, output_tokens, cost_usd = self._usage_metrics(capability)
+        detail.update(
+            {
+                "status": status,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "cost_usd": cost_usd,
+            }
+        )
         if isinstance(output, Suggestion):
             detail.update(
                 {
@@ -183,6 +192,9 @@ class CapabilityGateway:
             subject_ref=subject_ref,
             latency_ms=latency_ms,
             status=status,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost_usd=cost_usd,
             detail=detail,
         )
         return {
@@ -192,7 +204,45 @@ class CapabilityGateway:
             "model_version": used_model,
             "prompt_version": used_prompt,
             "latency_ms": round(latency_ms, 2),
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cost_usd": cost_usd,
         }
+
+    def _usage_metrics(self, capability: str) -> tuple[int | None, int | None, float | None]:
+        usage = getattr(self.provider, "last_usage", None) or {}
+
+        def as_int(*keys: str) -> int | None:
+            for key in keys:
+                value = usage.get(key)
+                if value is None:
+                    continue
+                try:
+                    return int(value)
+                except (TypeError, ValueError):
+                    continue
+            return None
+
+        input_tokens = as_int("input_tokens", "prompt_tokens")
+        output_tokens = as_int("output_tokens", "completion_tokens")
+        measured = False
+        cost = 0.0
+        if input_tokens:
+            cost += input_tokens / 1000 * AI_INPUT_PRICE_PER_1K
+            measured = True
+        if output_tokens:
+            cost += output_tokens / 1000 * AI_OUTPUT_PRICE_PER_1K
+            measured = True
+        duration = usage.get("duration_seconds")
+        if duration is None:
+            duration = usage.get("duration")
+        if capability == "asr.transcribe" and duration is not None:
+            try:
+                cost += float(duration) / 60 * ASR_PRICE_PER_MINUTE
+                measured = True
+            except (TypeError, ValueError):
+                pass
+        return input_tokens, output_tokens, round(cost, 6) if measured else None
 
 
 def suggestion_to_dict(suggestion: Suggestion) -> dict[str, Any]:

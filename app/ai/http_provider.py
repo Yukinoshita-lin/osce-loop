@@ -87,6 +87,7 @@ class HttpScoringProvider:
         self.api_key = api_key
         self.timeout = max(1.0, float(timeout))
         self.max_retries = max(0, min(5, int(max_retries)))
+        self.last_usage: dict[str, Any] | None = None
 
     def score_item(
         self,
@@ -95,6 +96,7 @@ class HttpScoringProvider:
         transcript: list[dict[str, Any]],
         attempt_meta: dict[str, Any],
     ) -> Suggestion:
+        self.last_usage = None
         body = {
             "model": self.model,
             "temperature": 0,
@@ -157,9 +159,12 @@ class HttpScoringProvider:
                 with urllib.request.urlopen(request, timeout=self.timeout) as response:
                     raw = response.read().decode("utf-8")
                 try:
-                    return json.loads(raw)
+                    payload = json.loads(raw)
                 except json.JSONDecodeError as exc:
                     raise ProviderError("AI 响应不是合法 JSON") from exc
+                if isinstance(payload, dict) and isinstance(payload.get("usage"), dict):
+                    self.last_usage = payload["usage"]
+                return payload
             except urllib.error.HTTPError as exc:
                 reason = str(exc.reason or "")
                 try:

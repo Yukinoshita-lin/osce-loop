@@ -18,6 +18,9 @@ from .ai.asr import ASRError, build_asr_provider
 from .ai.base import CapabilityGateway
 from .ai.factory import build_scoring_provider, scoring_provider_info
 from .config import (
+    AI_INPUT_PRICE_PER_1K,
+    AI_OUTPUT_PRICE_PER_1K,
+    ASR_PRICE_PER_MINUTE,
     ASR_PROMPT_VERSION,
     LOGIN_WINDOW_SECONDS,
     MEDIA_DIR,
@@ -1115,6 +1118,13 @@ def quality(conn=Depends(get_conn)):
     calls = db.rows_to_dicts(conn.execute("SELECT * FROM ai_calls ORDER BY created_at DESC LIMIT 400").fetchall())
     latencies = sorted(c["latency_ms"] for c in calls)
     p95 = latencies[int(len(latencies) * 0.95) - 1] if latencies else None
+    input_tokens = sum(c["input_tokens"] or 0 for c in calls)
+    output_tokens = sum(c["output_tokens"] or 0 for c in calls)
+    total_cost = round(sum(c["cost_usd"] or 0 for c in calls), 6)
+    cost_by_capability: dict[str, float] = {}
+    for call in calls:
+        key = call["capability"] or "unknown"
+        cost_by_capability[key] = round(cost_by_capability.get(key, 0.0) + (call["cost_usd"] or 0), 6)
     return {
         "report": report,
         "gates": gates,
@@ -1125,6 +1135,14 @@ def quality(conn=Depends(get_conn)):
             "avg_latency_ms": round(sum(latencies) / len(latencies), 2) if latencies else None,
             "by_capability": _count_by(calls, "capability"),
             "by_status": _count_by(calls, "status"),
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_cost_usd": total_cost,
+            "priced_calls": sum(1 for c in calls if c["cost_usd"] is not None),
+            "cost_by_capability": cost_by_capability,
+            "pricing_configured": any(
+                [AI_INPUT_PRICE_PER_1K, AI_OUTPUT_PRICE_PER_1K, ASR_PRICE_PER_MINUTE]
+            ),
         },
         "overrides": list_overrides(conn),
         "sp_certification": certification_for_bundle(conn, bundles_list[0])
