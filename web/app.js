@@ -1892,11 +1892,13 @@ function calibrationSectionHtml(cal) {
 }
 
 async function viewQuality() {
-  const [data, audit, retention] = await Promise.all([
+  const [data, audit, retention, backupsData] = await Promise.all([
     api('/api/quality'),
     api('/api/audit?limit=30'),
     api('/api/retention'),
+    api('/api/ops/backups'),
   ]);
+  const backups = backupsData.backups || [];
   const report = data.report;
   const gates = data.gates.gates;
   const stageLabels = {
@@ -2047,11 +2049,13 @@ async function viewQuality() {
       <div class="card">
         <div class="card-title">审计事件<span class="sub">只追加 · 哈希链 + 外部锚点</span></div>
         <div class="tiny muted" style="margin-bottom:8px">外部锚点：${anchors.length ? `${anchors.length} 个 · 最近 ${fmtTime(anchors[0].created_at)}` : '尚未写入'}</div>
+        <div class="tiny muted" style="margin-bottom:8px">数据库备份：${backups.length ? `${esc(backups[0].filename)} · ${bytesText(backups[0].size_bytes)} · ${fmtTime(backups[0].created_at)}（共 ${backups.length} 个）` : '尚无备份'}</div>
         <div class="btn-row" style="margin-bottom:8px">
           <button class="btn small" data-action="verify-audit">校验审计链</button>
           <button class="btn small" data-action="create-anchor">写入审计锚点</button>
           <button class="btn small" data-action="verify-anchor">校验外部锚点</button>
           <button class="btn small" data-action="ops-health">运行健康检查</button>
+          ${state.user && ['admin', 'exam_manager'].includes(state.user.role) ? '<button class="btn small" data-action="ops-backup">创建数据库备份</button>' : ''}
         </div>
         <div id="audit-chain-result" class="tiny muted" style="margin-bottom:8px">尚未校验。校验会逐条重算 prev_hash 与事件哈希。</div>
         <div id="ops-health-result" class="tiny muted" style="margin-bottom:8px"></div>
@@ -2349,6 +2353,16 @@ document.addEventListener('click', async (e) => {
       toast(result.status === 'ok' ? '健康检查通过' : '健康检查发现降级项', result.status !== 'ok');
     } catch (err) {
       if (box) box.innerHTML = `<span class="pill red">检查失败</span> ${esc(err.message)}`;
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'ops-backup') {
+    try {
+      const result = await api('/api/ops/backup', { method: 'POST', body: {} });
+      toast(`已创建数据库备份：${result.backup.filename}`);
+      await viewQuality();
+    } catch (err) {
       toast(err.message, true);
     }
     return;

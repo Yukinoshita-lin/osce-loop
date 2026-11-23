@@ -49,6 +49,7 @@ from .domain.auth import (
     revoke_token,
     rbac_allowed,
 )
+from .domain.backup import create_backup, list_backups
 from .domain.bundle import (
     apply_authority_reset,
     diff_payloads,
@@ -300,6 +301,20 @@ def healthz():
 @app.get("/api/ops/health")
 def ops_health(conn=Depends(get_conn)):
     return system_health(conn)
+
+
+@app.post("/api/ops/backup")
+def ops_backup(request: Request, conn=Depends(get_conn)):
+    _ensure_not_stopped(conn)
+    return {
+        "ok": True,
+        "backup": create_backup(conn, actor=request.state.user["display_name"]),
+    }
+
+
+@app.get("/api/ops/backups")
+def ops_backups():
+    return {"backups": list_backups(limit=10)}
 
 UPLOAD_DIR = MEDIA_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
