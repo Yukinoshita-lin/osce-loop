@@ -98,6 +98,7 @@ from .domain.spqa import certification_for_bundle, certify_bundle, ensure_certif
 from .domain.stats import domain_scores, quality_report
 from .domain.sus import submit_sus, sus_summary
 from .domain.transcript import parse_transcript
+from .domain.transparency import refresh_transparency_assets
 from .seed import apply_startup_governance, seed_if_empty
 
 
@@ -1478,6 +1479,15 @@ def create_approval(body: ApprovalBody, conn=Depends(get_conn)):
 
 class ModelCardBody(BaseModel):
     actor: str = "系统"
+
+
+@app.post("/api/governance/model-card/refresh")
+def refresh_model_card(request: Request, conn=Depends(get_conn)):
+    _ensure_not_stopped(conn)
+    result = refresh_transparency_assets(
+        conn, actor=request.state.user["display_name"]
+    )
+    return {"ok": True, **result}
 
 
 @app.post("/api/governance/model-card/publish")

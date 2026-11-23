@@ -1954,6 +1954,10 @@ async function viewQuality() {
     <div class="grid c2">
       <div class="card">
         <div class="card-title">模型卡<span class="sub">公开给校内与考生摘要</span></div>
+        <div class="btn-row" style="margin-bottom:8px">
+          <button class="btn small" data-action="refresh-model-card">刷新模型卡与数据表</button>
+          <span class="tiny muted">生成后需在 P3 治理准备中公开</span>
+        </div>
         ${modelCards || '<div class="empty">暂无模型卡</div>'}
       </div>
       <div class="card">
@@ -2095,6 +2099,19 @@ document.addEventListener('click', async (e) => {
           : `<span class="pill red">异常</span> 第 ${result.index} 条（${esc(result.broken_at)}）${esc(result.message)}`;
       }
       toast(result.ok ? `审计链完整：${result.total} 条` : '审计链校验失败', !result.ok);
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'refresh-model-card') {
+    try {
+      const result = await api('/api/governance/model-card/refresh', {
+        method: 'POST',
+        body: {},
+      });
+      toast(`已生成新模型卡与数据表 v${result.data_sheet_version}，待公开`);
+      await viewQuality();
     } catch (err) {
       toast(err.message, true);
     }
