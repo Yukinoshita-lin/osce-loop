@@ -103,6 +103,7 @@ from .domain.scheduling import (
 from .domain.slots import DialogueStateMachine, SPController
 from .domain.spqa import certification_for_bundle, certify_bundle, ensure_certification
 from .domain.stats import domain_scores, quality_report
+from .domain.station_quality import station_quality_report
 from .domain.sus import submit_sus, sus_summary
 from .domain.transcript import parse_transcript
 from .domain.transparency import refresh_transparency_assets
@@ -1274,6 +1275,11 @@ def feedback(attempt_id: str, request: Request, conn=Depends(get_conn)):
         "feedback_quality": summarize_feedback(deductions),
         "feedback_rule": "每条扣分项必须包含：可回放证据 + 对应评分项档位 + 可直接背诵的替代话术。",
     }
+
+
+@app.get("/api/quality/stations")
+def quality_stations(conn=Depends(get_conn)):
+    return {"stations": station_quality_report(conn)}
 
 
 @app.get("/api/quality")

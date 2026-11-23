@@ -62,7 +62,7 @@ def _quote_in_transcript(quote: str, transcript: list[dict[str, Any]], start_ms:
     return False
 
 
-def quality_report(conn) -> dict[str, Any]:
+def quality_report(conn, bundle_id: str | None = None) -> dict[str, Any]:
     attempts = [dict(r) for r in conn.execute("SELECT * FROM attempts").fetchall()]
     records = [dict(r) for r in conn.execute("SELECT * FROM score_records").fetchall()]
     actions = [dict(r) for r in conn.execute("SELECT * FROM review_actions").fetchall()]
@@ -70,6 +70,13 @@ def quality_report(conn) -> dict[str, Any]:
         row["attempt_id"]: json.loads(row["payload"])
         for row in conn.execute("SELECT attempt_id, payload FROM transcripts").fetchall()
     }
+    if bundle_id:
+        attempts = [a for a in attempts if a["bundle_id"] == bundle_id]
+        attempt_ids = {a["attempt_id"] for a in attempts}
+        records = [r for r in records if r["attempt_id"] in attempt_ids]
+        record_ids = {r["record_id"] for r in records}
+        actions = [a for a in actions if a["record_id"] in record_ids]
+        transcripts = {key: value for key, value in transcripts.items() if key in attempt_ids}
     attempt_by_id = {a["attempt_id"]: a for a in attempts}
 
     ai_pairs: list[tuple[int, int]] = []

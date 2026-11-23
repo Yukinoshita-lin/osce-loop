@@ -1920,13 +1920,15 @@ function calibrationSectionHtml(cal) {
 }
 
 async function viewQuality() {
-  const [data, audit, retention, backupsData] = await Promise.all([
+  const [data, audit, retention, backupsData, stationData] = await Promise.all([
     api('/api/quality'),
     api('/api/audit?limit=30'),
     api('/api/retention'),
     api('/api/ops/backups'),
+    api('/api/quality/stations'),
   ]);
   const backups = backupsData.backups || [];
+  const stationQuality = stationData.stations || [];
   const report = data.report;
   const gates = data.gates.gates;
   const stageLabels = {
@@ -1939,6 +1941,18 @@ async function viewQuality() {
   const qwkClass = report.qwk_ai >= 0.7 ? 'teal' : report.qwk_ai >= 0.6 ? 'amber' : 'red';
   const alerts = (data.gates.alerts || []).map((a) => `
     <div class="alert ${a.level === 'danger' ? 'danger' : ''}"><b>${esc(a.title)}</b><p>${esc(a.detail)}</p></div>`).join('');
+  const stationRows = stationQuality.map((s) => `
+    <tr>
+      <td><div style="font-weight:600">${esc(s.station_id)}</div><div class="tiny muted">${esc(s.title)}</div></td>
+      <td><span class="pill ${s.is_latest ? 'teal' : 'muted'}">v${esc(s.version)}</span></td>
+      <td class="num">${s.attempts}</td>
+      <td class="num">${s.records}</td>
+      <td class="num">${s.qwk_ai === null || s.qwk_ai === undefined ? '—' : `<span class="pill ${s.qwk_ai >= 0.7 ? 'teal' : s.qwk_ai >= 0.6 ? 'amber' : 'red'}">${num(s.qwk_ai, 3)}</span>`}</td>
+      <td class="num">${num(s.qwk_human, 3)}</td>
+      <td class="num">${pct(s.evidence_rate, 1)}</td>
+      <td class="num">${pct(s.edit_rate, 1)}</td>
+      <td class="num">${pct(s.integrity_gap_rate, 1)}</td>
+    </tr>`).join('');
   const gateCards = gates.map((gate) => `
     <div class="gate-card ${gate.is_current ? 'current' : ''} ${gate.is_locked ? 'locked' : ''}">
       <div class="gate-head">
@@ -1999,6 +2013,17 @@ async function viewQuality() {
       <div class="kpi blue"><div class="k">证据定位率</div><div class="v">${pct(report.evidence.rate, 0)}</div><div class="d">${report.evidence.localized}/${report.evidence.total} 条片段</div></div>
       <div class="kpi amber"><div class="k">人工编辑率</div><div class="v">${pct(report.review.edit_rate, 0)}</div><div class="d">接受率 ${pct(report.review.accept_rate, 0)} · 复核 ${report.review.reviewed}</div></div>
       <div class="kpi red"><div class="k">证据缺口率</div><div class="v">${pct(report.integrity_gap_rate, 1)}</div><div class="d">目标 ≤ 2% · 触发全站人工</div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">分站质量<span class="sub">按冻结版本 · 识别低区分度考站</span></div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>考站</th><th>版本</th><th class="num">场次</th><th class="num">评分项</th><th class="num">AI QWK</th><th class="num">人工 QWK</th><th class="num">证据定位</th><th class="num">编辑率</th><th class="num">完整性缺口</th></tr></thead>
+          <tbody>${stationRows || '<tr><td colspan="9" class="empty">暂无站包</td></tr>'}</tbody>
+        </table>
+      </div>
+      <div class="tiny muted" style="margin-top:6px">分站 QWK 仅统计该冻结版本下的场次；最新版本无场次时显示为 —。</div>
     </div>
 
     <div class="gates" style="margin-bottom:16px">${gateCards}</div>
