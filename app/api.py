@@ -6,7 +6,7 @@ import time
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import Body, Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -32,8 +32,10 @@ from .domain.bundle import (
     list_overrides,
 )
 from .domain.gates import evaluate_gates
+from .domain.practice import build_practice_report
 from .domain.rubric import AUTHORITY_LABELS, PHASE_LABELS
 from .domain.slots import DialogueStateMachine, SPController
+from .domain.spqa import certify_bundle, ensure_certification, latest_certification
 from .domain.stats import domain_scores, quality_report
 from .seed import apply_startup_governance, seed_if_empty
 
@@ -44,6 +46,7 @@ async def lifespan(app: FastAPI):
     db.init_db(conn)
     seed_if_empty(conn)
     apply_startup_governance(conn)
+    ensure_certification(conn)
     conn.close()
     yield
 
@@ -68,6 +71,18 @@ def _bundle_or_404(conn, bundle_id: str) -> dict[str, Any]:
     if not bundle:
         raise HTTPException(404, "站包不存在")
     return bundle
+
+
+def _resolve_bundle(conn, bundle_id: str | None = None) -> dict[str, Any]:
+    """单站包演示环境：请求了失效 bundle_id 时回退到当前冻结站包，避免页面 500。"""
+    bundles_list = list_bundles(conn)
+    if not bundles_list:
+        raise HTTPException(404, "无站包")
+    if bundle_id:
+        bundle = get_bundle(conn, bundle_id)
+        if bundle:
+            return bundle
+    return bundles_list[0]
 
 
 def _attempt_row(conn, attempt_id: str) -> dict[str, Any]:
@@ -683,6 +698,7 @@ def quality(conn=Depends(get_conn)):
             "by_status": _count_by(calls, "status"),
         },
         "overrides": list_overrides(conn),
+        "sp_certification": latest_certification(conn),
         "versions": {
             "model": db.get_state(conn, "model_version", MODEL_VERSION),
             "prompt": db.get_state(conn, "prompt_version", PROMPT_VERSION),
@@ -749,10 +765,7 @@ def audit(conn=Depends(get_conn), limit: int = Query(100, ge=1, le=500)):
 
 @app.get("/api/sp/persona")
 def sp_persona(bundle_id: str | None = None, conn=Depends(get_conn)):
-    bundles_list = list_bundles(conn)
-    if not bundles_list:
-        raise HTTPException(404, "无站包")
-    bundle = get_bundle(conn, bundle_id) if bundle_id else bundles_list[0]
+    bundle = _resolve_bundle(conn, bundle_id)
     machine = DialogueStateMachine(bundle["payload"], bundle["derived"])
     masked_slots = []
     for s in machine.slots:
@@ -769,11 +782,13 @@ def sp_persona(bundle_id: str | None = None, conn=Depends(get_conn)):
         "bundle_id": bundle["bundle_id"],
         "station_title": bundle["payload"]["title"],
         "persona": bundle["payload"].get("sp_profile"),
+        "persona_version": bundle["bundle_hash"],
         "phases": [
             {"phase": p, "label": PHASE_LABELS.get(p, p)}
             for p in bundle["derived"].get("phase_order", [])
         ],
         "slots": masked_slots,
+        "certification": latest_certification(conn, bundle["bundle_id"]),
     }
 
 
@@ -784,17 +799,14 @@ class SpSessionBody(BaseModel):
 
 @app.post("/api/sp/sessions")
 def create_sp_session(body: SpSessionBody, conn=Depends(get_conn)):
-    bundles_list = list_bundles(conn)
-    if not bundles_list:
-        raise HTTPException(404, "无站包")
-    bundle = get_bundle(conn, body.bundle_id) if body.bundle_id else bundles_list[0]
+    bundle = _resolve_bundle(conn, body.bundle_id)
     machine = DialogueStateMachine(bundle["payload"], bundle["derived"])
     controller = SPController(machine)
     state = machine.start()
     allowed = machine.slots_by_ids(state["released"])
     reply = controller.generate(allowed, machine.persona, 0)
     session_id = db.new_id("sp")
-    messages = [{"role": "patient", "text": reply, "turn": 0}]
+    messages = [{"role": "patient", "text": reply, "turn": 0, "phase": "opening", "at_ms": 0}]
     conn.execute(
         "INSERT INTO sp_sessions(session_id, bundle_id, candidate_label, state, transcript, created_at, updated_at) "
         "VALUES(?,?,?,?,?,?,?)",
@@ -817,7 +829,7 @@ def create_sp_session(body: SpSessionBody, conn=Depends(get_conn)):
         object_id=session_id,
         after={"bundle_id": bundle["bundle_id"]},
     )
-    return _sp_payload(session_id, state, messages, reply, None, False, machine)
+    return _sp_payload(session_id, state, messages, reply, None, False, machine, report=None)
 
 
 class SpMessageBody(BaseModel):
@@ -829,18 +841,38 @@ def sp_message(session_id: str, body: SpMessageBody, conn=Depends(get_conn)):
     row = conn.execute("SELECT * FROM sp_sessions WHERE session_id = ?", (session_id,)).fetchone()
     if not row:
         raise HTTPException(404, "会话不存在")
+    finished = conn.execute("SELECT 1 FROM sp_reports WHERE session_id = ?", (session_id,)).fetchone()
+    if finished:
+        raise HTTPException(400, "该练习已生成反馈，请开始新会话")
     session = dict(row)
     bundle = _bundle_or_404(conn, session["bundle_id"])
     machine = DialogueStateMachine(bundle["payload"], bundle["derived"])
     controller = SPController(machine)
     state = json.loads(session["state"])
     messages = json.loads(session["transcript"])
-    messages.append({"role": "candidate", "text": body.text, "turn": state.get("turn", 0) + 1})
+    candidate_at = _next_at(messages)
+    messages.append(
+        {
+            "role": "candidate",
+            "text": body.text,
+            "turn": state.get("turn", 0) + 1,
+            "phase": state.get("phase") or "opening",
+            "at_ms": candidate_at,
+        }
+    )
     started = time.perf_counter()
     result = controller.respond(state, body.text)
     latency = (time.perf_counter() - started) * 1000
     new_state = result["state"]
-    messages.append({"role": "patient", "text": result["reply"], "turn": new_state["turn"]})
+    messages.append(
+        {
+            "role": "patient",
+            "text": result["reply"],
+            "turn": new_state["turn"],
+            "phase": new_state.get("phase"),
+            "at_ms": candidate_at + 4500,
+        }
+    )
     conn.execute(
         "UPDATE sp_sessions SET state = ?, transcript = ?, updated_at = ? WHERE session_id = ?",
         (
@@ -872,7 +904,116 @@ def sp_message(session_id: str, body: SpMessageBody, conn=Depends(get_conn)):
         released_now=result["released_now"],
         transitioned=result["transitioned"],
         intent=result["intent"],
+        report=None,
     )
+
+
+class SpCertBody(BaseModel):
+    bundle_id: str | None = None
+    actor: str = "SP 认证员"
+
+
+@app.post("/api/sp/certification/run")
+def run_sp_certification(body: SpCertBody, conn=Depends(get_conn)):
+    bundle = _resolve_bundle(conn, body.bundle_id)
+    report = certify_bundle(conn, bundle, actor=body.actor)
+    return {"ok": True, "certification": report}
+
+
+@app.get("/api/sp/certifications")
+def sp_certifications(conn=Depends(get_conn), bundle_id: str | None = None):
+    if bundle_id:
+        rows = conn.execute(
+            "SELECT * FROM sp_certifications WHERE bundle_id = ? ORDER BY created_at DESC",
+            (bundle_id,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM sp_certifications ORDER BY created_at DESC"
+        ).fetchall()
+    result = []
+    for row in rows:
+        report = json.loads(row["report"])
+        result.append(
+            {
+                "cert_id": row["cert_id"],
+                "bundle_id": row["bundle_id"],
+                "persona_version": row["persona_version"],
+                "actor": row["actor"],
+                "status": row["status"],
+                "created_at": row["created_at"],
+                "checks": report.get("checks", []),
+                "red_team": {
+                    "case_count": report.get("red_team", {}).get("case_count"),
+                    "passed_cases": report.get("red_team", {}).get("passed_cases"),
+                    "leak_count": report.get("red_team", {}).get("leak_count"),
+                    "fact_error_rate": report.get("red_team", {}).get("fact_error_rate"),
+                    "persona_first_pass_rate": report.get("red_team", {}).get("persona_first_pass_rate"),
+                    "p95_latency_ms": report.get("red_team", {}).get("p95_latency_ms"),
+                },
+                "consistency": report.get("consistency", {}).get("rate"),
+            }
+        )
+    return result
+
+
+@app.post("/api/sp/sessions/{session_id}/finish")
+def finish_sp_session(session_id: str, conn=Depends(get_conn)):
+    row = conn.execute("SELECT * FROM sp_sessions WHERE session_id = ?", (session_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, "会话不存在")
+    session = dict(row)
+    bundle = _bundle_or_404(conn, session["bundle_id"])
+    existing = conn.execute("SELECT report FROM sp_reports WHERE session_id = ?", (session_id,)).fetchone()
+    if existing:
+        return {"ok": True, "report": json.loads(existing["report"])}
+    messages = json.loads(session["transcript"])
+    candidate_turns = sum(1 for m in messages if m.get("role") == "candidate")
+    if candidate_turns == 0:
+        raise HTTPException(400, "至少完成一轮提问后才能生成反馈")
+    report = build_practice_report(bundle, messages)
+    report["session_id"] = session_id
+    report["created_at"] = db.now_iso()
+    conn.execute(
+        "INSERT INTO sp_reports(session_id, bundle_id, report, created_at) VALUES(?,?,?,?)",
+        (session_id, bundle["bundle_id"], json.dumps(report, ensure_ascii=False), report["created_at"]),
+    )
+    conn.commit()
+    db.append_audit(
+        conn,
+        actor=session.get("candidate_label") or "练习学生",
+        action="sp.session_finish",
+        object_type="SpSession",
+        object_id=session_id,
+        before=None,
+        after={
+            "total": report["total"],
+            "coverage": report["coverage"],
+            "deductions": len(report["deductions"]),
+            "uncovered": report["uncovered_count"],
+        },
+        model_version=db.get_state(conn, "sp_model_version", SP_MODEL_VERSION),
+        prompt_version=db.get_state(conn, "sp_prompt_version", SP_PROMPT_VERSION),
+    )
+    return {"ok": True, "report": report}
+
+
+@app.get("/api/sp/sessions/{session_id}/report")
+def get_sp_report(session_id: str, conn=Depends(get_conn)):
+    row = conn.execute("SELECT report FROM sp_reports WHERE session_id = ?", (session_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, "该会话尚未生成反馈")
+    return json.loads(row["report"])
+
+
+def _next_at(messages: list[dict[str, Any]]) -> int:
+    if not messages:
+        return 0
+    last = messages[-1]
+    last_at = last.get("at_ms")
+    if last_at is None:
+        return len(messages) * 6000
+    return int(last_at) + 6000
 
 
 def _sp_payload(
@@ -887,6 +1028,7 @@ def _sp_payload(
     released_now: list[str] | None = None,
     transitioned: bool = False,
     intent: dict[str, Any] | None = None,
+    report: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     released_ids = set(state.get("released", []))
     released_slots = [
@@ -916,6 +1058,8 @@ def _sp_payload(
         "intent": intent,
         "slot_total": len(machine.slots),
         "degraded_total": state.get("degraded_count", 0),
+        "report": report,
+        "finished": report is not None,
     }
 
 

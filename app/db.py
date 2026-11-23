@@ -149,6 +149,23 @@ CREATE TABLE IF NOT EXISTS sp_sessions (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS sp_certifications (
+    cert_id TEXT PRIMARY KEY,
+    bundle_id TEXT NOT NULL,
+    persona_version TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    status TEXT NOT NULL,
+    report TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sp_reports (
+    session_id TEXT PRIMARY KEY,
+    bundle_id TEXT NOT NULL,
+    report TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 

@@ -87,6 +87,21 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
 
     model_card_count = conn.execute("SELECT COUNT(*) AS n FROM model_cards").fetchone()["n"]
     version_complete = version_stamped == ai_records and ai_records > 0
+    cert_row = conn.execute(
+        "SELECT report FROM sp_certifications ORDER BY created_at DESC LIMIT 1"
+    ).fetchone()
+    sp_cert = json.loads(cert_row["report"]) if cert_row else None
+    sp_fact_error = None
+    sp_persona_pass = None
+    sp_p95_latency = None
+    sp_p0 = None
+    if sp_cert:
+        red_team = sp_cert.get("red_team", {})
+        sp_fact_error = red_team.get("fact_error_rate")
+        sp_persona_pass = red_team.get("persona_first_pass_rate")
+        p95_ms = red_team.get("p95_latency_ms")
+        sp_p95_latency = round(p95_ms / 1000, 3) if p95_ms is not None else None
+        sp_p0 = red_team.get("p0_incidents")
     return {
         "qwk_ai": report.get("qwk_ai"),
         "evidence_rate": (report.get("evidence") or {}).get("rate"),
@@ -95,11 +110,11 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
         "critical_miss": critical_miss,
         "audit_replay": 1.0 if version_complete and report.get("counts", {}).get("records", 0) > 0 else None,
         "model_card": 1.0 if model_card_count > 0 else None,
-        "sp_fact_error": None,
-        "persona_pass": None,
-        "p95_latency": None,
+        "sp_fact_error": sp_fact_error,
+        "persona_pass": sp_persona_pass,
+        "p95_latency": sp_p95_latency,
         "sus": None,
-        "p0_incidents": 0,
+        "p0_incidents": sp_p0 if sp_p0 is not None else 0,
         "near_improvement": None,
         "subgroup_gap": None,
         "teacher_hours": None,

@@ -227,7 +227,7 @@ def build_bundle_payload() -> dict[str, Any]:
             confidence_floor=0.60,
             slot={
                 "content": "出了不少汗，还有点恶心，喘气倒还行。",
-                "triggers": ["出汗", "恶心", "呼吸", "伴随", "还有"],
+                "triggers": ["出汗", "恶心", "呼吸", "伴随"],
                 "entities": ["不少汗", "恶心", "喘气"],
                 "disclosure": "on_direct_ask",
             },

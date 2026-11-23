@@ -18,8 +18,17 @@ from app.domain.rubric import (
     validate_bundle,
     validate_rubric_item,
 )
+from app.domain.gates import evaluate_gates
+from app.domain.practice import build_practice_report
 from app.domain.routing import is_near_cutoff, route_item, sampling_hit
 from app.domain.slots import DialogueStateMachine, SPController, scan_leaks
+from app.domain.spqa import (
+    certify_bundle,
+    ensure_certification,
+    latest_certification,
+    run_consistency,
+    run_red_team,
+)
 from app.domain.stats import quadratic_weighted_kappa, quality_report
 from app.seed import build_bundle_payload, seed_if_empty
 
@@ -250,3 +259,76 @@ def test_model_version_change_downgrades_authority(seeded_path, tmp_path):
     audit = conn.execute("SELECT COUNT(*) AS n FROM audit_events WHERE action = 'authority.auto_downgrade'").fetchone()
     assert audit["n"] == 1
     conn.close()
+
+
+def test_sp_red_team_passes_and_has_no_leaks(bundle):
+    report = run_red_team(bundle)
+    assert report["case_count"] == 7
+    assert report["passed_cases"] == 7
+    assert report["leak_count"] == 0
+    assert report["fact_errors"] == 0
+    assert report["p0_incidents"] == 0
+    assert report["persona_first_pass_rate"] >= 0.95
+
+
+def test_sp_consistency_is_deterministic(bundle):
+    report = run_consistency(bundle, runs=20)
+    assert report["rate"] >= 0.95
+    assert all(p["runs"] == 20 for p in report["paths"])
+    assert all(p["unique_sequences"] == 1 for p in report["paths"])
+
+
+def test_sp_certification_is_persisted(conn, bundle):
+    report = certify_bundle(conn, bundle, actor="测试认证员")
+    assert report["status"] == "certified"
+    assert all(check["passed"] for check in report["checks"])
+    latest = latest_certification(conn, bundle["bundle_id"])
+    assert latest is not None
+    assert latest["red_team"]["leak_count"] == 0
+    assert latest["consistency"]["rate"] >= 0.95
+    rows = conn.execute("SELECT COUNT(*) AS n FROM sp_certifications").fetchone()["n"]
+    assert rows >= 1
+
+
+def test_sp_generator_focuses_newly_released_slot(bundle):
+    machine = DialogueStateMachine(bundle["payload"], bundle["derived"])
+    controller = SPController(machine)
+    state = machine.start()
+    result = controller.respond(state, "疼多久了？")
+    assert "两个多小时" in result["reply"]
+    assert "王建国" not in result["reply"]
+
+
+def test_practice_report_has_three_part_feedback(bundle):
+    messages = [
+        {"role": "patient", "text": "大夫，我胸口疼。", "turn": 0, "phase": "opening", "at_ms": 0},
+        {"role": "candidate", "text": "您好，我是急诊科张医生，请问您怎么称呼？", "turn": 1, "phase": "opening", "at_ms": 6000},
+        {"role": "patient", "text": "我叫王建国。", "turn": 1, "phase": "information_gathering", "at_ms": 10000},
+        {"role": "candidate", "text": "疼多久了？有没有向肩膀放射？", "turn": 2, "phase": "information_gathering", "at_ms": 16000},
+        {"role": "patient", "text": "两个多小时了，会窜到左边胳膊。", "turn": 2, "phase": "information_gathering", "at_ms": 20000},
+        {"role": "candidate", "text": "有没有出汗、恶心？", "turn": 3, "phase": "information_gathering", "at_ms": 26000},
+        {"role": "patient", "text": "出了不少汗，有点恶心。", "turn": 3, "phase": "information_gathering", "at_ms": 30000},
+        {"role": "candidate", "text": "我先给您听诊一下，然后做心电图。", "turn": 4, "phase": "assessment", "at_ms": 36000},
+    ]
+    report = build_practice_report(bundle, messages)
+    assert report["total"] is not None
+    assert report["covered"] >= 4
+    assert report["uncovered_count"] > 0
+    assert report["deductions"]
+    for unit in report["deductions"]:
+        assert unit["behavior"]
+        assert unit["alternative"]
+        assert "evidence" in unit
+    assert report["disclaimer"]
+
+
+def test_gate_g1_uses_sp_certification(conn):
+    ensure_certification(conn)
+    report = quality_report(conn)
+    gates = evaluate_gates(conn, report, "G0_offline")
+    g1 = next(g for g in gates["gates"] if g["id"] == "G1")
+    values = {c["key"]: c["value"] for c in g1["criteria"]}
+    assert values["sp_fact_error"] is not None
+    assert values["persona_pass"] is not None
+    assert values["p95_latency"] is not None
+    assert values["p0_incidents"] == 0

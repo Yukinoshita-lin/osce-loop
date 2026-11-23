@@ -160,10 +160,43 @@ class SPController:
     def __init__(self, machine: DialogueStateMachine):
         self.machine = machine
 
-    def generate(self, released_slots: list[dict[str, Any]], persona: dict[str, Any], turn: int) -> str:
+    def generate(
+        self,
+        released_slots: list[dict[str, Any]],
+        persona: dict[str, Any],
+        turn: int,
+        *,
+        focus_ids: list[str] | None = None,
+        empathy: bool = False,
+    ) -> str:
+        if focus_ids is not None:
+            focused = [s for s in released_slots if s["slot_id"] in set(focus_ids)]
+            if focused:
+                released_slots = focused
+            else:
+                if empathy:
+                    options = (
+                        "唉，谢谢您……听您这么说，我心里踏实一点。",
+                        "您这么说，我就不那么慌了。",
+                        "大夫，您态度真好，我配合您。",
+                    )
+                    return options[turn % len(options)]
+                options = (
+                    "医生，您问得具体点，我有点糊涂……",
+                    "唉，就是不舒服，您看我这是怎么了？",
+                    "我这心里没底，您多问问吧。",
+                )
+                return options[turn % len(options)]
         if not released_slots:
+            if empathy:
+                options = (
+                    "唉，谢谢您……听您这么说，我心里踏实一点。",
+                    "您这么说，我就不那么慌了。",
+                    "大夫，您态度真好，我配合您。",
+                )
+                return options[turn % len(options)]
             options = (
-                "医生，我也说不太好……您再具体问问我？",
+                "医生，这个我刚才说过了……您还想问啥？",
                 "唉，就是不舒服，您看我这是怎么了？",
                 "我这心里没底，您多问问吧。",
             )
@@ -204,7 +237,13 @@ class SPController:
         new_state, released_now, intent, transitioned = self.machine.step_state(state, user_text)
         allowed = self.machine.slots_by_ids(new_state["released"])
         unreleased = self.machine.unreleased(new_state)
-        draft = self.generate(allowed, self.machine.persona, new_state["turn"])
+        draft = self.generate(
+            allowed,
+            self.machine.persona,
+            new_state["turn"],
+            focus_ids=released_now,
+            empathy=bool(intent.get("empathy")),
+        )
 
         verification = self.verify(draft, self.machine.persona, unreleased)
         attempts = 0
@@ -213,7 +252,13 @@ class SPController:
             attempts += 1
             if not verification["repairable"]:
                 break
-            draft = self.generate(allowed, self.machine.persona, new_state["turn"] + attempts)
+            draft = self.generate(
+                allowed,
+                self.machine.persona,
+                new_state["turn"] + attempts,
+                focus_ids=released_now,
+                empathy=bool(intent.get("empathy")),
+            )
             verification = self.verify(draft, self.machine.persona, unreleased)
 
         if not verification["passed"]:

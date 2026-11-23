@@ -876,6 +876,23 @@ function renderSP() {
   }).join('');
   const messages = session && session.messages ? session.messages : [];
   const verify = session && session.verification;
+  const cert = persona.certification;
+  const finished = Boolean(session && session.finished);
+  const certHtml = `
+    <section class="card">
+      <div class="card-title">SP 认证<span class="sub">红队 + 20×3 一致性</span></div>
+      ${cert ? `
+        <div class="attempt-strip"><span>${cert.status === 'certified' ? '<span class="pill teal">已认证</span>' : '<span class="pill red">未通过</span>'}</span><span>${esc(fmtTime(cert.created_at))}</span></div>
+        <div class="version-row"><span class="k">红队用例</span><span class="v">${cert.red_team.passed_cases}/${cert.red_team.case_count} 通过</span></div>
+        <div class="version-row"><span class="k">信息泄露</span><span class="v">${cert.red_team.leak_count}</span></div>
+        <div class="version-row"><span class="k">人格首轮通过</span><span class="v">${pct(cert.red_team.persona_first_pass_rate, 0)}</span></div>
+        <div class="version-row"><span class="k">跨会话一致性</span><span class="v">${pct(cert.consistency.rate, 0)}</span></div>
+        <div class="version-row"><span class="k">P95 单轮延迟</span><span class="v">${num(cert.red_team.p95_latency_ms, 0)} ms</span></div>
+        ${(cert.checks || []).filter((c) => !c.passed).map((c) => `<div class="violation">${esc(c.label)}：${esc(c.value)}（目标 ${esc(c.target)}）</div>`).join('')}
+      ` : '<div class="tiny muted">尚未认证。红队会尝试诱导泄露、编造病史、跨阶段索取诊断等 7 类攻击。</div>'}
+      <div class="sep"></div>
+      <div class="btn-row"><button class="btn small ${cert && cert.status === 'certified' ? '' : 'primary'}" data-action="sp-certify">运行红队认证</button><span class="tiny muted">${esc((persona.persona_version || '').slice(7, 19))}</span></div>
+    </section>`;
   const verifierHtml = verify ? `
     <div class="verify-panel">
       <div class="verify-item ${verify.persona >= 0.85 ? 'pass' : 'fail'}"><div class="k">人格保真 · 0.35</div><div class="v">${num(verify.persona, 2)}</div></div>
@@ -914,6 +931,7 @@ function renderSP() {
           <div class="sep"></div>
           <div class="tiny muted">禁用话术：${(p.forbidden || []).map(esc).join(' · ')}</div>
         </section>
+        ${certHtml}
         <section class="card">
           <div class="card-title">阶段<span class="sub">状态机驱动</span></div>
           <div class="phase-steps">
@@ -932,18 +950,23 @@ function renderSP() {
         <section class="card chat-card">
           <div class="chat-head">
             <h3>与模拟患者对话</h3>
-            <div class="tiny muted">${session ? esc(session.phase_label) : '未开始'} · turn ${session ? session.turn : 0} · 信任 ${session ? session.trust : 0}</div>
+            <div class="btn-row">
+              <span class="tiny muted">${session ? esc(session.phase_label) : '未开始'} · turn ${session ? session.turn : 0} · 信任 ${session ? session.trust : 0}</span>
+              ${session && !finished ? '<button class="btn small amber" data-action="sp-finish">结束练习并生成反馈</button>' : ''}
+              ${finished ? '<span class="pill teal">已生成反馈</span>' : ''}
+            </div>
           </div>
           <div class="chat-log" id="chat-log">
             ${messages.map((m) => `<div class="msg ${m.role}"><div class="who">${m.role === 'patient' ? 'SP' : '考生'}</div>${esc(m.text)}</div>`).join('')}
           </div>
+          ${finished ? '<div class="tiny muted" style="padding:12px 15px;border-top:1px solid var(--border-soft)">本次练习已生成反馈。开始新会话可再练一次。</div>' : `
           <div class="chat-suggestions">
             ${['您哪里不舒服？', '疼多久了？', '有没有高血压？', '我理解您很担心', '我要给您听诊一下'].map((t) => `<button class="btn small ghost" data-action="sp-suggest" data-text="${dataAttr(t)}">${esc(t)}</button>`).join('')}
           </div>
           <form class="chat-input" id="sp-form">
             <input class="input" id="sp-input" maxlength="500" placeholder="以考生身份提问……" autocomplete="off">
             <button class="btn primary" type="submit">发送</button>
-          </form>
+          </form>`}
         </section>
         <section class="card">
           <div class="card-title">独立验证器<span class="sub">信息边界权重 0.50 · 不通过则回退模板</span></div>
@@ -953,6 +976,7 @@ function renderSP() {
         </section>
       </div>
     </div>
+    ${session && session.report ? practiceReportHtml(session.report) : ''}
   `;
   const log = $('#chat-log');
   if (log) log.scrollTop = log.scrollHeight;
@@ -966,6 +990,62 @@ function renderSP() {
       await sendSpMessage(text);
     });
   }
+}
+
+function practiceReportHtml(report) {
+  const domains = report.domains || [];
+  const domainMax = Math.max(1, ...domains.map((d) => d.score || 0));
+  const deductions = (report.deductions || []).map((u) => {
+    const ev = u.evidence || {};
+    const hasEvidence = ev.quote && ev.evidence_kind !== 'absence';
+    return `<div class="fb-card">
+      <div class="fb-head">
+        <h4>${u.critical ? '<span class="pill badge-critical">关键</span> ' : ''}${esc(u.item_title)} <span class="mono tiny muted">${esc(u.item_id)}</span></h4>
+        <span class="pill ${u.score === 0 ? 'red' : 'amber'}">${esc(u.score_label)}</span>
+      </div>
+      <div class="fb-part"><div class="lab">① 证据</div><div class="val">${hasEvidence ? `${mmss(ev.start_ms)} · ${esc(ev.quote)}` : '本段对话未观察到相关询问（缺席证据）'}</div></div>
+      <div class="fb-part"><div class="lab">② 行为</div><div class="val">${esc(u.behavior)}</div></div>
+      <div class="fb-part alt"><div class="lab">③ 替代</div><div class="val">${esc(u.alternative || '下次可追加一句具体提问，覆盖该评分项后再进入下一环节。')}</div></div>
+    </div>`;
+  }).join('');
+  const uncovered = (report.uncovered || []).map((u) => `<span class="pill amber">${esc(u.item_title)}</span>`).join('');
+  const strengths = (report.strengths || []).map((u) => `<span class="pill teal">${esc(u.item_title)}</span>`).join('');
+  const passed = report.total !== null && report.total >= report.pass_line;
+  return `
+    <section class="card" style="margin-top:16px">
+      <div class="card-title">练习反馈<span class="sub">形成性 · 不计入成绩</span></div>
+      <div class="grid c4" style="margin-bottom:14px">
+        <div class="kpi ${passed ? 'teal' : 'amber'}"><div class="k">全站模拟分</div><div class="v">${num(report.total, 1)}</div><div class="d">及格线 ${num(report.pass_line, 0)} · ${passed ? '达标' : '继续练习'}</div></div>
+        <div class="kpi blue"><div class="k">评分项覆盖</div><div class="v">${pct(report.coverage, 0)}</div><div class="d">${report.covered} / ${report.items_scored} 项有对话证据</div></div>
+        <div class="kpi amber"><div class="k">需改进项</div><div class="v">${(report.deductions || []).length}</div><div class="d">含关键项 ${(report.deductions || []).filter((x) => x.critical).length}</div></div>
+        <div class="kpi red"><div class="k">未覆盖项</div><div class="v">${report.uncovered_count}</div><div class="d">未提问或未触发对应评分项</div></div>
+      </div>
+      ${report.coverage < 0.5 ? `<div class="alert"><b>样本不足，分数仅作覆盖度参考</b><p>本次仅覆盖 ${pct(report.coverage, 0)} 的评分项，未覆盖项按 0 计入全站模拟分。建议完成完整问诊后再解读分数。</p></div>` : ''}
+      <div class="grid c1-2">
+        <div>
+          <div class="card-title">能力域画像</div>
+          <div class="domain-bars">
+            ${domains.map((d) => `
+              <div class="domain-row">
+                <span class="bar-label">${esc(d.domain)}</span>
+                <div class="bar-track"><div class="bar-fill" style="width:${Math.max(2, (d.score || 0) / domainMax * 100)}%"></div></div>
+                <span class="bar-count">${num(d.score, 0)}</span>
+              </div>`).join('')}
+          </div>
+          <div class="sep"></div>
+          <div class="card-title" style="margin-bottom:5px">优势项</div>
+          <div class="strength-list">${strengths || '<span class="tiny muted">暂无</span>'}</div>
+          ${uncovered ? `<div class="sep"></div><div class="card-title" style="margin-bottom:5px">未覆盖</div><div class="strength-list">${uncovered}</div>` : ''}
+        </div>
+        <div>
+          <div class="card-title">逐项反馈<span class="sub">证据 → 行为 → 替代话术</span></div>
+          ${deductions || '<div class="empty">本次没有明显扣分项。</div>'}
+        </div>
+      </div>
+      <div class="sep"></div>
+      <div class="feedback-rule">${esc(report.feedback_rule)}</div>
+      <div class="tiny muted" style="margin-top:6px">${esc(report.disclaimer)}</div>
+    </section>`;
 }
 
 async function sendSpMessage(text) {
@@ -1002,7 +1082,8 @@ async function viewQuality() {
           let value = '—';
           if (c.value !== null && c.value !== undefined) {
             if (c.key === 'evidence_rate' || c.key === 'edit_rate' || c.key === 'subgroup_gap' || c.key === 'near_improvement' || c.key === 'teacher_hours' || c.key === 'sp_fact_error' || c.key === 'persona_pass') value = pct(c.value, c.value < 0.1 ? 1 : 0);
-            else if (c.key === 'avg_review_seconds' || c.key === 'p95_latency') value = num(c.value, 2) + (c.key === 'avg_review_seconds' ? 's' : 's');
+            else if (c.key === 'avg_review_seconds') value = num(c.value, 2) + 's';
+            else if (c.key === 'p95_latency') value = num(c.value * 1000, 0) + ' ms';
             else value = num(c.value, 2);
           }
           return `<div class="criterion"><span>${esc(c.label)}</span><span class="val">${esc(value)}</span><span class="target">${checkMark(c.status)}<div class="tiny muted">${esc(c.target)}</div></span></div>`;
@@ -1181,6 +1262,37 @@ document.addEventListener('click', async (e) => {
     if (!state.sp) return;
     await createSpSession();
     renderSP();
+    return;
+  }
+  if (action === 'sp-finish') {
+    if (!state.sp || !state.sp.session) return;
+    try {
+      const data = await api(`/api/sp/sessions/${encodeURIComponent(state.sp.session.session_id)}/finish`, {
+        method: 'POST',
+      });
+      state.sp.session.report = data.report;
+      state.sp.session.finished = true;
+      renderSP();
+      toast('已生成三段式练习反馈');
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'sp-certify') {
+    if (!state.sp || !state.sp.persona) return;
+    try {
+      const data = await api('/api/sp/certification/run', {
+        method: 'POST',
+        body: { bundle_id: state.sp.persona.bundle_id, actor: state.reviewer || 'SP 认证员' },
+      });
+      state.sp.persona.certification = data.certification;
+      renderSP();
+      const cert = data.certification;
+      toast(cert.status === 'certified' ? 'SP 认证通过：红队与一致性抽测达标' : '认证未通过：请查看失败项');
+    } catch (err) {
+      toast(err.message, true);
+    }
     return;
   }
   if (action === 'version-bump') {
