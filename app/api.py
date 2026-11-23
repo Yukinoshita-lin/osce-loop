@@ -1027,6 +1027,7 @@ def quality(conn=Depends(get_conn)):
         "latest_self_check": latest_self_check(conn),
         "governance": governance_status(conn),
         "ai_provider": scoring_provider_info(),
+        "audit_anchors": db.list_audit_anchors(conn, limit=5),
         "versions": {
             "model": db.get_state(conn, "model_version", MODEL_VERSION),
             "prompt": db.get_state(conn, "prompt_version", PROMPT_VERSION),
@@ -1317,6 +1318,30 @@ def audit(conn=Depends(get_conn), limit: int = Query(100, ge=1, le=500)):
 @app.get("/api/audit/verify")
 def audit_verify(conn=Depends(get_conn)):
     return db.verify_audit_chain(conn)
+
+
+@app.get("/api/audit/anchors")
+def audit_anchors(conn=Depends(get_conn)):
+    return {
+        "head": db.audit_chain_head(conn),
+        "anchors": db.list_audit_anchors(conn, limit=50),
+    }
+
+
+@app.post("/api/audit/anchors")
+def audit_anchor_create(request: Request, conn=Depends(get_conn)):
+    try:
+        anchor = db.create_audit_anchor(conn, actor=request.state.user["display_name"])
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(500, str(exc)) from exc
+    return {"ok": True, "anchor": anchor, "head": db.audit_chain_head(conn)}
+
+
+@app.get("/api/audit/anchors/verify")
+def audit_anchors_verify(conn=Depends(get_conn)):
+    return db.verify_audit_anchors(conn)
 
 
 @app.get("/api/retention")

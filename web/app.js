@@ -1771,6 +1771,7 @@ async function viewQuality() {
     </div>`).join('');
   const canPurge = state.user && ['admin', 'exam_manager'].includes(state.user.role);
   const provider = data.ai_provider || {};
+  const anchors = data.audit_anchors || [];
   const modelCards = data.model_cards.map((c) => `
     <div class="card tight" style="margin-bottom:8px">
       <div class="card-title" style="margin-bottom:4px">${esc(c.capability)}<span class="sub">${esc(c.model_version)}</span></div>
@@ -1858,9 +1859,12 @@ async function viewQuality() {
         ${modelCards || '<div class="empty">暂无模型卡</div>'}
       </div>
       <div class="card">
-        <div class="card-title">审计事件<span class="sub">只追加 · 哈希链可验证</span></div>
+        <div class="card-title">审计事件<span class="sub">只追加 · 哈希链 + 外部锚点</span></div>
+        <div class="tiny muted" style="margin-bottom:8px">外部锚点：${anchors.length ? `${anchors.length} 个 · 最近 ${fmtTime(anchors[0].created_at)}` : '尚未写入'}</div>
         <div class="btn-row" style="margin-bottom:8px">
           <button class="btn small" data-action="verify-audit">校验审计链</button>
+          <button class="btn small" data-action="create-anchor">写入审计锚点</button>
+          <button class="btn small" data-action="verify-anchor">校验外部锚点</button>
         </div>
         <div id="audit-chain-result" class="tiny muted" style="margin-bottom:8px">尚未校验。校验会逐条重算 prev_hash 与事件哈希。</div>
         <div class="audit-list">${auditRows || '<div class="empty">暂无审计</div>'}</div>
@@ -1928,6 +1932,34 @@ document.addEventListener('click', async (e) => {
           : `<span class="pill red">异常</span> 第 ${result.index} 条（${esc(result.broken_at)}）${esc(result.message)}`;
       }
       toast(result.ok ? `审计链完整：${result.total} 条` : '审计链校验失败', !result.ok);
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'create-anchor') {
+    try {
+      const result = await api('/api/audit/anchors', { method: 'POST', body: {} });
+      const box = $('#audit-chain-result');
+      if (box) {
+        box.innerHTML = `<span class="pill teal">已写入</span> 第 ${result.anchor.event_count} 条事件 · <span class="mono">${esc(result.anchor.head_hash.slice(0, 22))}…</span>`;
+      }
+      toast(`审计锚点已写入：${result.anchor.event_count} 条事件`);
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'verify-anchor') {
+    try {
+      const result = await api('/api/audit/anchors/verify');
+      const box = $('#audit-chain-result');
+      if (box) {
+        box.innerHTML = result.ok
+          ? `<span class="pill teal">锚点有效</span> ${esc(result.message)} · ${esc(result.external_file)}`
+          : `<span class="pill red">锚点异常</span> ${esc(result.message)}`;
+      }
+      toast(result.ok ? result.message : '外部锚点校验失败', !result.ok);
     } catch (err) {
       toast(err.message, true);
     }

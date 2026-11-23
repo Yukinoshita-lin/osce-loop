@@ -10,6 +10,10 @@ MEDIA_DIR = DATA_DIR / "media"
 WEB_DIR = BASE_DIR / "web"
 
 DB_PATH = Path(os.getenv("OSCELOOP_DB", str(DATA_DIR / "osceloop.db")))
+# 审计链外部锚点文件：生产环境应指向独立卷/WORM 存储，避免与数据库同盘被一起改写。
+AUDIT_ANCHOR_PATH = Path(
+    os.getenv("OSCELOOP_AUDIT_ANCHOR_PATH", str(DATA_DIR / "audit_anchors.jsonl"))
+)
 
 # AI 输出三元版本戳：任何一个变化都必须重新校准权限（见方案 6.3）
 MODEL_VERSION = os.getenv("OSCELOOP_MODEL_VERSION", "mock-score-1.0")

@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from .config import DB_PATH
+from .config import AUDIT_ANCHOR_PATH, DB_PATH
 
 
 SCHEMA = """
@@ -334,6 +335,14 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
     expires_at TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS audit_anchors (
+    anchor_id TEXT PRIMARY KEY,
+    event_count INTEGER NOT NULL,
+    head_hash TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -546,6 +555,172 @@ def append_audit(
     )
     conn.commit()
     return event_id
+
+
+def audit_chain_head(conn: sqlite3.Connection) -> dict[str, Any]:
+    count = conn.execute("SELECT COUNT(*) AS n FROM audit_events").fetchone()["n"]
+    last = conn.execute(
+        "SELECT event_hash FROM audit_events ORDER BY rowid DESC LIMIT 1"
+    ).fetchone()
+    return {
+        "event_count": count,
+        "head_hash": (last["event_hash"] or "") if last else "",
+    }
+
+
+def list_audit_anchors(conn: sqlite3.Connection, limit: int = 20) -> list[dict[str, Any]]:
+    return rows_to_dicts(
+        conn.execute(
+            "SELECT * FROM audit_anchors ORDER BY created_at DESC, rowid DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    )
+
+
+def _read_anchor_file(path: Path) -> list[dict[str, Any]] | None:
+    if not path.exists():
+        return None
+    rows: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"外部锚点文件损坏：{exc}") from exc
+        if not isinstance(data, dict):
+            raise ValueError("外部锚点文件格式错误")
+        rows.append(data)
+    return rows
+
+
+def create_audit_anchor(
+    conn: sqlite3.Connection,
+    *,
+    actor: str,
+    anchor_path: Path | str | None = None,
+) -> dict[str, Any]:
+    """把当前审计链头写入数据库与外部 JSONL 文件；链损坏时拒绝锚定。"""
+    chain = verify_audit_chain(conn)
+    if not chain["ok"]:
+        raise ValueError(f"审计链校验失败，拒绝写入锚点：{chain['message']}")
+    anchor_id = new_id("anchor")
+    timestamp = now_iso()
+    append_audit(
+        conn,
+        actor=actor,
+        action="audit.anchor",
+        object_type="AuditChain",
+        object_id=anchor_id,
+        after={"anchor_id": anchor_id},
+    )
+    head = audit_chain_head(conn)
+    anchor = {
+        "anchor_id": anchor_id,
+        "event_count": head["event_count"],
+        "head_hash": head["head_hash"],
+        "actor": actor,
+        "created_at": timestamp,
+    }
+    conn.execute(
+        "INSERT INTO audit_anchors(anchor_id, event_count, head_hash, actor, created_at) "
+        "VALUES(?,?,?,?,?)",
+        (
+            anchor["anchor_id"],
+            anchor["event_count"],
+            anchor["head_hash"],
+            anchor["actor"],
+            anchor["created_at"],
+        ),
+    )
+    conn.commit()
+    path = Path(anchor_path or AUDIT_ANCHOR_PATH)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(anchor, ensure_ascii=False) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+    except OSError as exc:
+        conn.execute("DELETE FROM audit_anchors WHERE anchor_id = ?", (anchor_id,))
+        conn.commit()
+        raise RuntimeError(f"外部锚点写入失败：{exc}") from exc
+    return anchor
+
+
+def verify_audit_anchors(
+    conn: sqlite3.Connection,
+    *,
+    anchor_path: Path | str | None = None,
+) -> dict[str, Any]:
+    """校验数据库锚点、外部锚点文件与审计链是否仍一致。"""
+    path = Path(anchor_path or AUDIT_ANCHOR_PATH)
+    chain = verify_audit_chain(conn)
+    anchors = list_audit_anchors(conn, limit=100000)
+    anchors.sort(key=lambda item: (int(item["event_count"]), item["created_at"]))
+    result: dict[str, Any] = {
+        "ok": False,
+        "checked": 0,
+        "anchors": anchors,
+        "external_file": str(path),
+        "chain": chain,
+        "message": "",
+    }
+    if not chain["ok"]:
+        result["message"] = f"审计链校验失败：{chain['message']}"
+        return result
+    try:
+        file_rows = _read_anchor_file(path)
+    except (OSError, ValueError) as exc:
+        result["message"] = f"外部锚点读取失败：{exc}"
+        return result
+    if file_rows is None:
+        if not anchors:
+            result.update(ok=True, message="尚无审计锚点")
+            return result
+        result["message"] = "外部锚点文件缺失，无法完成外部核验"
+        return result
+    file_by_id: dict[str, dict[str, Any]] = {}
+    for row in file_rows:
+        anchor_id = str(row.get("anchor_id") or "")
+        if not anchor_id:
+            result["message"] = "外部锚点记录缺少 anchor_id"
+            return result
+        if anchor_id in file_by_id:
+            result["message"] = f"外部锚点文件存在重复 anchor_id：{anchor_id}"
+            return result
+        file_by_id[anchor_id] = row
+    db_ids = {str(anchor["anchor_id"]) for anchor in anchors}
+    if set(file_by_id) != db_ids:
+        result["message"] = "外部锚点与数据库记录不一致"
+        return result
+    events = conn.execute("SELECT event_id, event_hash FROM audit_events ORDER BY rowid").fetchall()
+    for anchor in anchors:
+        anchor_id = str(anchor["anchor_id"])
+        file_row = file_by_id[anchor_id]
+        try:
+            file_count = int(file_row.get("event_count", -1))
+        except (TypeError, ValueError):
+            file_count = -1
+        if file_count != int(anchor["event_count"]) or file_row.get("head_hash") != anchor["head_hash"]:
+            result["message"] = f"外部锚点 {anchor_id} 与数据库记录不一致"
+            return result
+        count = int(anchor["event_count"])
+        if count > len(events):
+            result["message"] = (
+                f"锚点 {anchor_id} 之后的事件被删除（锚点 {count} 条，当前 {len(events)} 条）"
+            )
+            return result
+        actual = "" if count == 0 else (events[count - 1]["event_hash"] or "")
+        if actual != anchor["head_hash"]:
+            result["message"] = f"锚点 {anchor_id} 位置的哈希不一致，疑似历史事件被改写"
+            return result
+    result["checked"] = len(anchors)
+    result["ok"] = True
+    result["message"] = (
+        f"{len(anchors)} 个锚点全部通过外部核验" if anchors else "尚无审计锚点"
+    )
+    return result
 
 
 def log_ai_call(
