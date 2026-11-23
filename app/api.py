@@ -1025,6 +1025,8 @@ def bundles(conn=Depends(get_conn)):
             "bundle_hash": b["bundle_hash"],
             "status": b["status"],
             "frozen_at": b["frozen_at"],
+            "supersedes": b["supersedes"],
+            "reason": b["reason"],
         }
         for b in list_bundles(conn)
     ]

@@ -286,6 +286,40 @@ def test_freeze_is_idempotent_and_hash_bound(conn):
     assert conn.execute("SELECT COUNT(*) AS n FROM bundles").fetchone()["n"] == 2
 
 
+def test_freeze_enforces_version_discipline(seeded_path, tmp_path):
+    path = tmp_path / "version.db"
+    shutil.copy(seeded_path, path)
+    conn = db.connect(path)
+    try:
+        payload = build_bundle_payload()
+        first = freeze_bundle(conn, payload, actor="test", version="1.0")
+        changed = copy.deepcopy(payload)
+        changed["title"] = changed["title"] + "（版本纪律）"
+
+        with pytest.raises(ValueError, match="已存在"):
+            freeze_bundle(conn, changed, actor="test", version="1.0")
+        with pytest.raises(ValueError, match="必须高于"):
+            freeze_bundle(
+                conn, changed, actor="test", version="0.9", supersedes=first["bundle_id"], reason="降级"
+            )
+
+        other = copy.deepcopy(payload)
+        other["station_id"] = "ST-OTHER-001"
+        other["title"] = "其他考站"
+        other_bundle = freeze_bundle(conn, other, actor="test", version="1.0")
+        with pytest.raises(ValueError, match="同一考站"):
+            freeze_bundle(
+                conn, changed, actor="test", version="1.1", supersedes=other_bundle["bundle_id"], reason="跨站替代"
+            )
+
+        bad_version = copy.deepcopy(payload)
+        bad_version["title"] = bad_version["title"] + "（非法版本）"
+        with pytest.raises(ValueError, match="格式"):
+            freeze_bundle(conn, bad_version, actor="test", version="v2")
+    finally:
+        conn.close()
+
+
 def test_seeded_attempts_and_quality(conn, bundle):
     attempts = db.rows_to_dicts(conn.execute("SELECT * FROM attempts").fetchall())
     assert len(attempts) == 13

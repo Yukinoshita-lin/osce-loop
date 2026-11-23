@@ -50,6 +50,7 @@ const state = {
   feedbackId: null,
   bundleCurrent: null,
   bundlePayload: null,
+  bundleFocus: null,
 };
 
 /* ---------- utils ---------- */
@@ -1173,7 +1174,9 @@ async function viewBundle() {
     $('#view').innerHTML = '<div class="empty">尚无冻结站包</div>';
     return;
   }
-  const data = await api(`/api/bundles/${encodeURIComponent(list[0].bundle_id)}`);
+  const data = await api(`/api/bundles/${encodeURIComponent(
+    (list.find((b) => b.bundle_id === state.bundleFocus) || list[0]).bundle_id,
+  )}`);
   state.bundleCurrent = data;
   state.bundlePayload = null;
   const [major, minor] = String(data.version || '1.0').split('.');
@@ -1228,6 +1231,28 @@ async function viewBundle() {
         <button class="btn small primary" data-action="bundle-freeze">签字冻结</button>
       </div>
       <div id="bundle-proposal-result" class="tiny muted" style="margin-top:8px">先下载当前站包作为模板，修改后上传；校验通过才能冻结。新站包需重新完成 SP 认证。</div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-title">版本历史<span class="sub">只增不改 · 当前冻结基准 v${esc(data.version)}</span></div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>版本</th><th>bundle_id</th><th>冻结时间</th><th>原因</th><th>替代版本</th><th>哈希</th><th></th></tr></thead>
+          <tbody>${list.map((b) => `
+            <tr>
+              <td><span class="pill ${b.bundle_id === data.bundle_id ? 'teal' : 'muted'}">v${esc(b.version)}</span></td>
+              <td class="mono tiny">${esc(b.bundle_id)}</td>
+              <td class="tiny">${fmtTime(b.frozen_at)}</td>
+              <td class="tiny">${esc(b.reason || '—')}</td>
+              <td class="mono tiny">${esc(b.supersedes || '—')}</td>
+              <td class="mono tiny" title="${dataAttr(b.bundle_hash)}">${esc((b.bundle_hash || '').slice(0, 16))}…</td>
+              <td>${b.bundle_id === data.bundle_id
+                ? '<span class="pill muted">查看中</span>'
+                : `<button class="btn small" data-action="bundle-view" data-bundle="${esc(b.bundle_id)}">查看</button>`}</td>
+            </tr>`).join('')}</tbody>
+        </table>
+      </div>
+      ${data.bundle_id !== list[0].bundle_id ? '<div class="btn-row" style="margin-top:8px"><button class="btn small" data-action="bundle-latest">回到最新版本</button></div>' : ''}
     </div>
 
     <div class="grid c2" style="margin-bottom:14px">
@@ -2147,6 +2172,16 @@ document.addEventListener('click', async (e) => {
     }
     return;
   }
+  if (action === 'bundle-view') {
+    state.bundleFocus = el.dataset.bundle || null;
+    await viewBundle();
+    return;
+  }
+  if (action === 'bundle-latest') {
+    state.bundleFocus = null;
+    await viewBundle();
+    return;
+  }
   if (action === 'bundle-export') {
     const bundle = state.bundleCurrent;
     if (!bundle) return;
@@ -2232,6 +2267,7 @@ document.addEventListener('click', async (e) => {
       toast(result.created
         ? `已冻结 ${result.bundle.bundle_id} v${result.bundle.version}`
         : '相同内容已存在，未重复冻结');
+      state.bundleFocus = result.bundle.bundle_id;
       await viewBundle();
     } catch (err) {
       toast(err.message, true);

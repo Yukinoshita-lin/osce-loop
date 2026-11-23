@@ -22,6 +22,14 @@ def compute_bundle_hash(payload: dict[str, Any], derived: dict[str, Any]) -> str
     return "sha256:" + digest.hexdigest()
 
 
+def _version_key(value: str) -> tuple[int, int]:
+    try:
+        parts = str(value).split(".")
+        return int(parts[0]), int(parts[1]) if len(parts) > 1 else 0
+    except (TypeError, ValueError, IndexError) as exc:
+        raise ValueError("版本号格式应为 主版本.次版本，例如 1.1") from exc
+
+
 def freeze_bundle(
     conn,
     payload: dict[str, Any],
@@ -42,6 +50,25 @@ def freeze_bundle(
     existing = conn.execute("SELECT bundle_id FROM bundles WHERE bundle_hash = ?", (bundle_hash,)).fetchone()
     if existing:
         return get_bundle(conn, existing["bundle_id"])
+
+    station_id = payload.get("station_id")
+    new_version = _version_key(version)
+    if supersedes:
+        previous = conn.execute(
+            "SELECT station_id, version FROM bundles WHERE bundle_id = ?", (supersedes,)
+        ).fetchone()
+        if not previous:
+            raise ValueError("被替代的站包不存在")
+        if previous["station_id"] != station_id:
+            raise ValueError("只能替代同一考站的站包")
+        if new_version <= _version_key(previous["version"]):
+            raise ValueError(f"新版本号必须高于被替代版本 {previous['version']}")
+    duplicate = conn.execute(
+        "SELECT bundle_id FROM bundles WHERE station_id = ? AND version = ? AND bundle_hash != ?",
+        (station_id, version, bundle_hash),
+    ).fetchone()
+    if duplicate:
+        raise ValueError(f"考站 {station_id} 的版本 {version} 已存在，请提升版本号")
 
     timestamp = db.now_iso()
     conn.execute(
