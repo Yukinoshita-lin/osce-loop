@@ -215,6 +215,12 @@ def _ensure_not_stopped(conn) -> None:
         raise HTTPException(423, "终止开关已激活，当前写操作被阻断")
 
 
+def _ensure_attempt_access(user: dict[str, Any], attempt: dict[str, Any]) -> None:
+    if user.get("role") == "student":
+        if not user.get("candidate_code") or attempt.get("candidate_code") != user["candidate_code"]:
+            raise HTTPException(403, "学生只能访问自己的场次与反馈")
+
+
 def _bundle_or_404(conn, bundle_id: str) -> dict[str, Any]:
     bundle = get_bundle(conn, bundle_id)
     if not bundle:
@@ -416,8 +422,17 @@ def overview(conn=Depends(get_conn)):
 
 
 @app.get("/api/attempts")
-def attempts(conn=Depends(get_conn)):
-    rows = db.rows_to_dicts(conn.execute("SELECT * FROM attempts ORDER BY attempt_id").fetchall())
+def attempts(request: Request, conn=Depends(get_conn)):
+    user = request.state.user
+    if user.get("role") == "student":
+        rows = db.rows_to_dicts(
+            conn.execute(
+                "SELECT * FROM attempts WHERE candidate_code = ? ORDER BY attempt_id",
+                (user.get("candidate_code"),),
+            ).fetchall()
+        )
+    else:
+        rows = db.rows_to_dicts(conn.execute("SELECT * FROM attempts ORDER BY attempt_id").fetchall())
     return [_attempt_summary(conn, a) for a in rows]
 
 
@@ -520,8 +535,9 @@ async def ingest_attempt(
 
 
 @app.get("/api/attempts/{attempt_id}")
-def attempt_detail(attempt_id: str, conn=Depends(get_conn)):
+def attempt_detail(attempt_id: str, request: Request, conn=Depends(get_conn)):
     attempt = _attempt_row(conn, attempt_id)
+    _ensure_attempt_access(request.state.user, attempt)
     bundle = _bundle_or_404(conn, attempt["bundle_id"])
     records = db.rows_to_dicts(
         conn.execute("SELECT * FROM score_records WHERE attempt_id = ? ORDER BY item_id", (attempt_id,)).fetchall()
@@ -904,8 +920,9 @@ def bundle_detail(bundle_id: str, conn=Depends(get_conn)):
 
 
 @app.get("/api/feedback/{attempt_id}")
-def feedback(attempt_id: str, conn=Depends(get_conn)):
+def feedback(attempt_id: str, request: Request, conn=Depends(get_conn)):
     attempt = _attempt_row(conn, attempt_id)
+    _ensure_attempt_access(request.state.user, attempt)
     bundle = _bundle_or_404(conn, attempt["bundle_id"])
     items = _item_map(bundle)
     templates = {

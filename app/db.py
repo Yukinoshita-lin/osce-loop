@@ -314,6 +314,7 @@ CREATE TABLE IF NOT EXISTS users (
     role TEXT NOT NULL,
     password_hash TEXT NOT NULL,
     active INTEGER NOT NULL DEFAULT 1,
+    candidate_code TEXT,
     created_at TEXT NOT NULL
 );
 
@@ -368,6 +369,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE model_cards ADD COLUMN is_public INTEGER NOT NULL DEFAULT 0")
     if "published_at" not in card_columns:
         conn.execute("ALTER TABLE model_cards ADD COLUMN published_at TEXT")
+
+    user_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+    if "candidate_code" not in user_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN candidate_code TEXT")
 
 
 def rows_to_dicts(rows: Iterable[sqlite3.Row]) -> list[dict[str, Any]]:

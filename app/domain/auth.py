@@ -19,11 +19,11 @@ ROLE_LABELS = {
     "student": "学生",
 }
 DEMO_USERS = [
-    ("admin", "系统管理员", "admin", "admin123"),
-    ("exam", "考务 李萍", "exam_manager", "exam123"),
-    ("reviewer", "主治 张蕾", "examiner", "review123"),
-    ("auditor", "审计员 周宁", "auditor", "audit123"),
-    ("student", "练习学生", "student", "student123"),
+    ("admin", "系统管理员", "admin", "admin123", None),
+    ("exam", "考务 李萍", "exam_manager", "exam123", None),
+    ("reviewer", "主治 张蕾", "examiner", "review123", None),
+    ("auditor", "审计员 周宁", "auditor", "audit123", None),
+    ("student", "练习学生", "student", "student123", "C2026-001"),
 ]
 
 
@@ -54,13 +54,18 @@ def _token_hash(token: str) -> str:
 
 
 def ensure_users(conn) -> None:
-    for username, display_name, role, password in DEMO_USERS:
+    for username, display_name, role, password, candidate_code in DEMO_USERS:
         existing = conn.execute("SELECT user_id FROM users WHERE username = ?", (username,)).fetchone()
         if existing:
+            if candidate_code:
+                conn.execute(
+                    "UPDATE users SET candidate_code = ? WHERE username = ? AND (candidate_code IS NULL OR candidate_code = '')",
+                    (candidate_code, username),
+                )
             continue
         conn.execute(
-            "INSERT INTO users(user_id, username, display_name, role, password_hash, active, created_at) "
-            "VALUES(?,?,?,?,?,?,?)",
+            "INSERT INTO users(user_id, username, display_name, role, password_hash, active, candidate_code, created_at) "
+            "VALUES(?,?,?,?,?,?,?,?)",
             (
                 db.new_id("usr"),
                 username,
@@ -68,6 +73,7 @@ def ensure_users(conn) -> None:
                 role,
                 hash_password(password),
                 1,
+                candidate_code,
                 db.now_iso(),
             ),
         )
@@ -81,6 +87,7 @@ def public_user(row) -> dict[str, Any]:
         "display_name": row["display_name"],
         "role": row["role"],
         "role_label": ROLE_LABELS.get(row["role"], row["role"]),
+        "candidate_code": row["candidate_code"] if "candidate_code" in row.keys() else None,
     }
 
 
@@ -147,6 +154,20 @@ def rbac_allowed(method: str, path: str, role: str) -> bool:
     if role == "admin":
         return True
     if method in ("GET", "HEAD", "OPTIONS"):
+        if path.startswith("/api/review/"):
+            return role in ("exam_manager", "examiner")
+        if path.startswith(("/api/quality", "/api/fairness", "/api/ab", "/api/audit")):
+            return role in ("exam_manager", "auditor")
+        if path.startswith("/api/governance/"):
+            return role in ("exam_manager", "auditor")
+        if path.startswith("/api/overview"):
+            return role in ("exam_manager", "examiner", "auditor")
+        if path.startswith("/api/bundles"):
+            return role in ("exam_manager", "examiner", "auditor")
+        if path.startswith(("/api/schedule", "/api/execution")):
+            return role in ("exam_manager", "examiner", "auditor")
+        if path.startswith("/api/attempts/"):
+            return role in ("exam_manager", "examiner", "auditor")
         return True
     if path == "/api/auth/logout":
         return True

@@ -70,5 +70,17 @@ def test_rbac_write_matrix():
     assert rbac_allowed("POST", "/api/sp/sessions", "student") is True
     assert rbac_allowed("POST", "/api/sp/sessions", "auditor") is False
     assert rbac_allowed("GET", "/api/quality", "auditor") is True
-    assert rbac_allowed("GET", "/api/audit", "student") is True
+    assert rbac_allowed("GET", "/api/audit", "student") is False
+    assert rbac_allowed("GET", "/api/attempts", "student") is True
+    assert rbac_allowed("GET", "/api/attempts/att_1", "student") is False
+    assert rbac_allowed("GET", "/api/feedback/att_1", "student") is True
+    assert rbac_allowed("GET", "/api/review/queue", "student") is False
+    assert rbac_allowed("GET", "/api/overview", "student") is False
+    assert rbac_allowed("GET", "/api/bundles", "student") is False
     assert rbac_allowed("POST", "/api/auth/logout", "auditor") is True
+
+
+def test_student_user_is_bound_to_candidate(conn):
+    student = authenticate(conn, "student", "student123")
+    assert student["role"] == "student"
+    assert student["candidate_code"] == "C2026-001"
