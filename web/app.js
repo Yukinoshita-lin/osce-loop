@@ -166,6 +166,7 @@ const ROUTES = {
   review: { title: '复核队列', render: viewReview },
   ingest: { title: '录像录入', render: viewIngest },
   schedule: { title: '考务编排', render: viewSchedule },
+  execution: { title: '考试执行', render: viewExecution },
   bundle: { title: '站包契约', render: viewBundle },
   feedback: { title: '反馈报告', render: viewFeedback },
   sp: { title: 'SP 演练', render: viewSP },
@@ -925,6 +926,141 @@ function scheduleHtml(schedule) {
         </ul>
         <div class="sep"></div>
         <div class="tiny muted">当前算法为确定性回溯 + 难度均衡启发式；真实部署可替换为 CP-SAT 或整数规划求解器。</div>
+      </div>
+    </div>`;
+}
+
+/* ---------- execution ---------- */
+const EXEC_STATUS = {
+  waiting: ['等待', 'muted'],
+  in_progress: ['进行中', 'blue'],
+  completed: ['已完成', 'teal'],
+  anomaly: ['异常', 'amber'],
+  terminated: ['已终止', 'red'],
+  stopped: ['已停止', 'red'],
+  running: ['进行中', 'teal'],
+  paused: ['暂停', 'amber'],
+};
+
+function execPill(status) {
+  const item = EXEC_STATUS[status] || [status, 'muted'];
+  return `<span class="pill ${item[1]}">${esc(item[0])}</span>`;
+}
+
+async function viewExecution() {
+  const data = await api('/api/execution/latest');
+  const run = data.run;
+  if (!run) {
+    $('#view').innerHTML = `
+      <div class="view-head">
+        <div><h2>考试执行</h2><p>S5：从排考表启动执行，记录异常与终止，事实层提示可一键关闭并留痕。</p></div>
+      </div>
+      <div class="grid c2">
+        <div class="card">
+          <div class="card-title">启动考试执行<span class="sub">使用最新排考表</span></div>
+          <p class="small dim">启动后系统会按轮次初始化全部考站槽位。当前演示不接入真实音视频流，执行状态与事件会写入审计链。</p>
+          <div class="btn-row" style="margin-top:12px">
+            <button class="btn primary" data-action="exec-start" ${data.schedule_available && !data.emergency_stop ? '' : 'disabled'}>开始考试执行</button>
+            <a class="btn" href="#/schedule">去考务编排</a>
+          </div>
+          ${data.emergency_stop ? '<div class="alert danger" style="margin-top:10px"><b>终止开关已激活</b><p>需先解除全局终止才能启动考试。</p></div>' : ''}
+          ${!data.schedule_available ? '<div class="alert" style="margin-top:10px"><b>尚无排考表</b><p>请先到考务编排生成排考表。</p></div>' : ''}
+        </div>
+        <div class="card">
+          <div class="card-title">执行纪律<span class="sub">现场事实层</span></div>
+          <ul class="small dim" style="padding-left:18px;line-height:1.9">
+            <li>实时提示只呈现事实，禁止呈现“合格/不合格”等判断。</li>
+            <li>提示可一键关闭，关闭操作写入事件日志与审计。</li>
+            <li>异常终止权始终由现场考务/考官保留。</li>
+            <li>媒体完整性缺口会标记为 critical 事件。</li>
+          </ul>
+        </div>
+      </div>`;
+    return;
+  }
+  $('#view').innerHTML = executionHtml(run, data.emergency_stop);
+  state.executionRunId = run.run_id;
+}
+
+function executionHtml(run, emergencyStop) {
+  const counts = run.counts || {};
+  const current = run.slots.filter((s) => s.round === run.current_round);
+  const completed = ['completed', 'stopped'].includes(run.status);
+  const roundNames = Array.from({ length: run.max_round }, (_, i) => i + 1);
+  const eventRows = (run.events || []).slice(0, 30).map((ev) => `
+    <div class="audit-row">
+      <div class="act" style="color:${ev.severity === 'critical' ? 'var(--red)' : ev.severity === 'warn' ? 'var(--amber)' : 'var(--teal)'}">${esc(ev.event_type)}</div>
+      <div class="obj">${esc(ev.message)}</div>
+      <div class="time">${fmtTime(ev.created_at)}</div>
+    </div>`).join('');
+  const slotCards = current.map((slot) => `
+    <div class="card tight" style="margin-bottom:8px">
+      <div class="attempt-strip" style="margin-bottom:4px">
+        <span><b>${esc(slot.candidate_name)}</b> · ${esc(slot.station_name)}</span>
+        ${execPill(slot.status)}
+      </div>
+      <div class="tiny muted">${esc(slot.room)} · ${esc(slot.sp)} · ${esc(slot.examiner)} · ${slot.start_min}–${slot.end_min}′</div>
+      ${run.hints_enabled ? `<ul class="tiny muted" style="margin:6px 0 0;padding-left:16px">${(slot.hints || []).map((h) => `<li>${esc(h)}</li>`).join('')}</ul>` : '<div class="tiny muted" style="margin-top:5px">事实层提示已关闭</div>'}
+      ${slot.note ? `<div class="violation">${esc(slot.note)}</div>` : ''}
+      ${['waiting', 'in_progress'].includes(slot.status) && !completed ? `
+        <div class="btn-row" style="margin-top:7px">
+          <button class="btn small" data-action="exec-slot" data-slot-key="${dataAttr(slot.slot_key)}" data-slot-action="complete">完成</button>
+          <button class="btn small amber" data-action="exec-slot" data-slot-key="${dataAttr(slot.slot_key)}" data-slot-action="anomaly">异常</button>
+          <button class="btn small danger" data-action="exec-slot" data-slot-key="${dataAttr(slot.slot_key)}" data-slot-action="terminate">终止该站</button>
+        </div>` : ''}
+    </div>`).join('');
+  const matrixRows = Object.values(
+    run.slots.reduce((acc, slot) => {
+      acc[slot.candidate_id] = acc[slot.candidate_id] || { id: slot.candidate_id, name: slot.candidate_name, byRound: {} };
+      acc[slot.candidate_id].byRound[slot.round] = slot;
+      return acc;
+    }, {})
+  ).map((candidate) => `
+    <tr>
+      <td><div class="mono tiny muted">${esc(candidate.id)}</div><div>${esc(candidate.name)}</div></td>
+      ${roundNames.map((r) => {
+        const slot = candidate.byRound[r];
+        return `<td>${slot ? `${execPill(slot.status)}<div class="tiny muted">${esc(slot.station_name)}</div>` : '<span class="muted">—</span>'}</td>`;
+      }).join('')}
+    </tr>`).join('');
+
+  return `
+    <div class="view-head">
+      <div>
+        <h2>考试执行</h2>
+        <p>${esc(run.exam_date || '')} · 第 ${run.current_round} / ${run.max_round} 轮 · 事实层提示${run.hints_enabled ? '开启' : '关闭'}</p>
+      </div>
+      <div class="btn-row">
+        ${execPill(run.status)}
+        ${!completed ? `<button class="btn small" data-action="exec-hints" data-enabled="${run.hints_enabled ? 'false' : 'true'}">${run.hints_enabled ? '关闭事实层提示' : '开启事实层提示'}</button>` : ''}
+        ${!completed ? `<button class="btn small primary" data-action="exec-advance">${run.current_round >= run.max_round ? '结束考试' : '推进到下一轮'}</button>` : ''}
+        ${!completed ? '<button class="btn small danger" data-action="exec-stop">终止考试</button>' : ''}
+        ${emergencyStop ? '<button class="btn small amber" data-action="exec-global-resume">解除全局终止</button>' : '<button class="btn small danger" data-action="exec-global-stop">全局终止</button>'}
+      </div>
+    </div>
+    ${emergencyStop ? '<div class="alert danger"><b>全局终止开关已激活</b><p>评分、SP 对话与成绩发布等写操作已被阻断；请确认现场安全后解除。</p></div>' : ''}
+    <div class="grid c4" style="margin-bottom:16px">
+      <div class="kpi blue"><div class="k">当前轮次</div><div class="v">${run.current_round}<small>/ ${run.max_round}</small></div><div class="d">${current.length} 个并行考站</div></div>
+      <div class="kpi teal"><div class="k">已完成</div><div class="v">${counts.completed || 0}</div><div class="d">总槽位 ${counts.total}</div></div>
+      <div class="kpi amber"><div class="k">异常</div><div class="v">${counts.anomaly || 0}</div><div class="d">需现场处置</div></div>
+      <div class="kpi red"><div class="k">已终止</div><div class="v">${counts.terminated || 0}</div><div class="d">保留终止理由与事件</div></div>
+    </div>
+    <div class="grid c1-2" style="margin-bottom:16px">
+      <div class="card">
+        <div class="card-title">当前轮次槽位<span class="sub">仅事实层提示</span></div>
+        <div style="max-height:520px;overflow-y:auto">${slotCards || '<div class="empty">当前轮次无槽位</div>'}</div>
+      </div>
+      <div class="card">
+        <div class="card-title">全流程矩阵<span class="sub">${Object.keys(run.slots.reduce((a, s) => { a[s.candidate_id] = 1; return a; }, {})).length} 名考生 · ${run.max_round} 轮</span></div>
+        <div class="tbl-wrap">
+          <table class="schedule-table">
+            <thead><tr><th>考生</th>${roundNames.map((r) => `<th>第 ${r} 轮</th>`).join('')}</tr></thead>
+            <tbody>${matrixRows}</tbody>
+          </table>
+        </div>
+        <div class="sep"></div>
+        <div class="card-title">事件日志<span class="sub">只追加</span></div>
+        <div class="audit-list" style="max-height:300px">${eventRows || '<div class="tiny muted">暂无事件</div>'}</div>
       </div>
     </div>`;
 }
@@ -1743,6 +1879,107 @@ document.addEventListener('click', async (e) => {
       });
       toast(`已升级：${result.old_stage} → ${result.new_stage}`);
       await viewQuality();
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'exec-start') {
+    try {
+      await api('/api/execution/start', { method: 'POST', body: { actor: state.reviewer || '考务' } });
+      toast('考试执行已启动，第 1 轮槽位进入进行中');
+      await viewExecution();
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'exec-advance') {
+    try {
+      const data = await api(`/api/execution/${encodeURIComponent(state.executionRunId)}/advance`, { method: 'POST' });
+      toast(data.run.status === 'completed' ? '全部轮次完成' : `已进入第 ${data.run.current_round} 轮`);
+      await viewExecution();
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'exec-stop') {
+    const reason = prompt('终止整场考试的理由：');
+    if (!reason) return;
+    try {
+      await api(`/api/execution/${encodeURIComponent(state.executionRunId)}/stop`, {
+        method: 'POST',
+        body: { reason, actor: state.reviewer || '考务' },
+      });
+      toast('考试已终止，事件已写入审计');
+      await viewExecution();
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'exec-hints') {
+    try {
+      const enabled = el.dataset.enabled === 'true';
+      await api(`/api/execution/${encodeURIComponent(state.executionRunId)}/hints`, {
+        method: 'POST',
+        body: { enabled, actor: state.reviewer || '考务' },
+      });
+      toast(enabled ? '事实层提示已开启' : '事实层提示已关闭，操作已留痕');
+      await viewExecution();
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'exec-slot') {
+    const slotAction = el.dataset.slotAction;
+    let note = '';
+    if (slotAction !== 'complete') {
+      note = prompt(slotAction === 'terminate' ? '终止该站的理由：' : '异常说明（事实层）：') || '';
+      if (slotAction === 'terminate' && !note) return;
+    }
+    try {
+      await api(`/api/execution/${encodeURIComponent(state.executionRunId)}/slots/${encodeURIComponent(el.dataset.slotKey)}/action`, {
+        method: 'POST',
+        body: { action: slotAction, note, actor: state.reviewer || '考务' },
+      });
+      toast(slotAction === 'complete' ? '该槽位已完成' : slotAction === 'terminate' ? '该站已终止' : '异常已记录');
+      await viewExecution();
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'exec-global-stop') {
+    if (!confirm('激活全局终止开关？评分、SP 对话与成绩发布将被阻断，并终止当前考试执行。')) return;
+    try {
+      await api('/api/governance/termination-switch', {
+        method: 'POST',
+        body: { active: true, reason: '考试执行台全局终止', actor: state.reviewer || '考务' },
+      });
+      if (state.executionRunId) {
+        await api(`/api/execution/${encodeURIComponent(state.executionRunId)}/stop`, {
+          method: 'POST',
+          body: { reason: '全局终止开关', actor: state.reviewer || '考务' },
+        });
+      }
+      toast('全局终止已激活', true);
+      await viewExecution();
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'exec-global-resume') {
+    try {
+      await api('/api/governance/termination-switch', {
+        method: 'POST',
+        body: { active: false, reason: '现场确认安全，解除终止', actor: state.reviewer || '考务' },
+      });
+      toast('全局终止已解除');
+      await viewExecution();
     } catch (err) {
       toast(err.message, true);
     }

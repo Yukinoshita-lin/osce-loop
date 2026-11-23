@@ -49,6 +49,15 @@ from .domain.governance import (
     set_emergency_stop,
     set_release_stage,
 )
+from .domain.execution import (
+    advance_run,
+    get_run,
+    latest_run,
+    slot_action,
+    start_run,
+    stop_run,
+    toggle_hints,
+)
 from .domain.ingest import create_ingested_attempt
 from .domain.practice import build_practice_report
 from .domain.risk import RISK_ORDER, escalate_risk
@@ -974,6 +983,95 @@ def gen_schedule(body: ScheduleBody, conn=Depends(get_conn)):
 @app.get("/api/schedule/latest")
 def get_latest_schedule(conn=Depends(get_conn)):
     return {"schedule": latest_schedule(conn)}
+
+
+@app.get("/api/execution/latest")
+def get_latest_execution(conn=Depends(get_conn)):
+    run = latest_run(conn)
+    return {"run": run, "schedule_available": latest_schedule(conn) is not None, "emergency_stop": emergency_stop_active(conn)}
+
+
+class RunStartBody(BaseModel):
+    schedule_id: str | None = None
+    actor: str = "考务"
+
+
+@app.post("/api/execution/start")
+def start_execution(body: RunStartBody, conn=Depends(get_conn)):
+    _ensure_not_stopped(conn)
+    try:
+        run = start_run(conn, schedule_id=body.schedule_id, actor=body.actor)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "run": run}
+
+
+@app.get("/api/execution/{run_id}")
+def get_execution(run_id: str, conn=Depends(get_conn)):
+    try:
+        return {"run": get_run(conn, run_id)}
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.post("/api/execution/{run_id}/advance")
+def advance_execution(run_id: str, conn=Depends(get_conn)):
+    _ensure_not_stopped(conn)
+    try:
+        run = advance_run(conn, run_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "run": run}
+
+
+class SlotActionBody(BaseModel):
+    action: str
+    note: str = ""
+    actor: str = "考务"
+
+
+@app.post("/api/execution/{run_id}/slots/{slot_key}/action")
+def execution_slot_action(run_id: str, slot_key: str, body: SlotActionBody, conn=Depends(get_conn)):
+    try:
+        run = slot_action(
+            conn,
+            run_id,
+            slot_key,
+            action=body.action,
+            note=body.note,
+            actor=body.actor,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "run": run}
+
+
+class HintsBody(BaseModel):
+    enabled: bool
+    actor: str = "考务"
+
+
+@app.post("/api/execution/{run_id}/hints")
+def execution_hints(run_id: str, body: HintsBody, conn=Depends(get_conn)):
+    try:
+        run = toggle_hints(conn, run_id, enabled=body.enabled, actor=body.actor)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return {"ok": True, "run": run}
+
+
+class RunStopBody(BaseModel):
+    reason: str = "人工终止"
+    actor: str = "考务"
+
+
+@app.post("/api/execution/{run_id}/stop")
+def stop_execution(run_id: str, body: RunStopBody, conn=Depends(get_conn)):
+    try:
+        run = stop_run(conn, run_id, reason=body.reason, actor=body.actor)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return {"ok": True, "run": run}
 
 
 class GovernanceBody(BaseModel):

@@ -263,6 +263,49 @@ CREATE TABLE IF NOT EXISTS exam_schedules (
     schedule TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS exam_runs (
+    run_id TEXT PRIMARY KEY,
+    schedule_id TEXT,
+    exam_date TEXT,
+    status TEXT NOT NULL,
+    current_round INTEGER NOT NULL DEFAULT 1,
+    hints_enabled INTEGER NOT NULL DEFAULT 1,
+    started_at TEXT,
+    ended_at TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS exam_run_slots (
+    run_id TEXT NOT NULL,
+    slot_key TEXT NOT NULL,
+    candidate_id TEXT,
+    candidate_name TEXT,
+    round INTEGER NOT NULL,
+    station_id TEXT,
+    station_name TEXT,
+    room TEXT,
+    sp TEXT,
+    examiner TEXT,
+    start_min INTEGER,
+    end_min INTEGER,
+    status TEXT NOT NULL DEFAULT 'waiting',
+    note TEXT,
+    hints TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (run_id, slot_key)
+);
+
+CREATE TABLE IF NOT EXISTS exam_events (
+    event_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    severity TEXT NOT NULL DEFAULT 'info',
+    message TEXT NOT NULL,
+    slot_key TEXT,
+    payload TEXT,
+    created_at TEXT NOT NULL
+);
 """
 
 
