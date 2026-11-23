@@ -545,6 +545,7 @@ function renderWorkbench(data) {
         ${attempt.media_purged_at
           ? `<div class="quote absence">媒体已按留存策略清理（${esc(fmtTime(attempt.media_purged_at))}），证据时间戳与哈希链仍保留；如需回放请走申诉调档。</div>`
           : `<audio id="review-audio" preload="metadata" controls src="${dataAttr(ev && data.media_url ? data.media_url : (data.media_url || ''))}"></audio>`}
+        ${attempt.media_sha256 ? `<div class="tiny muted mono" style="margin-top:6px">媒体校验值 ${esc(attempt.media_sha256)}</div>` : ''}
         <div class="clip-actions">
           <button class="btn small primary" data-action="play-clip">播放证据片段 ±3 秒</button>
           <span class="play-status" id="play-status">${data.evidence.length ? '等待播放' : '无 AI 片段'}</span>

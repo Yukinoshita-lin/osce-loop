@@ -23,6 +23,7 @@ from .config import (
     SP_PROMPT_VERSION,
 )
 from .domain.bundle import apply_authority_reset, freeze_bundle
+from .domain.media import file_sha256
 from .domain.rubric import PHASE_RANK
 from .domain.stats import quality_report
 from .domain.sus import compute_sus
@@ -859,6 +860,7 @@ def seed_if_empty(conn) -> bool:
     if conn.execute("SELECT COUNT(*) AS n FROM bundles").fetchone()["n"] > 0:
         return False
     ensure_demo_media()
+    media_sha = file_sha256(MEDIA_FILE)
     payload = build_bundle_payload()
     bundle = freeze_bundle(conn, payload, actor="命题专家 林岚", version="1.0", reason="演示站包首次冻结")
     gateway = CapabilityGateway(conn, MockScoringProvider(), MODEL_VERSION, PROMPT_VERSION)
@@ -872,9 +874,9 @@ def seed_if_empty(conn) -> bool:
         appeal = meta["code"] == "C2026-013"
         conn.execute(
             "INSERT INTO attempts(attempt_id, bundle_id, candidate_code, candidate_name, session_id, risk_level, "
-            "media_id, media_url, duration_ms, integrity_gap, integrity_note, appeal, asr_confidence, status, "
-            "ab_group, created_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "media_id, media_url, media_sha256, duration_ms, integrity_gap, integrity_note, appeal, asr_confidence, "
+            "status, ab_group, created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 attempt_id,
                 bundle["bundle_id"],
@@ -884,6 +886,7 @@ def seed_if_empty(conn) -> bool:
                 "L2",
                 MEDIA_ID,
                 MEDIA_URL,
+                media_sha,
                 duration_ms,
                 1 if integrity_gap else 0,
                 "第 2 段音频缺失 38 秒，转写存在断裂" if integrity_gap else None,

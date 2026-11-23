@@ -82,6 +82,7 @@ from .domain.execution import (
     toggle_hints,
 )
 from .domain.ingest import create_ingested_attempt
+from .domain.media import backfill_media_hashes
 from .domain.practice import build_practice_report
 from .domain.retention import purge_expired, refresh_retention, retention_overview
 from .domain.risk import RISK_ORDER, escalate_risk
@@ -110,6 +111,7 @@ async def lifespan(app: FastAPI):
     ensure_schedule_inputs(conn)
     ensure_users(conn)
     refresh_retention(conn)
+    backfill_media_hashes(conn)
     conn.close()
     yield
 
@@ -369,6 +371,7 @@ def _attempt_summary(conn, attempt: dict[str, Any]) -> dict[str, Any]:
         "integrity_note": attempt.get("integrity_note"),
         "appeal": bool(attempt.get("appeal")),
         "media_url": attempt.get("media_url"),
+        "media_sha256": attempt.get("media_sha256"),
         "media_purged_at": attempt.get("media_purged_at"),
         "retention_class": attempt.get("retention_class"),
         "retain_until": attempt.get("retain_until"),
@@ -508,6 +511,7 @@ async def _save_media(upload: UploadFile | None) -> dict[str, Any] | None:
     stored_name = f"{media_id}{suffix}"
     target = UPLOAD_DIR / stored_name
     total = 0
+    digest = hashlib.sha256()
     try:
         with target.open("wb") as output:
             while True:
@@ -517,6 +521,7 @@ async def _save_media(upload: UploadFile | None) -> dict[str, Any] | None:
                 total += len(chunk)
                 if total > MAX_MEDIA_BYTES:
                     raise HTTPException(413, "媒体文件超过 200MB 限制")
+                digest.update(chunk)
                 output.write(chunk)
     except Exception:
         target.unlink(missing_ok=True)
@@ -528,6 +533,7 @@ async def _save_media(upload: UploadFile | None) -> dict[str, Any] | None:
         "media_filename": upload.filename,
         "stored_name": stored_name,
         "size_bytes": total,
+        "sha256": "sha256:" + digest.hexdigest(),
     }
 
 
@@ -643,6 +649,7 @@ async def ingest_attempt(
         media_id=(media or {}).get("media_id") or "upload_no_media",
         media_url=(media or {}).get("media_url"),
         media_filename=(media or {}).get("filename"),
+        media_sha256=(media or {}).get("sha256"),
         media_size_bytes=(media or {}).get("size_bytes") or 0,
         transcript_source=parsed.get("source", "upload"),
         asr_model=(asr_meta or {}).get("model_version"),

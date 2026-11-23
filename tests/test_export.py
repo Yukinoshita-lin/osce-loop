@@ -48,6 +48,7 @@ def test_package_contains_case_evidence_and_audit(conn):
     assert package["review_actions"]
     assert package["audit_events"]
     assert package["integrity"]["media_url"]
+    assert package["attempt"]["media_sha256"].startswith("sha256:")
 
     export_event = conn.execute(
         "SELECT * FROM audit_events WHERE action = 'attempt.export' ORDER BY rowid DESC LIMIT 1"

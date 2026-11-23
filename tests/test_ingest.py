@@ -122,10 +122,12 @@ def test_ingest_creates_scored_attempt(conn, bundle):
         media_id="media_1",
         media_url="/media/uploads/test.wav",
         media_filename="test.wav",
+        media_sha256="sha256:test",
         actor="test",
     )
     attempt = conn.execute("SELECT * FROM attempts WHERE attempt_id = ?", (attempt_id,)).fetchone()
     assert attempt["candidate_code"] == "C-UPLOAD-001"
+    assert attempt["media_sha256"] == "sha256:test"
     assert attempt["integrity_gap"] == 0
     assert attempt["status"] == "pending_review"
     assert attempt["retention_class"] == "L2"

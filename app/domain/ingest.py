@@ -24,6 +24,7 @@ def create_ingested_attempt(
     media_id: str,
     media_url: str | None,
     media_filename: str | None,
+    media_sha256: str | None = None,
     media_size_bytes: int = 0,
     transcript_source: str = "upload",
     asr_model: str | None = None,
@@ -43,9 +44,9 @@ def create_ingested_attempt(
 
     conn.execute(
         "INSERT INTO attempts(attempt_id, bundle_id, candidate_code, candidate_name, session_id, risk_level, "
-        "media_id, media_url, media_filename, media_size_bytes, retention_class, retain_until, duration_ms, "
-        "integrity_gap, integrity_note, appeal, asr_confidence, status, ab_group, created_at) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "media_id, media_url, media_filename, media_sha256, media_size_bytes, retention_class, retain_until, "
+        "duration_ms, integrity_gap, integrity_note, appeal, asr_confidence, status, ab_group, created_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             attempt_id,
             bundle["bundle_id"],
@@ -56,6 +57,7 @@ def create_ingested_attempt(
             media_id,
             media_url,
             media_filename,
+            media_sha256,
             media_size_bytes,
             plan["retention_class"],
             plan["retain_until"],
@@ -99,6 +101,7 @@ def create_ingested_attempt(
             "risk_level": risk_level,
             "utterances": len(transcript),
             "media_filename": media_filename,
+            "media_sha256": media_sha256,
             "media_size_bytes": media_size_bytes,
             "retention_class": plan["retention_class"],
             "retain_until": plan["retain_until"],
