@@ -89,6 +89,7 @@ from .domain.execution import (
 )
 from .domain.ingest import create_ingested_attempt
 from .domain.integrity import backfill_transcript_hashes, transcript_integrity, verify_evidence
+from .domain.item_quality import item_quality_report
 from .domain.media import backfill_media_hashes
 from .domain.practice import build_practice_report
 from .domain.retention import purge_expired, refresh_retention, retention_overview
@@ -1300,10 +1301,23 @@ def quality(conn=Depends(get_conn)):
     for call in calls:
         key = call["capability"] or "unknown"
         cost_by_capability[key] = round(cost_by_capability.get(key, 0.0) + (call["cost_usd"] or 0), 6)
+    latest_bundle = bundles_list[0] if bundles_list else None
+    item_quality = (
+        {
+            "bundle_id": latest_bundle["bundle_id"],
+            "station_id": latest_bundle["station_id"],
+            "title": latest_bundle["title"],
+            "version": latest_bundle["version"],
+            "items": item_quality_report(conn, latest_bundle["bundle_id"]),
+        }
+        if latest_bundle
+        else None
+    )
     return {
         "report": report,
         "gates": gates,
         "model_cards": model_cards,
+        "item_quality": item_quality,
         "ai_calls": {
             "count": len(calls),
             "p95_latency_ms": p95,

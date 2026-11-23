@@ -1929,6 +1929,7 @@ async function viewQuality() {
   ]);
   const backups = backupsData.backups || [];
   const stationQuality = stationData.stations || [];
+  const itemQuality = data.item_quality || null;
   const report = data.report;
   const gates = data.gates.gates;
   const stageLabels = {
@@ -1952,6 +1953,17 @@ async function viewQuality() {
       <td class="num">${pct(s.evidence_rate, 1)}</td>
       <td class="num">${pct(s.edit_rate, 1)}</td>
       <td class="num">${pct(s.integrity_gap_rate, 1)}</td>
+    </tr>`).join('');
+  const itemRows = ((itemQuality && itemQuality.items) || []).map((item) => `
+    <tr>
+      <td><div class="mono tiny muted">${esc(item.item_id)}</div><div style="font-weight:600">${esc(item.title)}</div></td>
+      <td>${item.critical ? '<span class="pill red">关键</span>' : '<span class="muted tiny">—</span>'}</td>
+      <td class="num">${item.records}</td>
+      <td class="num">${item.reviewed}</td>
+      <td class="num">${pct(item.edit_rate, 0)}</td>
+      <td class="num">${item.gold_records ? pct(item.exact_match_rate, 0) : '—'}</td>
+      <td class="num">${num(item.avg_confidence, 2)}</td>
+      <td>${item.needs_review ? '<span class="pill amber">建议改写</span>' : '<span class="pill teal">可判</span>'}</td>
     </tr>`).join('');
   const gateCards = gates.map((gate) => `
     <div class="gate-card ${gate.is_current ? 'current' : ''} ${gate.is_locked ? 'locked' : ''}">
@@ -2024,6 +2036,17 @@ async function viewQuality() {
         </table>
       </div>
       <div class="tiny muted" style="margin-top:6px">分站 QWK 仅统计该冻结版本下的场次；最新版本无场次时显示为 —。</div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">项级可判性<span class="sub">${itemQuality ? `${esc(itemQuality.station_id)} · v${esc(itemQuality.version)}` : '暂无站包'} · 编辑率高或与金标准低一致优先改写</span></div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>评分项</th><th>关键</th><th class="num">评分记录</th><th class="num">已复核</th><th class="num">人工编辑率</th><th class="num">金标准一致率</th><th class="num">平均置信</th><th>判定</th></tr></thead>
+          <tbody>${itemRows || '<tr><td colspan="8" class="empty">暂无评分项</td></tr>'}</tbody>
+        </table>
+      </div>
+      <div class="tiny muted" style="margin-top:6px">判定规则：复核 ≥3 且编辑率 ≥30%，或金标准 ≥3 且一致率 ≤60%，标记为“建议改写”。</div>
     </div>
 
     <div class="gates" style="margin-bottom:16px">${gateCards}</div>
