@@ -8,6 +8,7 @@ from typing import Any
 from .. import db
 from ..ai.base import CapabilityGateway
 from ..ai.pipeline import run_scoring
+from .integrity import transcript_digest
 from .retention import retention_plan
 
 
@@ -72,8 +73,13 @@ def create_ingested_attempt(
         ),
     )
     conn.execute(
-        "INSERT INTO transcripts(attempt_id, payload, created_at) VALUES(?,?,?)",
-        (attempt_id, json.dumps(transcript, ensure_ascii=False), db.now_iso()),
+        "INSERT INTO transcripts(attempt_id, payload, sha256, created_at) VALUES(?,?,?,?)",
+        (
+            attempt_id,
+            json.dumps(transcript, ensure_ascii=False),
+            transcript_digest(transcript),
+            db.now_iso(),
+        ),
     )
     conn.commit()
 

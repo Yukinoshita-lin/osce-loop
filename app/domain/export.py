@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from .. import db
+from .integrity import transcript_integrity
 
 
 def canonical_json(value: Any) -> str:
@@ -32,12 +33,14 @@ def build_attempt_package(conn, attempt_id: str, *, exported_by: str) -> dict[st
             bundle[key] = {} if key != "payload" else []
 
     transcript_row = conn.execute(
-        "SELECT payload, created_at FROM transcripts WHERE attempt_id = ?", (attempt_id,)
+        "SELECT payload, sha256, created_at FROM transcripts WHERE attempt_id = ?", (attempt_id,)
     ).fetchone()
     try:
         transcript = json.loads(transcript_row["payload"]) if transcript_row else []
     except (TypeError, ValueError):
         transcript = []
+    transcript_sha = transcript_row["sha256"] if transcript_row else None
+    transcript_state = transcript_integrity(transcript_sha, transcript if transcript_row else None)
 
     records = db.rows_to_dicts(
         conn.execute(
@@ -91,6 +94,8 @@ def build_attempt_package(conn, attempt_id: str, *, exported_by: str) -> dict[st
         },
         "transcript": {
             "created_at": transcript_row["created_at"] if transcript_row else None,
+            "sha256": transcript_sha,
+            "integrity": transcript_state,
             "utterances": transcript,
         },
         "score_records": records,

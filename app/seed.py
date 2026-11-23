@@ -23,6 +23,7 @@ from .config import (
     SP_PROMPT_VERSION,
 )
 from .domain.bundle import apply_authority_reset, freeze_bundle
+from .domain.integrity import transcript_digest
 from .domain.media import file_sha256
 from .domain.rubric import PHASE_RANK
 from .domain.stats import quality_report
@@ -903,8 +904,13 @@ def seed_if_empty(conn) -> bool:
             (attempt_id, profile_row["gender"], profile_row["origin"], profile_row["language"], db.now_iso()),
         )
         conn.execute(
-            "INSERT INTO transcripts(attempt_id, payload, created_at) VALUES(?,?,?)",
-            (attempt_id, json.dumps(transcript, ensure_ascii=False), db.now_iso()),
+            "INSERT INTO transcripts(attempt_id, payload, sha256, created_at) VALUES(?,?,?,?)",
+            (
+                attempt_id,
+                json.dumps(transcript, ensure_ascii=False),
+                transcript_digest(transcript),
+                db.now_iso(),
+            ),
         )
         conn.commit()
         attempt = {

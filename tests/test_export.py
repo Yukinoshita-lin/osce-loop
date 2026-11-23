@@ -43,6 +43,8 @@ def test_package_contains_case_evidence_and_audit(conn):
     assert package["attempt"]["attempt_id"] == attempt_id
     assert package["bundle"]["bundle_hash"].startswith("sha256:")
     assert package["transcript"]["utterances"]
+    assert package["transcript"]["sha256"].startswith("sha256:")
+    assert package["transcript"]["integrity"] == "ok"
     assert package["score_records"]
     assert all(row["attempt_id"] == attempt_id for row in package["score_records"])
     assert package["review_actions"]

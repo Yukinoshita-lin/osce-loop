@@ -458,6 +458,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
                 (valid_until.isoformat(timespec="seconds"), row["cert_id"]),
             )
 
+    transcript_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(transcripts)").fetchall()
+    }
+    if "sha256" not in transcript_columns:
+        conn.execute("ALTER TABLE transcripts ADD COLUMN sha256 TEXT")
+
 
 def rows_to_dicts(rows: Iterable[sqlite3.Row]) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]

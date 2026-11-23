@@ -86,6 +86,7 @@ from .domain.execution import (
     toggle_hints,
 )
 from .domain.ingest import create_ingested_attempt
+from .domain.integrity import backfill_transcript_hashes, transcript_integrity
 from .domain.media import backfill_media_hashes
 from .domain.practice import build_practice_report
 from .domain.retention import purge_expired, refresh_retention, retention_overview
@@ -117,6 +118,7 @@ async def lifespan(app: FastAPI):
     ensure_users(conn)
     refresh_retention(conn)
     backfill_media_hashes(conn)
+    backfill_transcript_hashes(conn)
     conn.close()
     yield
 
@@ -385,6 +387,19 @@ def _attempt_summary(conn, attempt: dict[str, Any]) -> dict[str, Any]:
         for r in pending
         if (_item_map(bundle).get(r["item_id"]) or {}).get("critical")
     ]
+    transcript_row = conn.execute(
+        "SELECT payload, sha256 FROM transcripts WHERE attempt_id = ?", (attempt["attempt_id"],)
+    ).fetchone()
+    if transcript_row:
+        try:
+            utterances = json.loads(transcript_row["payload"])
+        except (TypeError, ValueError):
+            utterances = None
+        transcript_sha = transcript_row["sha256"]
+        transcript_state = transcript_integrity(transcript_sha, utterances)
+    else:
+        transcript_sha = None
+        transcript_state = "missing"
     return {
         "attempt_id": attempt["attempt_id"],
         "candidate_code": attempt["candidate_code"],
@@ -412,6 +427,8 @@ def _attempt_summary(conn, attempt: dict[str, Any]) -> dict[str, Any]:
         "appeal": bool(attempt.get("appeal")),
         "media_url": attempt.get("media_url"),
         "media_sha256": attempt.get("media_sha256"),
+        "transcript_sha256": transcript_sha,
+        "transcript_integrity": transcript_state,
         "media_purged_at": attempt.get("media_purged_at"),
         "retention_class": attempt.get("retention_class"),
         "retain_until": attempt.get("retain_until"),
