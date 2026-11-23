@@ -2035,8 +2035,10 @@ async function viewQuality() {
           <button class="btn small" data-action="verify-audit">校验审计链</button>
           <button class="btn small" data-action="create-anchor">写入审计锚点</button>
           <button class="btn small" data-action="verify-anchor">校验外部锚点</button>
+          <button class="btn small" data-action="ops-health">运行健康检查</button>
         </div>
         <div id="audit-chain-result" class="tiny muted" style="margin-bottom:8px">尚未校验。校验会逐条重算 prev_hash 与事件哈希。</div>
+        <div id="ops-health-result" class="tiny muted" style="margin-bottom:8px"></div>
         <div class="audit-list">${auditRows || '<div class="empty">暂无审计</div>'}</div>
       </div>
     </div>
@@ -2311,6 +2313,26 @@ document.addEventListener('click', async (e) => {
       }
       toast(result.ok ? result.message : '外部锚点校验失败', !result.ok);
     } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'ops-health') {
+    const box = $('#ops-health-result');
+    try {
+      const result = await api('/api/ops/health');
+      const healthy = result.checks.filter((c) => c.ok).length;
+      if (box) {
+        box.innerHTML = `
+          <div><span class="pill ${result.status === 'ok' ? 'teal' : 'red'}">${result.status === 'ok' ? '运行正常' : '存在降级'}</span>
+            ${healthy}/${result.checks.length} 项通过 · AI ${esc(result.ai.provider)} · ${esc(result.ai.model_version)}</div>
+          ${result.checks.map((c) => `
+            <div style="margin-top:3px"><span class="pill ${c.ok ? 'teal' : 'red'}">${esc(c.label)}</span> <span>${esc(c.detail)}</span></div>`).join('')}
+          <div style="margin-top:3px">场次 ${result.counts.attempts} · 评分记录 ${result.counts.score_records} · 待复核 ${result.counts.pending_reviews} · 审计事件 ${result.counts.audit_events}</div>`;
+      }
+      toast(result.status === 'ok' ? '健康检查通过' : '健康检查发现降级项', result.status !== 'ok');
+    } catch (err) {
+      if (box) box.innerHTML = `<span class="pill red">检查失败</span> ${esc(err.message)}`;
       toast(err.message, true);
     }
     return;

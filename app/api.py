@@ -74,6 +74,7 @@ from .domain.governance import (
     set_emergency_stop,
     set_release_stage,
 )
+from .domain.health import system_health
 from .domain.execution import (
     advance_run,
     get_run,
@@ -184,6 +185,22 @@ async def auth_middleware(request: Request, call_next):
     return await call_next(request)
 
 
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; "
+        "connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+    )
+    return response
+
+
 class LoginBody(BaseModel):
     username: str = Field(min_length=1)
     password: str = Field(min_length=1)
@@ -261,6 +278,25 @@ def logout(request: Request, response: Response, conn=Depends(get_conn)):
         after=None,
     )
     return {"ok": True}
+
+
+@app.get("/healthz")
+def healthz():
+    """无鉴权的最小存活探针：只验证数据库可连接。"""
+    try:
+        conn = db.connect()
+        try:
+            conn.execute("SELECT 1").fetchone()
+        finally:
+            conn.close()
+    except Exception as exc:
+        raise HTTPException(503, "数据库不可用") from exc
+    return {"status": "ok"}
+
+
+@app.get("/api/ops/health")
+def ops_health(conn=Depends(get_conn)):
+    return system_health(conn)
 
 UPLOAD_DIR = MEDIA_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
