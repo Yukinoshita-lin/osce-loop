@@ -68,6 +68,13 @@ function mmss(ms) {
   const total = Math.max(0, Math.floor(Number(ms) / 1000));
   return String(Math.floor(total / 60)).padStart(2, '0') + ':' + String(total % 60).padStart(2, '0');
 }
+function bytesText(value) {
+  const n = Number(value) || 0;
+  if (n >= 1024 * 1024 * 1024) return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+  if (n >= 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB';
+  if (n >= 1024) return (n / 1024).toFixed(1) + ' KB';
+  return n + ' B';
+}
 function fmtTime(iso) {
   if (!iso) return '—';
   const d = new Date(iso);
@@ -533,7 +540,9 @@ function renderWorkbench(data) {
       <section class="card clip-card">
         <div class="card-title">证据片段<span class="sub">${esc(clipLabel)}</span></div>
         ${evidenceHtml}
-        <audio id="review-audio" preload="metadata" controls src="${dataAttr(ev && data.media_url ? data.media_url : (data.media_url || ''))}"></audio>
+        ${attempt.media_purged_at
+          ? `<div class="quote absence">媒体已按留存策略清理（${esc(fmtTime(attempt.media_purged_at))}），证据时间戳与哈希链仍保留；如需回放请走申诉调档。</div>`
+          : `<audio id="review-audio" preload="metadata" controls src="${dataAttr(ev && data.media_url ? data.media_url : (data.media_url || ''))}"></audio>`}
         <div class="clip-actions">
           <button class="btn small primary" data-action="play-clip">播放证据片段 ±3 秒</button>
           <span class="play-status" id="play-status">${data.evidence.length ? '等待播放' : '无 AI 片段'}</span>
@@ -1289,6 +1298,7 @@ async function renderFeedback(attemptId) {
   const body = $('#feedback-body');
   body.innerHTML = '<div class="loading">正在生成反馈…</div>';
   const data = await api(`/api/feedback/${encodeURIComponent(attemptId)}`);
+  const purgedNote = data.media_purged_at ? '媒体已按留存策略清理，' : '';
   const domainMax = Math.max(1, ...data.domains.map((d) => d.score || 0));
   const deductionHtml = data.deductions.length ? data.deductions.map((u) => {
     const ev = u.evidence;
@@ -1298,7 +1308,7 @@ async function renderFeedback(attemptId) {
         <h4>${u.critical ? '<span class="pill badge-critical">关键</span> ' : ''}${esc(u.item_title)} <span class="mono tiny muted">${esc(u.item_id)}</span></h4>
         <div>${reasonPill(u.score === 0 ? 'critical_negative' : 'near_cutoff', u.score_label)}</div>
       </div>
-      <div class="fb-part"><div class="lab">① 证据</div><div class="val">${ev ? `<button class="timestamp-btn" data-action="play-feedback" data-start="${ev.start_ms}" data-end="${ev.end_ms}" data-url="${dataAttr(u.media_url || '')}">播放 ${mmss(ev.start_ms)}</button> ` : ''}${evText}</div></div>
+      <div class="fb-part"><div class="lab">① 证据</div><div class="val">${ev && u.media_url && !data.media_purged_at ? `<button class="timestamp-btn" data-action="play-feedback" data-start="${ev.start_ms}" data-end="${ev.end_ms}" data-url="${dataAttr(u.media_url || '')}">播放 ${mmss(ev.start_ms)}</button> ` : ''}${purgedNote}${evText}</div></div>
       <div class="fb-part"><div class="lab">② 行为</div><div class="val">${esc(u.behavior)}</div></div>
       <div class="fb-part alt"><div class="lab">③ 替代</div><div class="val">${esc(u.alternative || '下次可追加一句具体提问，覆盖该评分项后再进入下一环节。')}</div></div>
     </div>`;
@@ -1707,8 +1717,11 @@ function p3SectionHtml(gov, gates) {
 }
 
 async function viewQuality() {
-  const data = await api('/api/quality');
-  const audit = await api('/api/audit?limit=30');
+  const [data, audit, retention] = await Promise.all([
+    api('/api/quality'),
+    api('/api/audit?limit=30'),
+    api('/api/retention'),
+  ]);
   const report = data.report;
   const gates = data.gates.gates;
   const stageLabels = {
@@ -1750,6 +1763,12 @@ async function viewQuality() {
     <div class="version-row"><span class="k">${esc(o.item_id)}</span><span class="v">${esc(o.authority)} · ${esc(o.reason)}</span></div>`).join('') : '<div class="tiny muted">暂无权限覆盖</div>';
   const auditRows = audit.map((ev) => `
     <div class="audit-row"><div class="act">${esc(ev.action)}</div><div class="obj">${esc(ev.actor)} · ${esc(ev.object_type)} ${esc(ev.object_id)}</div><div class="time">${fmtTime(ev.created_at)}</div></div>`).join('');
+  const retentionRows = retention.by_class.map((p) => `
+    <div class="version-row">
+      <span class="k">${esc(p.class)} · ${esc(p.label)}</span>
+      <span class="v">${p.days} 天 · ${p.count} 场次 · 到期 ${p.expired} · ${bytesText(p.bytes)}</span>
+    </div>`).join('');
+  const canPurge = state.user && ['admin', 'exam_manager'].includes(state.user.role);
   const modelCards = data.model_cards.map((c) => `
     <div class="card tight" style="margin-bottom:8px">
       <div class="card-title" style="margin-bottom:4px">${esc(c.capability)}<span class="sub">${esc(c.model_version)}</span></div>
@@ -1775,6 +1794,22 @@ async function viewQuality() {
     </div>
 
     <div class="gates" style="margin-bottom:16px">${gateCards}</div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">媒体留存治理<span class="sub">成绩永久 · 音视频分级留存 · 删除留痕</span></div>
+      <div class="grid c4" style="margin-bottom:10px">
+        <div class="kpi blue"><div class="k">媒体总量</div><div class="v">${bytesText(retention.bytes.media_total)}</div><div class="d">${retention.counts.attempts} 个场次</div></div>
+        <div class="kpi amber"><div class="k">已到期</div><div class="v">${retention.counts.expired}</div><div class="d">30 天内到期 ${retention.counts.due_soon}</div></div>
+        <div class="kpi teal"><div class="k">已清理</div><div class="v">${retention.counts.purged}</div><div class="d">已释放 ${bytesText(retention.bytes.freed)}</div></div>
+        <div class="kpi red"><div class="k">申诉冻结</div><div class="v">${retention.counts.held}</div><div class="d">申诉处理中不清理</div></div>
+      </div>
+      ${retentionRows}
+      <div class="btn-row" style="margin-top:8px">
+        <button class="btn small" data-action="preview-retention">预览到期清理</button>
+        ${canPurge ? '<button class="btn small danger" data-action="purge-retention">执行清理</button>' : ''}
+      </div>
+      <div id="retention-result" class="tiny muted" style="margin-top:8px">${esc(retention.rule)}</div>
+    </div>
 
     <div class="grid c2" style="margin-bottom:16px">
       ${abSectionHtml(data.ab)}
@@ -1827,6 +1862,26 @@ async function viewQuality() {
   `;
 }
 
+function renderRetentionPreview(result) {
+  const box = $('#retention-result');
+  if (!box) return;
+  const items = result.items || [];
+  if (!items.length) {
+    box.innerHTML = `<span class="pill teal">无到期媒体</span> 截至 ${fmtTime(result.as_of)}，没有需要清理的媒体文件。`;
+    return;
+  }
+  box.innerHTML = `
+    <div class="card tight" style="margin-top:6px">
+      <div class="card-title" style="margin-bottom:4px">到期清理预览<span class="sub">${items.length} 个场次 · 可释放 ${bytesText(result.bytes.expired)}</span></div>
+      ${items.map((i) => `
+        <div class="version-row">
+          <span class="k">${esc(i.candidate_code)} · ${esc(i.risk_level)}</span>
+          <span class="v">${esc(i.media_filename || i.media_url)} · ${bytesText(i.size_bytes)} · ${esc(i.file_action_label)}</span>
+        </div>`).join('')}
+      <div class="tiny muted" style="margin-top:6px">确认后仅删除媒体文件；成绩、转写、证据时间戳与哈希链保留，并为每个场次写入 media.purge 审计事件。</div>
+    </div>`;
+}
+
 /* ---------- global events ---------- */
 document.addEventListener('click', async (e) => {
   const el = e.target.closest('[data-action]');
@@ -1866,6 +1921,26 @@ document.addEventListener('click', async (e) => {
           : `<span class="pill red">异常</span> 第 ${result.index} 条（${esc(result.broken_at)}）${esc(result.message)}`;
       }
       toast(result.ok ? `审计链完整：${result.total} 条` : '审计链校验失败', !result.ok);
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'preview-retention') {
+    try {
+      const result = await api('/api/retention');
+      renderRetentionPreview(result);
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'purge-retention') {
+    if (!confirm('将按留存策略清理所有到期媒体文件。成绩、转写与证据哈希保留，删除动作写入审计链。继续？')) return;
+    try {
+      const result = await api('/api/retention/purge', { method: 'POST', body: { apply: true } });
+      toast(`已清理 ${result.summary.purged_attempts} 个场次媒体，删除 ${result.deleted_files} 个文件，释放 ${bytesText(result.freed_bytes)}`);
+      await viewQuality();
     } catch (err) {
       toast(err.message, true);
     }

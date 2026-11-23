@@ -128,6 +128,8 @@ def test_ingest_creates_scored_attempt(conn, bundle):
     assert attempt["candidate_code"] == "C-UPLOAD-001"
     assert attempt["integrity_gap"] == 0
     assert attempt["status"] == "pending_review"
+    assert attempt["retention_class"] == "L2"
+    assert attempt["retain_until"] is not None
     records = conn.execute(
         "SELECT * FROM score_records WHERE attempt_id = ?", (attempt_id,)
     ).fetchall()

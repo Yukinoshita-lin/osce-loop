@@ -150,17 +150,45 @@ def revoke_token(conn, token: str) -> None:
     conn.commit()
 
 
-def media_allowed(conn, user: dict[str, Any], path: str) -> bool:
-    if user.get("role") != "student":
-        return True
-    candidate_code = user.get("candidate_code")
-    if not candidate_code:
+def _media_ref_active(row, now: datetime) -> bool:
+    if row["media_purged_at"]:
         return False
-    row = conn.execute(
-        "SELECT 1 FROM attempts WHERE media_url = ? AND candidate_code = ? LIMIT 1",
-        (path, candidate_code),
-    ).fetchone()
-    return row is not None
+    if row["appeal"]:
+        return True
+    try:
+        until = datetime.fromisoformat(row["retain_until"])
+    except (TypeError, ValueError):
+        return True
+    if until.tzinfo is None:
+        until = until.replace(tzinfo=timezone.utc)
+    return until > now
+
+
+def media_access(conn, user: dict[str, Any], path: str) -> str:
+    """返回 ok / purged / expired / forbidden，供媒体中间件区分 200、410 与 403。"""
+    rows = conn.execute(
+        "SELECT candidate_code, media_purged_at, retain_until, appeal FROM attempts WHERE media_url = ?",
+        (path,),
+    ).fetchall()
+    if user.get("role") == "student":
+        candidate_code = user.get("candidate_code")
+        if not candidate_code:
+            return "forbidden"
+        rows = [row for row in rows if row["candidate_code"] == candidate_code]
+        if not rows:
+            return "forbidden"
+    if not rows:
+        return "ok"
+    now = datetime.now(timezone.utc)
+    if any(_media_ref_active(row, now) for row in rows):
+        return "ok"
+    if all(row["media_purged_at"] for row in rows):
+        return "purged"
+    return "expired"
+
+
+def media_allowed(conn, user: dict[str, Any], path: str) -> bool:
+    return media_access(conn, user, path) == "ok"
 
 
 def rbac_allowed(method: str, path: str, role: str) -> bool:
@@ -169,7 +197,7 @@ def rbac_allowed(method: str, path: str, role: str) -> bool:
     if method in ("GET", "HEAD", "OPTIONS"):
         if path.startswith("/api/review/"):
             return role in ("exam_manager", "examiner")
-        if path.startswith(("/api/quality", "/api/fairness", "/api/ab", "/api/audit")):
+        if path.startswith(("/api/quality", "/api/fairness", "/api/ab", "/api/audit", "/api/retention")):
             return role in ("exam_manager", "auditor")
         if path.startswith("/api/governance/"):
             return role in ("exam_manager", "auditor")
@@ -201,6 +229,8 @@ def rbac_allowed(method: str, path: str, role: str) -> bool:
             return role == "exam_manager"
         return False
     if path == "/api/schedule/generate":
+        return role == "exam_manager"
+    if path == "/api/retention/purge":
         return role == "exam_manager"
     if path.startswith("/api/execution/"):
         return role in ("examiner", "exam_manager")

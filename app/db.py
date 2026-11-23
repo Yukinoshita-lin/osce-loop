@@ -49,6 +49,12 @@ CREATE TABLE IF NOT EXISTS attempts (
     ab_group TEXT NOT NULL DEFAULT 'ai_assisted',
     risk_escalated_at TEXT,
     risk_escalation_reason TEXT,
+    media_filename TEXT,
+    media_size_bytes INTEGER NOT NULL DEFAULT 0,
+    retention_class TEXT,
+    retain_until TEXT,
+    media_purged_at TEXT,
+    media_purged_by TEXT,
     signed_off_by TEXT,
     signed_off_at TEXT,
     published_at TEXT,
@@ -362,6 +368,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
         "ab_group": "TEXT NOT NULL DEFAULT 'ai_assisted'",
         "risk_escalated_at": "TEXT",
         "risk_escalation_reason": "TEXT",
+        "media_filename": "TEXT",
+        "media_size_bytes": "INTEGER NOT NULL DEFAULT 0",
+        "retention_class": "TEXT",
+        "retain_until": "TEXT",
+        "media_purged_at": "TEXT",
+        "media_purged_by": "TEXT",
     }
     for column, ddl in additions.items():
         if column not in existing:

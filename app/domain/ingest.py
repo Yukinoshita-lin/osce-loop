@@ -8,6 +8,7 @@ from typing import Any
 from .. import db
 from ..ai.base import CapabilityGateway
 from ..ai.pipeline import run_scoring
+from .retention import retention_plan
 
 
 def create_ingested_attempt(
@@ -23,11 +24,14 @@ def create_ingested_attempt(
     media_id: str,
     media_url: str | None,
     media_filename: str | None,
+    media_size_bytes: int = 0,
     actor: str = "考务录入",
 ) -> str:
     if not transcript:
         raise ValueError("转写为空，无法创建场次")
     attempt_id = db.new_id("att")
+    created_at = db.now_iso()
+    plan = retention_plan(risk_level, created_at)
     duration_ms = max(int(u["end_ms"]) for u in transcript)
     asr_confidence = round(mean(float(u.get("asr_confidence", 0.95)) for u in transcript), 3)
     integrity_gap = 1 if not media_url else 0
@@ -37,8 +41,9 @@ def create_ingested_attempt(
 
     conn.execute(
         "INSERT INTO attempts(attempt_id, bundle_id, candidate_code, candidate_name, session_id, risk_level, "
-        "media_id, media_url, duration_ms, integrity_gap, integrity_note, appeal, asr_confidence, status, "
-        "ab_group, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "media_id, media_url, media_filename, media_size_bytes, retention_class, retain_until, duration_ms, "
+        "integrity_gap, integrity_note, appeal, asr_confidence, status, ab_group, created_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             attempt_id,
             bundle["bundle_id"],
@@ -48,6 +53,10 @@ def create_ingested_attempt(
             risk_level,
             media_id,
             media_url,
+            media_filename,
+            media_size_bytes,
+            plan["retention_class"],
+            plan["retain_until"],
             duration_ms,
             integrity_gap,
             integrity_note,
@@ -55,7 +64,7 @@ def create_ingested_attempt(
             asr_confidence,
             "scored",
             "ai_assisted",
-            db.now_iso(),
+            created_at,
         ),
     )
     conn.execute(
@@ -88,6 +97,9 @@ def create_ingested_attempt(
             "risk_level": risk_level,
             "utterances": len(transcript),
             "media_filename": media_filename,
+            "media_size_bytes": media_size_bytes,
+            "retention_class": plan["retention_class"],
+            "retain_until": plan["retain_until"],
             "integrity_gap": bool(integrity_gap),
         },
         model_version=gateway.model_version,

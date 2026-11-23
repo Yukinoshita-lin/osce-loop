@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 from .. import db
+from .retention import refresh_retention
 
 RISK_ORDER = {"L0": 0, "L1": 1, "L2": 2, "L3": 3}
 
@@ -58,6 +59,10 @@ def escalate_risk(
             ),
         )
     conn.commit()
+    refresh_retention(conn, attempt_id=attempt_id)
+    retention = conn.execute(
+        "SELECT retention_class, retain_until FROM attempts WHERE attempt_id = ?", (attempt_id,)
+    ).fetchone()
     db.append_audit(
         conn,
         actor=actor,
@@ -65,7 +70,13 @@ def escalate_risk(
         object_type="StationAttempt",
         object_id=attempt_id,
         before={"risk_level": attempt["risk_level"], "status": attempt["status"]},
-        after={"risk_level": new_level, "status": "pending_review", "reason": reason},
+        after={
+            "risk_level": new_level,
+            "status": "pending_review",
+            "reason": reason,
+            "retention_class": retention["retention_class"],
+            "retain_until": retention["retain_until"],
+        },
     )
     return {
         "attempt_id": attempt_id,
@@ -73,4 +84,6 @@ def escalate_risk(
         "new_level": new_level,
         "reason": reason,
         "escalated_at": timestamp,
+        "retention_class": retention["retention_class"],
+        "retain_until": retention["retain_until"],
     }

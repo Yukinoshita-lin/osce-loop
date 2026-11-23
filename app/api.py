@@ -32,7 +32,7 @@ from .domain.auth import (
     authenticate,
     create_session,
     ensure_users,
-    media_allowed,
+    media_access,
     resolve_token,
     revoke_token,
     rbac_allowed,
@@ -69,6 +69,7 @@ from .domain.execution import (
 )
 from .domain.ingest import create_ingested_attempt
 from .domain.practice import build_practice_report
+from .domain.retention import purge_expired, refresh_retention, retention_overview
 from .domain.risk import RISK_ORDER, escalate_risk
 from .domain.rubric import AUTHORITY_LABELS, PHASE_LABELS, cap_authority
 from .domain.scheduling import (
@@ -93,6 +94,7 @@ async def lifespan(app: FastAPI):
     ensure_certification(conn)
     ensure_schedule_inputs(conn)
     ensure_users(conn)
+    refresh_retention(conn)
     conn.close()
     yield
 
@@ -141,8 +143,18 @@ async def auth_middleware(request: Request, call_next):
         conn = db.connect()
         try:
             user = resolve_token(conn, token)
-            if user and not media_allowed(conn, user, path):
-                return JSONResponse({"detail": "无权访问该媒体文件"}, status_code=403)
+            if user:
+                access = media_access(conn, user, path)
+                if access == "purged":
+                    return JSONResponse(
+                        {"detail": "该媒体已按留存策略清理，证据时间戳与哈希仍可查"}, status_code=410
+                    )
+                if access == "expired":
+                    return JSONResponse(
+                        {"detail": "该媒体已超过留存期限，当前不可访问，等待清理"}, status_code=410
+                    )
+                if access != "ok":
+                    return JSONResponse({"detail": "无权访问该媒体文件"}, status_code=403)
         finally:
             conn.close()
         if not user:
@@ -314,6 +326,9 @@ def _attempt_summary(conn, attempt: dict[str, Any]) -> dict[str, Any]:
         "integrity_note": attempt.get("integrity_note"),
         "appeal": bool(attempt.get("appeal")),
         "media_url": attempt.get("media_url"),
+        "media_purged_at": attempt.get("media_purged_at"),
+        "retention_class": attempt.get("retention_class"),
+        "retain_until": attempt.get("retain_until"),
         "duration_ms": attempt.get("duration_ms"),
         "asr_confidence": attempt.get("asr_confidence"),
         "signed_off_by": attempt.get("signed_off_by"),
@@ -518,6 +533,7 @@ async def ingest_attempt(
         media_id=(media or {}).get("media_id") or "upload_no_media",
         media_url=(media or {}).get("media_url"),
         media_filename=(media or {}).get("filename"),
+        media_size_bytes=(media or {}).get("size_bytes") or 0,
         actor=actor,
     )
     attempt = _attempt_summary(conn, _attempt_row(conn, attempt_id))
@@ -1297,6 +1313,30 @@ def audit(conn=Depends(get_conn), limit: int = Query(100, ge=1, le=500)):
 @app.get("/api/audit/verify")
 def audit_verify(conn=Depends(get_conn)):
     return db.verify_audit_chain(conn)
+
+
+@app.get("/api/retention")
+def retention(conn=Depends(get_conn)):
+    return retention_overview(conn)
+
+
+class RetentionPurgeBody(BaseModel):
+    apply: bool = False
+    as_of: str | None = None
+
+
+@app.post("/api/retention/purge")
+def retention_purge(body: RetentionPurgeBody, request: Request, conn=Depends(get_conn)):
+    _ensure_not_stopped(conn)
+    try:
+        return purge_expired(
+            conn,
+            actor=request.state.user["display_name"],
+            dry_run=not body.apply,
+            as_of=body.as_of,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @app.get("/api/sp/persona")
