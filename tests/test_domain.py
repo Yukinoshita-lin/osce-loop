@@ -108,6 +108,14 @@ def test_incomplete_bundle_payload_is_blocked():
     assert any("rubric" in issue for issue in validation["blocking"])
 
 
+def test_missing_feedback_alternative_blocks_freeze():
+    payload = build_bundle_payload()
+    payload["rubric"][0]["feedback_alt"] = ""
+    validation = validate_bundle(payload)
+    assert validation["can_freeze"] is False
+    assert any("替代话术" in issue for issue in validation["blocking"])
+
+
 def test_diff_payloads_reports_station_and_rubric_changes():
     base = build_bundle_payload()
     proposal = copy.deepcopy(base)

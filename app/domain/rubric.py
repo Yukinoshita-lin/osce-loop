@@ -124,6 +124,8 @@ def validate_rubric_item(item: dict[str, Any]) -> list[str]:
     ref = _text(item.get("guideline_ref"))
     if not ref:
         issues.append(f"{item_id}: 缺少 guideline_ref")
+    if evidence_type != "global" and not _text(item.get("feedback_alt")):
+        issues.append(f"{item_id}: 缺少可直接背诵的替代话术 feedback_alt")
     return issues
 
 
@@ -178,7 +180,12 @@ def validate_bundle(payload: dict[str, Any]) -> dict[str, Any]:
     if missing_refs:
         issues.append(f"考生指令引用了不存在的评分项: {', '.join(missing_refs)}")
     slot_issues = [i for i in issues if "缺少证据探针" in i or "weight" in i or "evidence_type" in i or "phase 非法" in i]
-    consistency_status = "fail" if (missing_refs or required_issues) else ("warn" if slot_issues else "pass")
+    feedback_issues = [i for i in issues if "替代话术" in i]
+    consistency_status = (
+        "fail"
+        if (missing_refs or required_issues or feedback_issues)
+        else ("warn" if slot_issues else "pass")
+    )
 
     def status_of(entries: list[str]) -> str:
         return "fail" if entries else "pass"

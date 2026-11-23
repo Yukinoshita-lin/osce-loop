@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..ai.mock import MockScoringProvider
+from .feedback import ensure_feedback_units, summarize_feedback
 from .stats import domain_scores
 
 SCORE_LABELS = {0: "negative", 1: "partial", 2: "positive"}
@@ -112,6 +113,7 @@ def build_practice_report(bundle: dict[str, Any], messages: list[dict[str, Any]]
     ]
     uncovered = [r for r in records if r["score"] == 0 and not r["covered"]]
     strengths = [r for r in records if r["score"] == 2]
+    ensure_feedback_units(records, {item["item_id"]: item for item in items})
     total = _weighted_total(items, scores)
     covered_count = sum(1 for r in records if r["covered"])
     return {
@@ -128,6 +130,7 @@ def build_practice_report(bundle: dict[str, Any], messages: list[dict[str, Any]]
         "strengths": strengths,
         "uncovered": uncovered,
         "uncovered_count": len(uncovered),
+        "feedback_quality": summarize_feedback(deductions),
         "disclaimer": "形成性练习反馈，不计入成绩；共情类全局项需教师观察，未纳入自动评分。",
         "feedback_rule": "每条扣分项包含：证据片段 + 对应评分项档位 + 可直接背诵的替代话术。",
         "created_at": None,

@@ -1427,6 +1427,11 @@ async function renderFeedback(attemptId) {
       <div class="card">
         <div class="card-title">反馈纪律<span class="sub">三段式</span></div>
         <div class="feedback-rule">${esc(data.feedback_rule)}</div>
+        ${data.feedback_quality ? `<div class="tiny" style="margin-top:6px">
+          <span class="pill ${data.feedback_quality.all_have_alternative ? 'teal' : 'amber'}">替代话术 ${data.feedback_quality.with_alternative}/${data.feedback_quality.checked}</span>
+          <span class="pill">时间戳 ${data.feedback_quality.with_timestamp}</span>
+          ${data.feedback_quality.repaired ? `<span class="pill amber">兜底修复 ${data.feedback_quality.repaired}</span>` : ''}
+        </div>` : ''}
         <div class="sep"></div>
         <div class="small dim">第三段是最容易被忽略、也最有价值的部分——它把评分表从“审判工具”变成“教学工具”。</div>
         <div class="sep"></div>
@@ -1659,6 +1664,11 @@ function practiceReportHtml(report) {
       </div>
       <div class="sep"></div>
       <div class="feedback-rule">${esc(report.feedback_rule)}</div>
+      ${report.feedback_quality ? `<div class="tiny" style="margin-top:6px">
+        <span class="pill ${report.feedback_quality.all_have_alternative ? 'teal' : 'amber'}">替代话术 ${report.feedback_quality.with_alternative}/${report.feedback_quality.checked}</span>
+        <span class="pill">时间戳 ${report.feedback_quality.with_timestamp}</span>
+        ${report.feedback_quality.repaired ? `<span class="pill amber">兜底修复 ${report.feedback_quality.repaired}</span>` : ''}
+      </div>` : ''}
       <div class="tiny muted" style="margin-top:6px">${esc(report.disclaimer)}</div>
     </section>`;
 }

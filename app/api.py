@@ -61,6 +61,7 @@ from .domain.bundle import (
 from .domain.calibration import calibration_report, import_gold_scores, parse_gold_file
 from .domain.export import build_attempt_package
 from .domain.fairness import fairness_report
+from .domain.feedback import ensure_feedback_units, summarize_feedback
 from .domain.gates import evaluate_gates
 from .domain.governance import (
     emergency_stop_active,
@@ -1223,12 +1224,14 @@ def feedback(attempt_id: str, request: Request, conn=Depends(get_conn)):
             strengths.append(unit)
         else:
             deductions.append(unit)
+    ensure_feedback_units(deductions + strengths, items)
     return {
         **summary,
         "status_note": "该场次尚未发布，以下为阶段性反馈" if attempt["status"] != "published" else "已发布",
         "domains": domain_scores(bundle["payload"], final_scores),
         "deductions": deductions,
         "strengths": strengths,
+        "feedback_quality": summarize_feedback(deductions),
         "feedback_rule": "每条扣分项必须包含：可回放证据 + 对应评分项档位 + 可直接背诵的替代话术。",
     }
 
