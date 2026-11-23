@@ -1,0 +1,1215 @@
+/* OSCE·Loop P0 评分副驾 — 单页工作台 */
+'use strict';
+
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+const STATUS = {
+  published: ['已发布', 'teal'],
+  signed_off: ['已签字', 'blue'],
+  reviewed: ['已复核', 'blue'],
+  pending_review: ['待复核', 'amber'],
+  integrity_hold: ['证据缺口', 'red'],
+  scored: ['已评分', 'muted'],
+  auto: ['自动通过', 'muted'],
+  accepted: ['已接受', 'teal'],
+  corrected: ['已修正', 'blue'],
+  rejected: ['已拒绝', 'red'],
+  manual_scored: ['人工已评', 'teal'],
+  manual_pending: ['待人工评分', 'amber'],
+};
+
+const REASON_COLOR = {
+  integrity_gap: 'red',
+  critical_negative: 'red',
+  near_cutoff: 'amber',
+  confidence_below_floor: 'amber',
+  item_disagreement: 'amber',
+  appeal: 'purple',
+  manual_only: 'blue',
+  extract_only: 'blue',
+  ai_refusal: 'amber',
+  sampling: 'muted',
+};
+
+const state = {
+  reviewer: localStorage.getItem('osceloop.reviewer') || '主治 张蕾',
+  queue: null,
+  queueFilter: { search: '', reason: '' },
+  currentReview: null,
+  reviewPlayed: false,
+  reviewMode: null,
+  reviewScore: null,
+  reviewStartedAt: 0,
+  sp: null,
+  feedbackId: null,
+};
+
+/* ---------- utils ---------- */
+function esc(value) {
+  return String(value === null || value === undefined ? '' : value).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+function num(value, digits = 2) {
+  if (value === null || value === undefined || value === '' || Number.isNaN(Number(value))) return '—';
+  return Number(value).toFixed(digits);
+}
+function pct(value, digits = 0) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
+  return (Number(value) * 100).toFixed(digits) + '%';
+}
+function mmss(ms) {
+  if (ms === null || ms === undefined) return '—';
+  const total = Math.max(0, Math.floor(Number(ms) / 1000));
+  return String(Math.floor(total / 60)).padStart(2, '0') + ':' + String(total % 60).padStart(2, '0');
+}
+function fmtTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function statusPill(status) {
+  const item = STATUS[status] || [status || '—', 'muted'];
+  return `<span class="pill ${item[1]}">${esc(item[0])}</span>`;
+}
+function reasonPill(reason, label) {
+  const color = REASON_COLOR[reason] || 'muted';
+  return `<span class="pill ${color}">${esc(label || reason || '—')}</span>`;
+}
+function scoreText(score) {
+  if (score === 0) return 'negative';
+  if (score === 1) return 'partial';
+  if (score === 2) return 'positive';
+  return '—';
+}
+function checkMark(status) {
+  if (status === 'pass') return '<span class="check pass">PASS</span>';
+  if (status === 'fail') return '<span class="check fail">FAIL</span>';
+  return '<span class="check unmeasured">未采集</span>';
+}
+function gateStatusPill(status) {
+  if (status === 'pass') return '<span class="pill teal">通过</span>';
+  if (status === 'fail') return '<span class="pill red">未通过</span>';
+  return '<span class="pill amber">待补测</span>';
+}
+async function api(path, options = {}) {
+  const opts = {
+    headers: { 'Content-Type': 'application/json' },
+    ...options,
+  };
+  if (opts.body && typeof opts.body !== 'string') opts.body = JSON.stringify(opts.body);
+  const res = await fetch(path, opts);
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const data = await res.json();
+      detail = data.detail || detail;
+    } catch (e) { /* ignore */ }
+    throw new Error(detail);
+  }
+  return res.json();
+}
+let toastTimer = null;
+function toast(message, isError = false) {
+  const el = $('#toast');
+  el.textContent = message;
+  el.className = 'toast show' + (isError ? ' error' : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.className = 'toast'; }, 3600);
+}
+function setTitle(title) {
+  $('#page-title').textContent = title;
+  document.title = 'OSCE·Loop · ' + title;
+}
+function setActiveNav(view) {
+  $$('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.view === view));
+}
+function setPendingBadge(count) {
+  const el = $('#nav-pending');
+  if (!el) return;
+  el.textContent = count > 99 ? '99+' : String(count);
+  el.style.display = count ? '' : 'none';
+}
+function attemptFlags(a) {
+  const flags = [];
+  if (a.integrity_gap) flags.push('<span class="pill red">integrity_gap</span>');
+  if (a.near_cutoff) flags.push('<span class="pill amber">near_cutoff</span>');
+  if (a.appeal) flags.push('<span class="pill purple">申诉中</span>');
+  if (a.critical_pending) flags.push(`<span class="pill red">关键项 ${a.critical_pending}</span>`);
+  return flags.join(' ');
+}
+function dataAttr(value) {
+  return esc(value);
+}
+
+/* ---------- router ---------- */
+const ROUTES = {
+  overview: { title: '总览', render: viewOverview },
+  review: { title: '复核队列', render: viewReview },
+  bundle: { title: '站包契约', render: viewBundle },
+  feedback: { title: '反馈报告', render: viewFeedback },
+  sp: { title: 'SP 演练', render: viewSP },
+  quality: { title: '质量与闸门', render: viewQuality },
+};
+
+function currentRoute() {
+  const hash = location.hash || '#/overview';
+  const name = hash.replace(/^#\/?/, '').split('?')[0] || 'overview';
+  return ROUTES[name] ? name : 'overview';
+}
+
+async function route() {
+  const name = currentRoute();
+  const def = ROUTES[name];
+  setActiveNav(name);
+  setTitle(def.title);
+  $('#view').innerHTML = '<div class="loading">正在载入工作台…</div>';
+  try {
+    await def.render();
+  } catch (err) {
+    $('#view').innerHTML = `<div class="empty">载入失败：${esc(err.message)}<br><br><button class="btn" onclick="location.reload()">重试</button></div>`;
+    toast(err.message, true);
+  }
+}
+
+/* ---------- overview ---------- */
+async function viewOverview() {
+  const data = await api('/api/overview');
+  setPendingBadge(data.stats.pending || 0);
+  $('#stage-pill').textContent = data.release_stage === 'G0_offline' ? 'G0 离线副驾' : data.release_stage;
+  const qwkClass = data.stats.qwk_ai >= 0.7 ? 'teal' : data.stats.qwk_ai >= 0.6 ? 'amber' : 'red';
+  const routingMax = Math.max(1, ...data.routing.map((r) => r.count));
+  const gate = data.p0_gate;
+  const gateRows = gate ? gate.criteria.map((c) => {
+    let value = '—';
+    if (c.key === 'evidence_rate') value = pct(c.value, 0);
+    else if (c.key === 'avg_review_seconds') value = c.value === null ? '—' : `${num(c.value, 0)}s`;
+    else value = c.value === null ? '—' : num(c.value, 3);
+    return `<div class="gate-mini-row">
+      <span>${esc(c.label)}</span>
+      <span class="mono small dim">${esc(value)}</span>
+      ${checkMark(c.status)}
+    </div>`;
+  }).join('') : '';
+
+  const alertHtml = (data.alerts || []).map((a) => `
+    <div class="alert ${a.level === 'danger' ? 'danger' : ''}">
+      <b>${esc(a.title)}</b><p>${esc(a.detail)}</p>
+    </div>`).join('');
+
+  const attemptsRows = data.attempts.map((a) => `
+    <tr>
+      <td><div class="mono tiny muted">${esc(a.candidate_code)}</div><div>${esc(a.candidate_name)}</div></td>
+      <td>${statusPill(a.status)}<div class="tiny" style="margin-top:3px">${attemptFlags(a)}</div></td>
+      <td class="num">${num(a.ai_total, 1)}</td>
+      <td class="num">${a.final_total === null ? '—' : num(a.final_total, 1)}</td>
+      <td class="num">${a.pending}</td>
+      <td class="small dim">${a.passed_note || (a.final_total !== null && a.final_total >= a.pass_line ? '达标' : a.final_total === null ? '待定' : '未达标')}</td>
+      <td class="nowrap">
+        <a class="link-btn" href="#/review">复核</a>
+        <span class="muted"> · </span>
+        <a class="link-btn" href="#/feedback" data-open-feedback="${esc(a.attempt_id)}">反馈</a>
+        ${a.pending === 0 && a.status !== 'signed_off' && a.status !== 'published' ? `<span class="muted"> · </span><button class="link-btn" data-action="signoff" data-attempt="${esc(a.attempt_id)}">签字</button>` : ''}
+        ${a.status === 'signed_off' ? `<span class="muted"> · </span><button class="link-btn" data-action="publish" data-attempt="${esc(a.attempt_id)}">发布</button>` : ''}
+      </td>
+    </tr>`).join('');
+
+  const auditRows = data.recent_audit.map((ev) => `
+    <div class="audit-row">
+      <div class="act">${esc(ev.action)}</div>
+      <div class="obj">${esc(ev.object_id)} · ${esc(ev.actor)}</div>
+      <div class="time">${fmtTime(ev.created_at)}</div>
+    </div>`).join('');
+
+  $('#view').innerHTML = `
+    <section class="hero">
+      <div class="eyebrow">P0 · OFFLINE SCORING COPILOT</div>
+      <h2>把 AI 放进评分流程，但只在<span class="accent">该放手的地方</span>放手</h2>
+      <p>当前范围：历史录像离线评分。AI 只给项级建议分与可回放证据，低置信、关键项、边缘案例与证据缺口强制路由到人。</p>
+    </section>
+
+    ${alertHtml}
+
+    <div class="kpis">
+      <div class="kpi amber"><div class="k">待人工复核</div><div class="v">${data.stats.pending}<small>项</small></div><div class="d">${data.stats.attempts} 场历史录像 · ${data.stats.published} 场已发布</div></div>
+      <div class="kpi ${qwkClass}"><div class="k">AI–人 QWK</div><div class="v">${num(data.stats.qwk_ai, 3)}</div><div class="d">人工复核后 ${num(data.stats.qwk_human, 3)} · 目标 ≥ 0.70</div></div>
+      <div class="kpi blue"><div class="k">单条复核耗时</div><div class="v">${num(data.stats.avg_review_seconds, 0)}<small>秒</small></div><div class="d">目标 ≤ 90 秒 · 编辑率 ${pct(data.stats.edit_rate, 0)}</div></div>
+      <div class="kpi teal"><div class="k">证据定位率</div><div class="v">${pct(data.stats.evidence_rate, 0)}</div><div class="d">缺口场次 ${pct(data.stats.integrity_gap_rate, 1)}</div></div>
+    </div>
+
+    <div class="grid c2-1" style="margin-bottom:16px">
+      <div class="card">
+        <div class="card-title">风险路由分布<span class="sub">按具名原因，不是黑箱开关</span></div>
+        <div class="bars">
+          ${data.routing.length ? data.routing.map((r) => `
+            <div class="bar-row">
+              <span class="bar-label" title="${esc(r.label)}">${esc(r.label)}</span>
+              <div class="bar-track"><div class="bar-fill" style="width:${Math.max(2, r.count / routingMax * 100)}%"></div></div>
+              <span class="bar-count">${r.count}</span>
+            </div>`).join('') : '<div class="empty">暂无路由记录</div>'}
+        </div>
+        <div class="sep"></div>
+        <div class="tiny muted">路由顺序：证据缺口 → 关键项阴性 → 边缘案例 → 低置信 → 历史分歧 → 申诉 → 抽检。命中即停。</div>
+      </div>
+      <div class="card">
+        <div class="card-title">P0 放行闸门<span class="sub">${gate ? gate.id + ' · ' + gate.name : '—'}</span></div>
+        <div class="gate-mini">${gateRows || '<div class="empty">未配置</div>'}</div>
+        <div class="sep"></div>
+        <div class="btn-row">
+          <a class="btn small primary" href="#/quality">查看全部闸门</a>
+          <a class="btn small" href="#/review">进入复核队列</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">场次总览<span class="sub">13 场历史录像 · 同一冻结站包 · 金标准仅用于质量评测</span></div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>考生</th><th>状态</th><th class="num">AI 总分</th><th class="num">最终分</th><th class="num">待复核</th><th>结论</th><th></th></tr></thead>
+          <tbody>${attemptsRows || '<tr><td colspan="7" class="empty">暂无场次</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="grid c2">
+      <div class="card">
+        <div class="card-title">版本与模型<span class="sub">三元版本戳</span></div>
+        <div class="version-row"><span class="k">model_version</span><span class="v">${esc(data.versions.model)}</span></div>
+        <div class="version-row"><span class="k">prompt_version</span><span class="v">${esc(data.versions.prompt)}</span></div>
+        <div class="version-row"><span class="k">release_stage</span><span class="v">${esc(data.release_stage)}</span></div>
+        <div class="sep"></div>
+        <div class="tiny muted">模型或提示词版本变化会自动把 suggest/decide 权限降为 extract，直到完成新一轮人工比对校准。</div>
+      </div>
+      <div class="card">
+        <div class="card-title">最近审计事件<span class="sub">只追加</span></div>
+        <div class="audit-list">${auditRows || '<div class="empty">暂无审计</div>'}</div>
+      </div>
+    </div>
+  `;
+  $$('#view [data-open-feedback]').forEach((el) => {
+    el.addEventListener('click', () => {
+      state.feedbackId = el.dataset.openFeedback;
+    });
+  });
+}
+
+/* ---------- review ---------- */
+async function viewReview() {
+  const queue = await api('/api/review/queue');
+  state.queue = queue;
+  setPendingBadge(queue.total);
+  state.queueFilter = { search: '', reason: '' };
+  const reasonOptions = queue.by_reason
+    .filter((r) => r.count > 0)
+    .map((r) => `<option value="${dataAttr(r.reason)}">${esc(r.label)} (${r.count})</option>`)
+    .join('');
+  $('#view').innerHTML = `
+    <div class="view-head">
+      <div>
+        <h2>复核队列</h2>
+        <p>按风险路由排序。打开记录先播放证据片段，AI 建议在播放后才显示——避免先看分数再找理由。</p>
+      </div>
+      <div class="stat-line"><span>待复核 <b>${queue.total}</b></span><span>原因 <b>${queue.by_reason.length}</b> 类</span></div>
+    </div>
+    <div class="review-layout">
+      <section class="queue-panel">
+        <div class="queue-head">
+          <div class="row"><h3>待办</h3><span class="pill amber">${queue.total}</span></div>
+          <div class="queue-filters">
+            <input id="queue-search" class="input" placeholder="搜索考生 / 评分项">
+            <select id="queue-reason" class="input"><option value="">全部原因</option>${reasonOptions}</select>
+          </div>
+        </div>
+        <div class="queue-list" id="queue-list"></div>
+      </section>
+      <section class="workbench" id="workbench">
+        <div class="empty">从左侧选择一条待复核记录</div>
+      </section>
+    </div>
+  `;
+  renderQueueList();
+  $('#queue-search').addEventListener('input', (e) => {
+    state.queueFilter.search = e.target.value.trim().toLowerCase();
+    renderQueueList();
+  });
+  $('#queue-reason').addEventListener('change', (e) => {
+    state.queueFilter.reason = e.target.value;
+    renderQueueList();
+  });
+  const first = filteredQueue()[0];
+  if (first) {
+    await loadReview(first.record_id);
+  }
+}
+
+function filteredQueue() {
+  if (!state.queue) return [];
+  return state.queue.items.filter((item) => {
+    const s = state.queueFilter.search;
+    const matchSearch = !s || `${item.candidate} ${item.item_title} ${item.item_id}`.toLowerCase().includes(s);
+    const matchReason = !state.queueFilter.reason || item.routing.reason === state.queueFilter.reason;
+    return matchSearch && matchReason;
+  });
+}
+
+function renderQueueList() {
+  const list = $('#queue-list');
+  if (!list) return;
+  const items = filteredQueue();
+  if (!items.length) {
+    list.innerHTML = '<div class="empty">没有匹配的待复核记录</div>';
+    return;
+  }
+  list.innerHTML = items.map((item) => `
+    <button class="queue-item ${state.currentReview && state.currentReview.record_id === item.record_id ? 'active' : ''}" data-record-id="${dataAttr(item.record_id)}">
+      <div class="q-top">
+        <span class="q-title">${item.critical ? '<span class="pill badge-critical">关键</span> ' : ''}${esc(item.item_title)}</span>
+        <span class="mono tiny muted">${esc(item.item_id)}</span>
+      </div>
+      <div class="q-sub"><span>${esc(item.candidate)}</span><span>${esc(item.risk_level)}</span><span>权重 ${item.weight}</span></div>
+      <div class="q-reason">${reasonPill(item.routing.reason, item.routing.reason_label)}</div>
+    </button>`).join('');
+  $$('.queue-item', list).forEach((btn) => {
+    btn.addEventListener('click', () => loadReview(btn.dataset.recordId));
+  });
+}
+
+async function loadReview(recordId) {
+  const data = await api(`/api/review/${encodeURIComponent(recordId)}`);
+  state.currentReview = data;
+  state.reviewPlayed = data.evidence.length === 0;
+  state.reviewMode = null;
+  state.reviewScore = null;
+  state.reviewStartedAt = Date.now();
+  renderQueueList();
+  renderWorkbench(data);
+  setupReviewAudio(data);
+}
+
+function renderWorkbench(data) {
+  const wb = $('#workbench');
+  if (!wb) return;
+  const ev = data.evidence && data.evidence[0];
+  const attempt = data.attempt || {};
+  const clipLabel = ev ? `${mmss(ev.start_ms)} – ${mmss(ev.end_ms)}` : '无片段';
+  const evidenceHtml = ev
+    ? `<div class="clip-meta">
+         <span>${esc(ev.speaker || 'unknown')}</span>
+         <span>${clipLabel}</span>
+         <span>${ev.evidence_kind === 'absence' ? '缺席证据' : 'utterance'}</span>
+       </div>
+       <blockquote class="quote ${ev.evidence_kind === 'absence' ? 'absence' : ''}">${esc(ev.quote)}</blockquote>
+       ${ev.note ? `<div class="tiny muted">${esc(ev.note)}</div>` : ''}`
+    : `<div class="quote absence">该项为人工保留项 / 无 AI 证据片段，请回放整段录像后人工评分。</div>`;
+  const anchor = data.anchor || {};
+  wb.innerHTML = `
+    <div class="wb-head">
+      <div>
+        <div class="mono tiny muted">${esc(data.item_id)} · ${esc(data.phase_label)} · 权重 ${data.weight}</div>
+        <h2>${esc(data.item_title)}</h2>
+        <div class="sub">${esc(data.candidate)} · ${data.critical ? '<span class="pill badge-critical">关键项</span>' : '非关键项'} · ${esc(data.authority_label)}</div>
+      </div>
+      <div class="wb-badges">
+        ${reasonPill(data.routing.reason, data.routing.reason_label)}
+        <span class="pill">${esc(data.routing.route_label)}</span>
+        <span class="pill muted">${esc(data.evidence_type)}</span>
+      </div>
+    </div>
+
+    <div class="attempt-strip">
+      <span>场次 <b>${esc(attempt.candidate_code || '')}</b></span>
+      <span>状态 ${statusPill(attempt.status)}</span>
+      <span>AI 总分 <b>${num(attempt.ai_total, 1)}</b></span>
+      <span>最终分 <b>${attempt.final_total === null ? '—' : num(attempt.final_total, 1)}</b></span>
+      <span>待复核 <b>${attempt.pending ?? '—'}</b></span>
+      ${attempt.integrity_gap ? '<span class="pill red">integrity_gap</span>' : ''}
+      ${attempt.near_cutoff ? '<span class="pill amber">near_cutoff</span>' : ''}
+    </div>
+
+    <div class="wb-grid">
+      <section class="card clip-card">
+        <div class="card-title">证据片段<span class="sub">${esc(clipLabel)}</span></div>
+        ${evidenceHtml}
+        <audio id="review-audio" preload="metadata" controls src="${dataAttr(ev && data.media_url ? data.media_url : (data.media_url || ''))}"></audio>
+        <div class="clip-actions">
+          <button class="btn small primary" data-action="play-clip">播放证据片段 ±3 秒</button>
+          <span class="play-status" id="play-status">${data.evidence.length ? '等待播放' : '无 AI 片段'}</span>
+        </div>
+        ${ev && ev.evidence_kind === 'absence' ? '<div class="tiny muted" style="margin-top:6px">阴性判定使用阶段窗口作为缺席证据，播放窗口为节选，仍需人工确认边界。</div>' : ''}
+      </section>
+      <section class="card" id="ai-panel">
+        ${aiPanelHtml(data, !state.reviewPlayed && data.evidence.length > 0)}
+      </section>
+    </div>
+
+    <section class="card">
+      <div class="card-title">行为锚三档<span class="sub">可观测、可判定、可回放</span></div>
+      <div class="anchors">
+        <div class="anchor-cell p"><div class="h">POSITIVE · 2</div><p>${esc(anchor.positive || '—')}</p></div>
+        <div class="anchor-cell m"><div class="h">PARTIAL · 1</div><p>${esc(anchor.partial || '—')}</p></div>
+        <div class="anchor-cell n"><div class="h">NEGATIVE · 0</div><p>${esc(anchor.negative || '—')}</p></div>
+      </div>
+      <div class="sep"></div>
+      <div class="tiny muted">可观测性要求：行为锚必须包含可被判定的动词与可听/可见的对象；含糊表述在冻结阶段即被阻断。</div>
+    </section>
+
+    <section class="card">
+      <div class="card-title">人工复核<span class="sub">三元操作 · 拒绝必须填理由码</span></div>
+      <div class="action-zone" id="action-panel">
+        ${actionPanelHtml(data)}
+      </div>
+      <div class="sep"></div>
+      <div class="tiny muted">界面纪律：默认播放、不默认给分；只提供接受/修正/拒绝，修正从 rubric 档位中选择；人工记录直接进入一致性统计。</div>
+    </section>
+  `;
+}
+
+function aiPanelHtml(data, locked) {
+  if (locked) {
+    return `<div class="ai-locked"><div><b>AI 建议已锁定</b><br><span style="font-size:11px">播放证据片段后显示建议分与置信度<br><span class="mono" style="font-size:9.5px">默认播放，不默认给分</span></span></div></div>`;
+  }
+  if (data.ai_score === null || data.ai_score === undefined) {
+    return `
+      <div class="card-title">AI 参与情况<span class="sub">人工保留项</span></div>
+      <div class="ai-suggestion">
+        <div class="score-row"><span class="big-score" style="color:var(--text-mute)">—</span><span class="score-label">AI 未给出分数</span></div>
+        <div class="rationale">${esc(data.ai_rationale || '该项 AI 无评分权限或仅提取证据，需人工判定。')}</div>
+        <div class="tiny muted">${esc(data.authority_label)} · 来源 ${esc(data.evidence_type)}</div>
+      </div>`;
+  }
+  const cls = 's' + data.ai_score;
+  return `
+    <div class="card-title">AI 建议<span class="sub">需人工确认</span></div>
+    <div class="ai-suggestion">
+      <div class="score-row">
+        <span class="big-score ${cls}">${data.ai_score}</span>
+        <span class="score-label">${scoreText(data.ai_score)}</span>
+        <span class="conf">置信度<b>${pct(data.ai_confidence, 0)}</b></span>
+      </div>
+      <div class="rationale">${esc(data.ai_rationale || '')}</div>
+      ${(data.evidence || []).map((ev) => `<div class="tiny muted">${mmss(ev.start_ms)} · ${esc(ev.quote)}</div>`).join('')}
+      <div class="tiny muted">model ${esc(data.model_version || '—')} · prompt ${esc(data.prompt_version || '—')}</div>
+    </div>`;
+}
+
+function actionPanelHtml(data) {
+  if (!state.reviewPlayed && data.evidence.length > 0) {
+    return '<div class="action-note">播放证据片段后出现评分操作。</div>';
+  }
+  if (data.ai_score === null || data.ai_score === undefined) {
+    const selected = state.reviewScore;
+    return `
+      <div class="attempt-strip"><span>该项无 AI 分数，请直接给出人工档位：</span></div>
+      <div class="score-choice">
+        ${[2, 1, 0].map((s) => `<button data-action="score" data-score="${s}" class="${selected === s ? 'selected' : ''}">${s} · ${scoreText(s)}</button>`).join('')}
+      </div>
+      <div class="btn-row">
+        <button class="btn primary" data-action="manual-save">保存人工评分</button>
+        <span class="action-note">复核人：${esc(state.reviewer)}</span>
+      </div>`;
+  }
+  if (state.reviewMode === 'correct' || state.reviewMode === 'reject') {
+    const isReject = state.reviewMode === 'reject';
+    return `
+      <div class="attempt-strip"><span>${isReject ? '拒绝 AI 判定并给出你的档位' : '修正 AI 建议'}</span><span>AI：<b>${data.ai_score} · ${scoreText(data.ai_score)}</b></span></div>
+      <div class="score-choice">
+        ${[2, 1, 0].map((s) => `<button data-action="score" data-score="${s}" class="${state.reviewScore === s ? 'selected' : ''}">${s} · ${scoreText(s)}</button>`).join('')}
+      </div>
+      ${isReject ? `<div class="reason-row">
+        ${['证据不足', '判定过严', '判定过宽', '行为锚歧义', '其他'].map((r) => `
+          <label><input type="radio" name="reason" value="${r}" ${state.reviewReason === r ? 'checked' : ''} data-action="reason"><span>${r}</span></label>`).join('')}
+      </div>` : ''}
+      <div class="btn-row">
+        <button class="btn ${isReject ? 'danger' : 'primary'}" data-action="submit-mode">${isReject ? '确认拒绝' : '确认修正'}</button>
+        <button class="btn ghost" data-action="cancel-mode">取消</button>
+      </div>`;
+  }
+  return `
+    <div class="btn-row">
+      <button class="btn primary" data-action="accept">接受 AI 建议</button>
+      <button class="btn amber" data-action="mode" data-mode="correct">修正</button>
+      <button class="btn danger" data-action="mode" data-mode="reject">拒绝</button>
+    </div>
+    <div class="action-note">接受后 final_score = AI 建议；修正/拒绝会写入 ReviewAction 与审计链。复核人：${esc(state.reviewer)}</div>`;
+}
+
+function refreshActionPanel() {
+  if (!state.currentReview) return;
+  const panel = $('#action-panel');
+  if (panel) panel.innerHTML = actionPanelHtml(state.currentReview);
+}
+
+function setupReviewAudio(data) {
+  const audio = $('#review-audio');
+  if (!audio) return;
+  const ev = data.evidence && data.evidence[0];
+  if (!ev || !data.media_url) {
+    markReviewPlayed();
+    return;
+  }
+  const start = Math.max(0, Number(ev.start_ms) / 1000 - 3);
+  const end = ev.evidence_kind === 'absence'
+    ? Math.min(Number(ev.end_ms) / 1000, start + 10)
+    : Number(ev.end_ms) / 1000 + 3;
+  audio.dataset.clipStart = String(start);
+  audio.dataset.clipEnd = String(end);
+  audio.addEventListener('play', markReviewPlayed, { once: true });
+  audio.addEventListener('timeupdate', () => {
+    if (Number(audio.currentTime) >= end) audio.pause();
+  });
+  const seekAndPlay = () => {
+    audio.currentTime = start;
+    const status = $('#play-status');
+    const promise = audio.play();
+    if (promise && promise.catch) {
+      promise.catch(() => {
+        if (status) status.textContent = '浏览器阻止自动播放，请点击播放';
+      });
+    }
+    if (status) status.textContent = '自动播放中 · 播完可评分';
+  };
+  if (audio.readyState >= 1) seekAndPlay();
+  else audio.addEventListener('loadedmetadata', seekAndPlay, { once: true });
+}
+
+function markReviewPlayed() {
+  if (state.reviewPlayed) return;
+  state.reviewPlayed = true;
+  if (!state.currentReview) return;
+  const ai = $('#ai-panel');
+  if (ai) ai.innerHTML = aiPanelHtml(state.currentReview, false);
+  refreshActionPanel();
+  const status = $('#play-status');
+  if (status) status.textContent = '已播放 · 可以评分';
+}
+
+async function submitReview(action, score, reason) {
+  if (!state.currentReview) return;
+  const reviewer = ($('#reviewer-input').value || '').trim();
+  if (!reviewer) {
+    toast('请先填写复核人', true);
+    return;
+  }
+  state.reviewer = reviewer;
+  localStorage.setItem('osceloop.reviewer', reviewer);
+  const seconds = Math.max(1, Math.round((Date.now() - state.reviewStartedAt) / 1000));
+  try {
+    const result = await api(`/api/review/${encodeURIComponent(state.currentReview.record_id)}/action`, {
+      method: 'POST',
+      body: { action, score, reason_code: reason || null, reviewer, seconds_spent: seconds },
+    });
+    toast(`已记录：${action} → ${result.final_score} 档 · 场次待复核 ${result.attempt_pending}`);
+    if (state.queue) {
+      state.queue.items = state.queue.items.filter((x) => x.record_id !== state.currentReview.record_id);
+      state.queue.total = Math.max(0, state.queue.total - 1);
+      setPendingBadge(state.queue.total);
+    }
+    const next = result.next_record_id;
+    const nextInList = filteredQueue().find((x) => x.record_id === next) || filteredQueue()[0];
+    if (nextInList) {
+      await loadReview(nextInList.record_id);
+    } else {
+      state.currentReview = null;
+      const wb = $('#workbench');
+      if (wb) wb.innerHTML = '<div class="empty">队列已清空。可到「质量与闸门」查看复核结果与审计链。</div>';
+    }
+    renderQueueList();
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+
+/* ---------- bundle ---------- */
+async function viewBundle() {
+  const list = await api('/api/bundles');
+  if (!list.length) {
+    $('#view').innerHTML = '<div class="empty">尚无冻结站包</div>';
+    return;
+  }
+  const data = await api(`/api/bundles/${encodeURIComponent(list[0].bundle_id)}`);
+  const checks = data.validation.checks.map((c) => `
+    <div class="check-card ${c.status}">
+      <div class="ch"><span>${esc(c.label)}</span>${c.status === 'pass' ? '<span class="pill teal">通过</span>' : c.status === 'warn' ? '<span class="pill amber">待核验</span>' : '<span class="pill red">阻断</span>'}</div>
+      <p>${esc(c.rule)}</p>
+      ${c.issues && c.issues.length ? `<p style="color:var(--amber)">${esc(c.issues[0])}</p>` : ''}
+    </div>`).join('');
+  const itemsRows = data.items.map((item) => `
+    <tr>
+      <td><div class="mono tiny muted">${esc(item.item_id)}</div><div style="font-weight:600">${esc(item.title)}</div></td>
+      <td class="truncate" title="${dataAttr(item.anchor.observable)}">${esc(item.anchor.observable)}</td>
+      <td><span class="pill">${esc(item.evidence_type)}</span><div class="tiny muted">${esc(item.phase)}</div></td>
+      <td class="num">${item.weight}</td>
+      <td>${item.critical ? '<span class="pill red">关键</span>' : '<span class="muted tiny">—</span>'}</td>
+      <td><span class="pill ${item.effective_authority === 'none' ? 'muted' : item.effective_authority === 'extract' ? 'blue' : 'teal'}">${esc(item.authority_label)}</span>
+        ${item.override ? `<div class="tiny" style="color:var(--amber);margin-top:2px">已降级：${esc(item.override.reason)}</div>` : ''}</td>
+      <td class="tiny muted">${esc(item.guideline_ref)}</td>
+    </tr>`).join('');
+  const slotRows = data.derived.slots.map((s) => `
+    <tr>
+      <td class="mono tiny">${esc(s.slot_id)}</td>
+      <td><span class="pill ${s.disclosure === 'active' ? 'teal' : s.disclosure === 'on_trust' ? 'purple' : 'muted'}">${esc(s.disclosure)}</span></td>
+      <td class="tiny">${esc(s.phase)}</td>
+      <td class="tiny">${(s.linked_items || []).map(esc).join(', ') || '公共信息'}</td>
+      <td class="small dim">${esc(s.content)}</td>
+      <td>${s.leak_guard ? '<span class="pill teal">on</span>' : '<span class="pill muted">off</span>'}</td>
+    </tr>`).join('');
+  const auditRows = data.audit.map((ev) => `
+    <div class="audit-row"><div class="act">${esc(ev.action)}</div><div class="obj">${esc(ev.actor)}</div><div class="time">${fmtTime(ev.created_at)}</div></div>`).join('');
+
+  $('#view').innerHTML = `
+    <div class="view-head">
+      <div>
+        <h2>${esc(data.title)}</h2>
+        <p>评分表不是流程的终点产物，而是贯穿全链路的契约。冻结瞬间派生信息槽、证据探针、检查点与反馈模板，共享同一 bundle_version。</p>
+      </div>
+      <div><span class="pill teal">${esc(data.status)}</span> <span class="pill">v${esc(data.version)}</span></div>
+    </div>
+
+    <div class="grid c2" style="margin-bottom:14px">
+      <div class="card">
+        <div class="card-title">冻结标识<span class="sub">不可变</span></div>
+        <div class="version-row"><span class="k">bundle_id</span><span class="v">${esc(data.bundle_id)}</span></div>
+        <div class="version-row"><span class="k">station_id</span><span class="v">${esc(data.station_id)}</span></div>
+        <div class="version-row"><span class="k">frozen_at</span><span class="v">${esc(data.frozen_at)}</span></div>
+        <div class="version-row"><span class="k">supersedes</span><span class="v">${esc(data.supersedes || '—')}</span></div>
+        <div class="sep"></div>
+        <div class="hash-block">${esc(data.bundle_hash)}</div>
+      </div>
+      <div class="card">
+        <div class="card-title">四类派生资产<span class="sub">1 rubric → 4 downstream</span></div>
+        <div class="derivation">
+          <div class="source-node">
+            <div class="l">SOURCE OF TRUTH</div>
+            <div class="t">RubricItem × ${data.derived.counts.probes}</div>
+            <div class="tiny muted">行为锚 · 证据形态 · 阶段 · 权限 · 权重</div>
+          </div>
+          <div class="arrow-v">→</div>
+          <div class="asset-grid">
+            <div class="asset"><b>SP 信息槽 × ${data.derived.counts.slots}</b><span>患者知道什么及触发条件</span></div>
+            <div class="asset"><b>对话检查点 × ${data.derived.counts.checkpoints}</b><span>阶段转换与引导语</span></div>
+            <div class="asset"><b>证据探针 × ${data.derived.counts.probes}</b><span>定位 utterance 的检索式</span></div>
+            <div class="asset"><b>反馈模板 × ${data.derived.counts.feedback_templates}</b><span>扣分时的替代话术</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="checks" style="margin-bottom:14px">${checks}</div>
+
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-title">评分项与项级 AI 权限<span class="sub">${data.items.length} 项 · 权限最小粒度是评分项</span></div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>评分项</th><th>可观测行为锚</th><th>证据 / 阶段</th><th class="num">权重</th><th>关键项</th><th>有效 AI 权限</th><th>指南引用</th></tr></thead>
+          <tbody>${itemsRows}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-title">SP 信息槽<span class="sub">说什么由确定性状态机控制 · leak_guard 默认开启</span></div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>槽位</th><th>披露阈值</th><th>阶段</th><th>关联评分项</th><th>内容</th><th>泄漏防护</th></tr></thead>
+          <tbody>${slotRows}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="grid c2">
+      <div class="card">
+        <div class="card-title">阶段检查点<span class="sub">必须触发项</span></div>
+        ${data.derived.checkpoints.map((cp) => `
+          <div class="version-row"><span class="k">${esc(cp.phase)}</span><span class="v">${(cp.must_probe || []).join(' · ') || '—'}</span></div>`).join('')}
+      </div>
+      <div class="card">
+        <div class="card-title">站包审计</div>
+        <div class="audit-list">${auditRows}</div>
+      </div>
+    </div>
+  `;
+}
+
+/* ---------- feedback ---------- */
+async function viewFeedback() {
+  const attempts = await api('/api/attempts');
+  if (!attempts.length) {
+    $('#view').innerHTML = '<div class="empty">尚无场次</div>';
+    return;
+  }
+  let selectedId = state.feedbackId;
+  if (!selectedId || !attempts.some((a) => a.attempt_id === selectedId)) {
+    selectedId = (attempts.find((a) => a.status === 'published') || attempts[0]).attempt_id;
+  }
+  state.feedbackId = selectedId;
+  $('#view').innerHTML = `
+    <div class="view-head">
+      <div>
+        <h2>反馈报告</h2>
+        <p>每条扣分项必须包含三段：发生了什么（证据）· 对应哪个评分项（行为）· 下次可以怎么说（替代方案）。</p>
+      </div>
+      <div class="attempt-picker">
+        <label class="field" style="font-size:10px">场次
+          <select class="input" id="feedback-select">
+            ${attempts.map((a) => `<option value="${dataAttr(a.attempt_id)}" ${a.attempt_id === selectedId ? 'selected' : ''}>${esc(a.candidate_code)} · ${esc(a.candidate_name)} · ${esc(a.status)}</option>`).join('')}
+          </select>
+        </label>
+      </div>
+    </div>
+    <div id="feedback-body"><div class="loading">正在生成反馈…</div></div>
+  `;
+  $('#feedback-select').addEventListener('change', (e) => {
+    state.feedbackId = e.target.value;
+    renderFeedback(state.feedbackId);
+  });
+  await renderFeedback(selectedId);
+}
+
+async function renderFeedback(attemptId) {
+  const body = $('#feedback-body');
+  body.innerHTML = '<div class="loading">正在生成反馈…</div>';
+  const data = await api(`/api/feedback/${encodeURIComponent(attemptId)}`);
+  const domainMax = Math.max(1, ...data.domains.map((d) => d.score || 0));
+  const deductionHtml = data.deductions.length ? data.deductions.map((u) => {
+    const ev = u.evidence;
+    const evText = ev ? `${mmss(ev.start_ms)} · ${esc(ev.quote)}` : '人工记录 / 无片段';
+    return `<div class="fb-card">
+      <div class="fb-head">
+        <h4>${u.critical ? '<span class="pill badge-critical">关键</span> ' : ''}${esc(u.item_title)} <span class="mono tiny muted">${esc(u.item_id)}</span></h4>
+        <div>${reasonPill(u.score === 0 ? 'critical_negative' : 'near_cutoff', u.score_label)}</div>
+      </div>
+      <div class="fb-part"><div class="lab">① 证据</div><div class="val">${ev ? `<button class="timestamp-btn" data-action="play-feedback" data-start="${ev.start_ms}" data-end="${ev.end_ms}" data-url="${dataAttr(u.media_url || '')}">播放 ${mmss(ev.start_ms)}</button> ` : ''}${evText}</div></div>
+      <div class="fb-part"><div class="lab">② 行为</div><div class="val">${esc(u.behavior)}</div></div>
+      <div class="fb-part alt"><div class="lab">③ 替代</div><div class="val">${esc(u.alternative || '下次可追加一句具体提问，覆盖该评分项后再进入下一环节。')}</div></div>
+    </div>`;
+  }).join('') : '<div class="empty">本次没有扣分项。</div>';
+
+  body.innerHTML = `
+    <div class="grid c4" style="margin-bottom:14px">
+      <div class="kpi blue"><div class="k">场次</div><div class="v" style="font-size:18px">${esc(data.candidate_name)}</div><div class="d">${esc(data.candidate_code)} · ${statusPill(data.status)}</div></div>
+      <div class="kpi teal"><div class="k">最终总分</div><div class="v">${num(data.final_total, 1)}</div><div class="d">AI 暂定 ${num(data.ai_total, 1)} · 及格线 ${num(data.pass_line, 0)}</div></div>
+      <div class="kpi ${data.final_total !== null && data.final_total >= data.pass_line ? 'teal' : 'red'}"><div class="k">结论</div><div class="v" style="font-size:18px">${data.final_total === null ? '待定' : data.final_total >= data.pass_line ? '达标' : '未达标'}</div><div class="d">${esc(data.status_note)}</div></div>
+      <div class="kpi amber"><div class="k">扣分项</div><div class="v">${data.deductions.length}</div><div class="d">优势项 ${data.strengths.length} · 人工评分项可能无片段</div></div>
+    </div>
+
+    <div class="grid c1-2" style="margin-bottom:16px">
+      <div class="card">
+        <div class="card-title">能力域画像<span class="sub">12 站可映射到 6 个能力域</span></div>
+        <div class="domain-bars">
+          ${data.domains.map((d) => `
+            <div class="domain-row">
+              <span class="bar-label">${esc(d.domain)}</span>
+              <div class="bar-track"><div class="bar-fill" style="width:${Math.max(2, (d.score || 0) / domainMax * 100)}%"></div></div>
+              <span class="bar-count">${num(d.score, 0)}</span>
+            </div>`).join('')}
+        </div>
+        <div class="sep"></div>
+        <div class="card-title" style="margin-bottom:6px">优势项</div>
+        <div class="strength-list">
+          ${data.strengths.length ? data.strengths.map((s) => `<span class="pill teal">${esc(s.item_title)}</span>`).join('') : '<span class="tiny muted">暂无</span>'}
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">反馈纪律<span class="sub">三段式</span></div>
+        <div class="feedback-rule">${esc(data.feedback_rule)}</div>
+        <div class="sep"></div>
+        <div class="small dim">第三段是最容易被忽略、也最有价值的部分——它把评分表从“审判工具”变成“教学工具”。</div>
+        <div class="sep"></div>
+        <audio id="fb-audio" preload="metadata" controls></audio>
+        <div class="tiny muted" style="margin-top:6px">点击任意时间戳播放对应证据片段。</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">逐项反馈<span class="sub">证据 → 行为 → 替代话术</span></div>
+      ${deductionHtml}
+    </div>
+  `;
+  const audio = $('#fb-audio');
+  if (audio) {
+    audio.addEventListener('timeupdate', () => {
+      const end = Number(audio.dataset.clipEnd || 0);
+      if (end && audio.currentTime >= end) audio.pause();
+    });
+  }
+}
+
+/* ---------- SP ---------- */
+async function viewSP() {
+  const persona = await api('/api/sp/persona');
+  if (!state.sp || state.sp.persona.bundle_id !== persona.bundle_id) {
+    state.sp = { persona, session: null };
+    await createSpSession();
+  } else {
+    state.sp.persona = persona;
+  }
+  renderSP();
+}
+
+async function createSpSession() {
+  const data = await api('/api/sp/sessions', {
+    method: 'POST',
+    body: { bundle_id: state.sp.persona.bundle_id, candidate_label: state.reviewer || '练习学生' },
+  });
+  state.sp.session = data;
+}
+
+function renderSP() {
+  const persona = state.sp.persona;
+  const session = state.sp.session;
+  const p = persona.persona || {};
+  const dims = p.persona || {};
+  const phaseOrder = persona.phases || [];
+  const currentPhase = session ? session.phase : 'opening';
+  const releasedMap = {};
+  (session && session.released_slots ? session.released_slots : []).forEach((s) => { releasedMap[s.slot_id] = s; });
+  const slots = (persona.slots || []).map((s) => {
+    const released = releasedMap[s.slot_id];
+    return `<div class="slot-row ${released ? 'released' : ''}">
+      <div><span class="sid">${esc(s.slot_id)}</span>${released ? '<span class="pill teal" style="padding:0 5px">已释放</span>' : '<span class="pill muted" style="padding:0 5px">未释放</span>'}</div>
+      <div class="content">${esc(released ? released.content : s.content)}</div>
+    </div>`;
+  }).join('');
+  const messages = session && session.messages ? session.messages : [];
+  const verify = session && session.verification;
+  const verifierHtml = verify ? `
+    <div class="verify-panel">
+      <div class="verify-item ${verify.persona >= 0.85 ? 'pass' : 'fail'}"><div class="k">人格保真 · 0.35</div><div class="v">${num(verify.persona, 2)}</div></div>
+      <div class="verify-item ${verify.boundary >= 0.85 ? 'pass' : 'fail'}"><div class="k">信息边界 · 0.50</div><div class="v">${num(verify.boundary, 2)}</div></div>
+      <div class="verify-item ${verify.clinical >= 0.85 ? 'pass' : 'fail'}"><div class="k">临床合理 · 0.15</div><div class="v">${num(verify.clinical, 2)}</div></div>
+    </div>
+    <div class="verify-total"><span>总分 ${num(verify.total, 3)} · ${verify.passed ? '<span style="color:var(--teal)">放行</span>' : '<span style="color:var(--red)">拦截 / 回退</span>'}</span><b>${num(verify.total, 3)}</b></div>
+    ${verify.violations && verify.violations.length ? `<div class="violation">${verify.violations.map((v) => esc((v.kind || '') + '：' + (v.entities || []).join(', '))).join('<br>')}</div>` : ''}
+    ${session.degraded ? '<div class="violation">本轮触发降级：已回退安全模板，未放行低分回应。</div>' : ''}
+  ` : '<div class="tiny muted">发送第一句后显示独立验证器结果。</div>';
+
+  $('#view').innerHTML = `
+    <div class="view-head">
+      <div>
+        <h2>SP 演练</h2>
+        <p>“说什么”由确定性状态机维护信息槽；“怎么说”交给生成器；独立验证器只做三件事：人格保真、信息边界、临床合理。</p>
+      </div>
+      <div class="btn-row"><button class="btn" data-action="sp-new">开始新会话</button></div>
+    </div>
+    <div class="sp-layout">
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <section class="card">
+          <div class="persona-name">${esc(p.name || '模拟患者')}</div>
+          <div class="persona-meta">
+            <span class="pill">${esc(p.age || '—')} 岁</span>
+            <span class="pill">${p.gender === 'male' ? '男性' : '女性'}</span>
+            <span class="pill">${esc(p.occupation || '—')}</span>
+          </div>
+          <div class="dim-list">
+            <div class="dim-row"><span>情绪基调</span><span>${esc(dims.tone || '—')}</span></div>
+            <div class="dim-row"><span>语言熟练度</span><span>${esc(dims.language || '—')}</span></div>
+            <div class="dim-row"><span>病史记忆</span><span>${esc(dims.memory || '—')}</span></div>
+            <div class="dim-row"><span>认知混乱度</span><span>${esc(dims.cognition ?? 0)}</span></div>
+            <div class="dim-row"><span>披露阈值</span><span>${esc(dims.disclosure || '—')}</span></div>
+          </div>
+          <div class="sep"></div>
+          <div class="tiny muted">禁用话术：${(p.forbidden || []).map(esc).join(' · ')}</div>
+        </section>
+        <section class="card">
+          <div class="card-title">阶段<span class="sub">状态机驱动</span></div>
+          <div class="phase-steps">
+            ${phaseOrder.map((ph, i) => {
+              const idx = phaseOrder.findIndex((x) => x.phase === currentPhase);
+              const cls = ph.phase === currentPhase ? 'current' : (i < idx ? 'done' : '');
+              return `<div class="phase-step ${cls}"><span class="idx">0${i + 1}</span>${esc(ph.label)}</div>`;
+            }).join('')}
+          </div>
+          <div class="sep"></div>
+          <div class="card-title">信息槽<span class="sub">${session ? session.released_slots.length : 0} / ${session ? session.slot_total : (persona.slots || []).length} 已释放</span></div>
+          <div class="slot-list">${slots}</div>
+        </section>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <section class="card chat-card">
+          <div class="chat-head">
+            <h3>与模拟患者对话</h3>
+            <div class="tiny muted">${session ? esc(session.phase_label) : '未开始'} · turn ${session ? session.turn : 0} · 信任 ${session ? session.trust : 0}</div>
+          </div>
+          <div class="chat-log" id="chat-log">
+            ${messages.map((m) => `<div class="msg ${m.role}"><div class="who">${m.role === 'patient' ? 'SP' : '考生'}</div>${esc(m.text)}</div>`).join('')}
+          </div>
+          <div class="chat-suggestions">
+            ${['您哪里不舒服？', '疼多久了？', '有没有高血压？', '我理解您很担心', '我要给您听诊一下'].map((t) => `<button class="btn small ghost" data-action="sp-suggest" data-text="${dataAttr(t)}">${esc(t)}</button>`).join('')}
+          </div>
+          <form class="chat-input" id="sp-form">
+            <input class="input" id="sp-input" maxlength="500" placeholder="以考生身份提问……" autocomplete="off">
+            <button class="btn primary" type="submit">发送</button>
+          </form>
+        </section>
+        <section class="card">
+          <div class="card-title">独立验证器<span class="sub">信息边界权重 0.50 · 不通过则回退模板</span></div>
+          ${verifierHtml}
+          <div class="sep"></div>
+          <div class="tiny muted">生成器只拿到“本轮允许说出的槽内容 + 人格卡 + 最近 3 轮上下文”；验证器看不到完整对话历史，避免上下文污染导致自我确认。</div>
+        </section>
+      </div>
+    </div>
+  `;
+  const log = $('#chat-log');
+  if (log) log.scrollTop = log.scrollHeight;
+  const form = $('#sp-form');
+  if (form) {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const input = $('#sp-input');
+      const text = (input.value || '').trim();
+      if (!text) return;
+      await sendSpMessage(text);
+    });
+  }
+}
+
+async function sendSpMessage(text) {
+  if (!state.sp || !state.sp.session) return;
+  try {
+    const data = await api(`/api/sp/sessions/${encodeURIComponent(state.sp.session.session_id)}/message`, {
+      method: 'POST',
+      body: { text },
+    });
+    state.sp.session = data;
+    renderSP();
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+
+/* ---------- quality ---------- */
+async function viewQuality() {
+  const data = await api('/api/quality');
+  const audit = await api('/api/audit?limit=30');
+  const report = data.report;
+  const gates = data.gates.gates;
+  const qwkClass = report.qwk_ai >= 0.7 ? 'teal' : report.qwk_ai >= 0.6 ? 'amber' : 'red';
+  const alerts = (data.gates.alerts || []).map((a) => `
+    <div class="alert ${a.level === 'danger' ? 'danger' : ''}"><b>${esc(a.title)}</b><p>${esc(a.detail)}</p></div>`).join('');
+  const gateCards = gates.map((gate) => `
+    <div class="gate-card ${gate.is_current ? 'current' : ''} ${gate.is_locked ? 'locked' : ''}">
+      <div class="gate-head">
+        <div><h3>${esc(gate.id)} · ${esc(gate.name)}</h3><p>${esc(gate.scope)}</p></div>
+        <div>${gateStatusPill(gate.status)}${gate.is_current ? ' <span class="pill teal">当前</span>' : ''}${gate.is_locked ? ' <span class="pill muted">未解锁</span>' : ''}</div>
+      </div>
+      <div class="criteria">
+        ${gate.criteria.map((c) => {
+          let value = '—';
+          if (c.value !== null && c.value !== undefined) {
+            if (c.key === 'evidence_rate' || c.key === 'edit_rate' || c.key === 'subgroup_gap' || c.key === 'near_improvement' || c.key === 'teacher_hours' || c.key === 'sp_fact_error' || c.key === 'persona_pass') value = pct(c.value, c.value < 0.1 ? 1 : 0);
+            else if (c.key === 'avg_review_seconds' || c.key === 'p95_latency') value = num(c.value, 2) + (c.key === 'avg_review_seconds' ? 's' : 's');
+            else value = num(c.value, 2);
+          }
+          return `<div class="criterion"><span>${esc(c.label)}</span><span class="val">${esc(value)}</span><span class="target">${checkMark(c.status)}<div class="tiny muted">${esc(c.target)}</div></span></div>`;
+        }).join('')}
+      </div>
+    </div>`).join('');
+  const overrides = data.overrides.length ? data.overrides.map((o) => `
+    <div class="version-row"><span class="k">${esc(o.item_id)}</span><span class="v">${esc(o.authority)} · ${esc(o.reason)}</span></div>`).join('') : '<div class="tiny muted">暂无权限覆盖</div>';
+  const auditRows = audit.map((ev) => `
+    <div class="audit-row"><div class="act">${esc(ev.action)}</div><div class="obj">${esc(ev.actor)} · ${esc(ev.object_type)} ${esc(ev.object_id)}</div><div class="time">${fmtTime(ev.created_at)}</div></div>`).join('');
+  const modelCards = data.model_cards.map((c) => `
+    <div class="card tight" style="margin-bottom:8px">
+      <div class="card-title" style="margin-bottom:4px">${esc(c.capability)}<span class="sub">${esc(c.model_version)}</span></div>
+      <div class="tiny muted">QWK ${num(c.metrics.qwk_ai, 3)} · 证据 ${pct(c.metrics.evidence_rate, 0)} · 编辑率 ${pct(c.metrics.edit_rate, 0)} · n=${c.metrics.sample_size}</div>
+      <div class="tiny" style="color:var(--amber);margin-top:4px">${esc(c.limitations)}</div>
+    </div>`).join('');
+
+  $('#view').innerHTML = `
+    <div class="view-head">
+      <div><h2>质量与闸门</h2><p>闸门不是“专家看过觉得可以”，而是带数字的放行条件；达不到就不放行，且降级自动生效。</p></div>
+      <div class="btn-row"><button class="btn amber small" data-action="version-bump">模拟模型版本变更</button></div>
+    </div>
+    ${alerts}
+    <div class="grid c4" style="margin-bottom:16px">
+      <div class="kpi ${qwkClass}"><div class="k">AI–人 QWK</div><div class="v">${num(report.qwk_ai, 3)}</div><div class="d">人工复核后 ${num(report.qwk_human, 3)}</div></div>
+      <div class="kpi blue"><div class="k">证据定位率</div><div class="v">${pct(report.evidence.rate, 0)}</div><div class="d">${report.evidence.localized}/${report.evidence.total} 条片段</div></div>
+      <div class="kpi amber"><div class="k">人工编辑率</div><div class="v">${pct(report.review.edit_rate, 0)}</div><div class="d">接受率 ${pct(report.review.accept_rate, 0)} · 复核 ${report.review.reviewed}</div></div>
+      <div class="kpi red"><div class="k">证据缺口率</div><div class="v">${pct(report.integrity_gap_rate, 1)}</div><div class="d">目标 ≤ 2% · 触发全站人工</div></div>
+    </div>
+
+    <div class="gates" style="margin-bottom:16px">${gateCards}</div>
+
+    <div class="grid c2" style="margin-bottom:16px">
+      <div class="card">
+        <div class="card-title">版本治理<span class="sub">变更即降级，禁止静默升级</span></div>
+        <div class="version-row"><span class="k">score model</span><span class="v">${esc(data.versions.model)}</span></div>
+        <div class="version-row"><span class="k">score prompt</span><span class="v">${esc(data.versions.prompt)}</span></div>
+        <div class="version-row"><span class="k">SP model</span><span class="v">${esc(data.versions.sp_model)}</span></div>
+        <div class="version-row"><span class="k">SP prompt</span><span class="v">${esc(data.versions.sp_prompt)}</span></div>
+        <div class="sep"></div>
+        <div class="card-title" style="margin-bottom:6px">权限覆盖</div>
+        ${overrides}
+      </div>
+      <div class="card">
+        <div class="card-title">AI 调用<span class="sub">网关唯一出口</span></div>
+        <div class="version-row"><span class="k">调用次数</span><span class="v">${data.ai_calls.count}</span></div>
+        <div class="version-row"><span class="k">P95 延迟</span><span class="v">${num(data.ai_calls.p95_latency_ms, 2)} ms</span></div>
+        <div class="version-row"><span class="k">平均延迟</span><span class="v">${num(data.ai_calls.avg_latency_ms, 2)} ms</span></div>
+        <div class="version-row"><span class="k">能力</span><span class="v">${data.ai_calls.by_capability.map((x) => `${esc(x.key)}:${x.count}`).join(' · ')}</span></div>
+        <div class="version-row"><span class="k">状态</span><span class="v">${data.ai_calls.by_status.map((x) => `${esc(x.key)}:${x.count}`).join(' · ')}</span></div>
+        <div class="sep"></div>
+        <div class="tiny muted">模型调用强制携带 model_version / prompt_version / rubric_version；缺任一项的记录视为无效。</div>
+      </div>
+    </div>
+
+    <div class="grid c2">
+      <div class="card">
+        <div class="card-title">模型卡<span class="sub">公开给校内与考生摘要</span></div>
+        ${modelCards || '<div class="empty">暂无模型卡</div>'}
+      </div>
+      <div class="card">
+        <div class="card-title">审计事件<span class="sub">只追加 · 可追溯</span></div>
+        <div class="audit-list">${auditRows || '<div class="empty">暂无审计</div>'}</div>
+      </div>
+    </div>
+  `;
+}
+
+/* ---------- global events ---------- */
+document.addEventListener('click', async (e) => {
+  const el = e.target.closest('[data-action]');
+  if (!el) return;
+  const action = el.dataset.action;
+  if (action === 'signoff' || action === 'publish') {
+    const reviewer = ($('#reviewer-input').value || '').trim();
+    if (!reviewer) return toast('请先填写复核人', true);
+    try {
+      await api(`/api/attempts/${encodeURIComponent(el.dataset.attempt)}/${action}`, {
+        method: 'POST',
+        body: { reviewer },
+      });
+      toast(action === 'signoff' ? '已完成 human_signoff，可发布成绩' : '成绩已发布，写入审计链');
+      await viewOverview();
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'play-clip') {
+    const audio = $('#review-audio');
+    if (!audio) return;
+    const start = Number(audio.dataset.clipStart || 0);
+    const end = Number(audio.dataset.clipEnd || 0);
+    audio.currentTime = start;
+    audio.play().catch(() => toast('无法播放音频', true));
+    if (end) {
+      const check = () => {
+        if (audio.currentTime >= end) {
+          audio.pause();
+          audio.removeEventListener('timeupdate', check);
+        }
+      };
+      audio.addEventListener('timeupdate', check);
+    }
+    return;
+  }
+  if (action === 'mode') {
+    state.reviewMode = el.dataset.mode;
+    state.reviewScore = null;
+    state.reviewReason = null;
+    refreshActionPanel();
+    return;
+  }
+  if (action === 'cancel-mode') {
+    state.reviewMode = null;
+    state.reviewScore = null;
+    state.reviewReason = null;
+    refreshActionPanel();
+    return;
+  }
+  if (action === 'score') {
+    state.reviewScore = Number(el.dataset.score);
+    $$('[data-action="score"]').forEach((b) => b.classList.toggle('selected', Number(b.dataset.score) === state.reviewScore));
+    return;
+  }
+  if (action === 'reason') {
+    state.reviewReason = el.value;
+    return;
+  }
+  if (action === 'accept') {
+    await submitReview('accept');
+    return;
+  }
+  if (action === 'submit-mode') {
+    const mode = state.reviewMode;
+    if (state.reviewScore === null || state.reviewScore === undefined) {
+      toast('请选择修正后的档位', true);
+      return;
+    }
+    if (mode === 'reject' && !state.reviewReason) {
+      toast('拒绝必须选择理由码', true);
+      return;
+    }
+    await submitReview(mode, state.reviewScore, mode === 'reject' ? state.reviewReason : null);
+    return;
+  }
+  if (action === 'manual-save') {
+    if (state.reviewScore === null || state.reviewScore === undefined) {
+      toast('请选择人工评分档位', true);
+      return;
+    }
+    await submitReview('manual_score', state.reviewScore);
+    return;
+  }
+  if (action === 'play-feedback') {
+    const audio = $('#fb-audio');
+    if (!audio) return;
+    const url = el.dataset.url;
+    if (url && audio.src.indexOf(url) === -1) audio.src = url;
+    const start = Number(el.dataset.start || 0) / 1000;
+    const end = Number(el.dataset.end || 0) / 1000 + 3;
+    audio.dataset.clipEnd = String(end);
+    audio.currentTime = Math.max(0, start - 3);
+    audio.play().catch(() => toast('无法播放音频', true));
+    return;
+  }
+  if (action === 'sp-suggest') {
+    const input = $('#sp-input');
+    if (input) {
+      input.value = el.dataset.text || '';
+      input.focus();
+    }
+    return;
+  }
+  if (action === 'sp-new') {
+    if (!state.sp) return;
+    await createSpSession();
+    renderSP();
+    return;
+  }
+  if (action === 'version-bump') {
+    if (!confirm('模拟模型/提示词版本变更？系统会把所有 suggest/decide 权限自动降为 extract，并写入审计。')) return;
+    try {
+      const model = 'mock-score-1.1';
+      const result = await api('/api/governance/version-bump', {
+        method: 'POST',
+        body: { model_version: model, actor: state.reviewer || '系统管理员' },
+      });
+      toast(`版本已切换为 ${result.model_version}，${result.changes.length} 个评分项权限自动降级`);
+      await viewQuality();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  }
+});
+
+document.addEventListener('change', (e) => {
+  if (e.target.dataset && e.target.dataset.action === 'reason') {
+    state.reviewReason = e.target.value;
+  }
+});
+
+/* ---------- boot ---------- */
+$('#reviewer-input').value = state.reviewer;
+$('#reviewer-input').addEventListener('change', (e) => {
+  state.reviewer = e.target.value.trim() || '主治 张蕾';
+  localStorage.setItem('osceloop.reviewer', state.reviewer);
+});
+window.addEventListener('hashchange', route);
+route();

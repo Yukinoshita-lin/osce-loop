@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OSCE·Loop · P0 评分副驾</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">OL</div>
+        <div>
+          <div class="brand-name">OSCE·Loop</div>
+          <div class="brand-sub">P0 评分副驾</div>
+        </div>
+      </div>
+      <nav class="nav" id="nav">
+        <a href="#/overview" data-view="overview"><span class="nav-no">01</span>总览</a>
+        <a href="#/review" data-view="review"><span class="nav-no">02</span>复核队列<span class="nav-badge" id="nav-pending">0</span></a>
+        <a href="#/bundle" data-view="bundle"><span class="nav-no">03</span>站包契约</a>
+        <a href="#/feedback" data-view="feedback"><span class="nav-no">04</span>反馈报告</a>
+        <a href="#/sp" data-view="sp"><span class="nav-no">05</span>SP 演练</a>
+        <a href="#/quality" data-view="quality"><span class="nav-no">06</span>质量与闸门</a>
+      </nav>
+      <div class="sidebar-foot">
+        <div class="foot-line"><span class="dot teal"></span>离线历史录像</div>
+        <div class="foot-line muted">不接触在考考生</div>
+        <div class="foot-meta">v0.1 · schema v2</div>
+      </div>
+    </aside>
+    <div class="main">
+      <header class="topbar">
+        <div class="topbar-title">
+          <div class="eyebrow">P0 · 证据锚定的离线评分</div>
+          <h1 id="page-title">总览</h1>
+        </div>
+        <div class="topbar-right">
+          <div class="stage-pill" id="stage-pill">G0 离线副驾</div>
+          <label class="reviewer-box">
+            <span>复核人</span>
+            <input id="reviewer-input" maxlength="20" placeholder="主治 张蕾">
+          </label>
+        </div>
+      </header>
+      <main id="view" class="view">
+        <div class="loading">正在载入工作台…</div>
+      </main>
+      <footer class="page-foot">
+        OSCE·Loop · 评分表即协议 · 证据先于结论 · 人类保留否决权
+      </footer>
+    </div>
+  </div>
+  <div id="toast" class="toast"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,1806 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OSCE·Loop — AI+OSCE 全流程系统设计方案</title>
+<style>
+:root{
+  --bg:#0a0e14;
+  --surface:#111821;
+  --surface-2:#161f2b;
+  --border:#21303f;
+  --border-soft:#1a2531;
+  --text:#e6edf3;
+  --text-dim:#9fb0c0;
+  --text-mute:#6f8091;
+  --teal:#3fd6c0;
+  --teal-dim:rgba(63,214,192,.12);
+  --amber:#f0a04b;
+  --amber-dim:rgba(240,160,75,.12);
+  --red:#e5645c;
+  --red-dim:rgba(229,100,92,.12);
+  --gray:#7c8b99;
+  --gray-dim:rgba(124,139,153,.12);
+  --blue:#5aa9e6;
+  --blue-dim:rgba(90,169,230,.12);
+  --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+  --sans:"PingFang SC","Microsoft YaHei","Noto Sans SC","Helvetica Neue",Arial,sans-serif;
+}
+*{box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{
+  margin:0;
+  background:var(--bg);
+  color:var(--text);
+  font-family:var(--sans);
+  font-size:15px;
+  line-height:1.85;
+  -webkit-font-smoothing:antialiased;
+}
+::selection{background:rgba(63,214,192,.28);}
+a{color:var(--teal);text-decoration:none;}
+a:hover{text-decoration:underline;}
+
+/* ---------- layout ---------- */
+.shell{display:flex;max-width:1400px;margin:0 auto;}
+nav.toc{
+  position:sticky;top:0;align-self:flex-start;
+  width:264px;flex-shrink:0;
+  height:100vh;overflow-y:auto;
+  padding:44px 20px 60px 28px;
+  border-right:1px solid var(--border-soft);
+}
+nav.toc .brand{
+  font-size:13px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--text-mute);margin-bottom:6px;
+}
+nav.toc .brand-sub{
+  font-size:17px;font-weight:700;color:var(--text);
+  letter-spacing:.01em;margin-bottom:26px;line-height:1.4;
+}
+nav.toc ol{list-style:none;margin:0;padding:0;counter-reset:toc;}
+nav.toc ol li{margin:0;counter-increment:toc;}
+nav.toc ol li a{
+  display:block;padding:5px 0 5px 30px;position:relative;
+  color:var(--text-dim);font-size:13.2px;line-height:1.55;
+  border-left:2px solid transparent;
+  transition:color .15s,border-color .15s;
+}
+nav.toc ol li a::before{
+  content:counter(toc,decimal-leading-zero);
+  position:absolute;left:8px;top:5px;
+  font-family:var(--mono);font-size:10.5px;color:var(--text-mute);
+}
+nav.toc ol li a:hover{color:var(--teal);border-left-color:var(--teal);text-decoration:none;}
+nav.toc .toc-foot{
+  margin-top:30px;padding-top:18px;border-top:1px solid var(--border-soft);
+  font-size:11.5px;color:var(--text-mute);line-height:1.7;
+}
+
+main{flex:1;min-width:0;padding:0 64px 120px;max-width:1010px;}
+
+/* ---------- hero ---------- */
+header.hero{
+  padding:78px 0 54px;border-bottom:1px solid var(--border-soft);margin-bottom:8px;
+}
+.eyebrow{
+  display:inline-flex;align-items:center;gap:8px;
+  font-family:var(--mono);font-size:11px;letter-spacing:.16em;
+  color:var(--teal);text-transform:uppercase;
+  padding:5px 11px;border:1px solid rgba(63,214,192,.28);
+  border-radius:3px;background:var(--teal-dim);margin-bottom:26px;
+}
+.eyebrow .dot{width:5px;height:5px;border-radius:50%;background:var(--teal);}
+h1{
+  font-size:42px;line-height:1.24;font-weight:800;margin:0 0 20px;
+  letter-spacing:-.015em;
+}
+h1 .accent{
+  background:linear-gradient(100deg,#3fd6c0,#5aa9e6 70%);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+}
+.lede{
+  font-size:17px;line-height:1.85;color:var(--text-dim);max-width:760px;margin:0 0 34px;
+}
+.lede strong{color:var(--text);font-weight:600;}
+.meta-grid{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:0;
+  border:1px solid var(--border);border-radius:6px;overflow:hidden;
+  background:var(--surface);
+}
+.meta-grid > div{padding:16px 18px;border-right:1px solid var(--border-soft);}
+.meta-grid > div:last-child{border-right:none;}
+.meta-grid .k{font-size:11px;letter-spacing:.09em;color:var(--text-mute);text-transform:uppercase;margin-bottom:5px;}
+.meta-grid .v{font-size:13.5px;color:var(--text);font-weight:600;}
+
+/* ---------- sections ---------- */
+section{padding-top:64px;}
+h2{
+  font-size:26px;font-weight:750;margin:0 0 8px;letter-spacing:-.01em;
+  display:flex;align-items:baseline;gap:14px;
+}
+h2 .num{
+  font-family:var(--mono);font-size:12px;color:var(--teal);
+  font-weight:500;letter-spacing:.08em;flex-shrink:0;padding-top:4px;
+}
+h2 + .sub{margin:0 0 28px;color:var(--text-mute);font-size:14px;}
+h3{
+  font-size:17.5px;font-weight:700;margin:44px 0 12px;
+  padding-left:13px;border-left:3px solid var(--teal);line-height:1.5;
+}
+h4{font-size:15px;font-weight:700;margin:26px 0 8px;color:var(--text);}
+p{margin:0 0 15px;}
+ul,ol{margin:0 0 16px;padding-left:22px;}
+li{margin-bottom:7px;}
+li::marker{color:var(--text-mute);}
+strong{color:#fff;font-weight:650;}
+code{
+  font-family:var(--mono);font-size:12.6px;
+  background:rgba(255,255,255,.06);padding:1.5px 5px;border-radius:3px;
+  color:#9fe6da;border:1px solid rgba(255,255,255,.05);
+}
+
+/* ---------- callouts ---------- */
+.callout{
+  border:1px solid var(--border);border-left:3px solid var(--teal);
+  background:linear-gradient(90deg,rgba(63,214,192,.055),rgba(63,214,192,0) 55%);
+  padding:18px 22px;border-radius:0 5px 5px 0;margin:22px 0;
+}
+.callout .tag{
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--teal);display:block;margin-bottom:7px;
+}
+.callout p:last-child{margin-bottom:0;}
+.callout.warn{border-left-color:var(--amber);background:linear-gradient(90deg,rgba(240,160,75,.055),rgba(240,160,75,0) 55%);}
+.callout.warn .tag{color:var(--amber);}
+.callout.danger{border-left-color:var(--red);background:linear-gradient(90deg,rgba(229,100,92,.055),rgba(229,100,92,0) 55%);}
+.callout.danger .tag{color:var(--red);}
+.callout.neutral{border-left-color:var(--blue);background:linear-gradient(90deg,rgba(90,169,230,.055),rgba(90,169,230,0) 55%);}
+.callout.neutral .tag{color:var(--blue);}
+
+/* ---------- tables ---------- */
+.tbl-wrap{overflow-x:auto;margin:20px 0 26px;border:1px solid var(--border);border-radius:6px;}
+table{border-collapse:collapse;width:100%;font-size:13.2px;line-height:1.65;background:var(--surface);}
+thead th{
+  text-align:left;padding:11px 14px;font-weight:650;font-size:12px;
+  letter-spacing:.045em;color:var(--text-dim);text-transform:uppercase;
+  background:var(--surface-2);border-bottom:1px solid var(--border);
+  white-space:nowrap;
+}
+tbody td{padding:11px 14px;border-bottom:1px solid var(--border-soft);vertical-align:top;}
+tbody tr:last-child td{border-bottom:none;}
+tbody tr:hover{background:rgba(255,255,255,.018);}
+td .mono,th .mono{font-family:var(--mono);font-size:12px;}
+
+/* risk pills */
+.pill{
+  display:inline-block;font-family:var(--mono);font-size:10.5px;font-weight:600;
+  padding:2px 7px;border-radius:3px;letter-spacing:.05em;white-space:nowrap;
+}
+.p-l0{background:var(--gray-dim);color:#a8b5c2;border:1px solid rgba(124,139,153,.3);}
+.p-l1{background:var(--teal-dim);color:var(--teal);border:1px solid rgba(63,214,192,.3);}
+.p-l2{background:var(--amber-dim);color:var(--amber);border:1px solid rgba(240,160,75,.3);}
+.p-l3{background:var(--red-dim);color:var(--red);border:1px solid rgba(229,100,92,.3);}
+.p-tag{background:rgba(90,169,230,.12);color:var(--blue);border:1px solid rgba(90,169,230,.3);}
+
+/* ---------- architecture diagram ---------- */
+.arch{
+  border:1px solid var(--border);border-radius:8px;padding:22px;
+  background:radial-gradient(120% 100% at 50% 0%,#101a24 0%,#0c1219 100%);
+  margin:26px 0;
+}
+.arch-title{
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--text-mute);margin-bottom:16px;display:flex;justify-content:space-between;
+}
+.layer{
+  display:grid;grid-template-columns:78px 1fr;gap:14px;align-items:stretch;
+  margin-bottom:9px;
+}
+.layer .lname{
+  font-family:var(--mono);font-size:10px;color:var(--text-mute);
+  writing-mode:vertical-rl;text-orientation:mixed;
+  display:flex;align-items:center;justify-content:center;
+  letter-spacing:.1em;border-right:1px solid var(--border-soft);
+}
+.layer .lbody{
+  display:grid;gap:8px;
+}
+.layer .lbody.c2{grid-template-columns:repeat(2,1fr);}
+.layer .lbody.c3{grid-template-columns:repeat(3,1fr);}
+.layer .lbody.c4{grid-template-columns:repeat(4,1fr);}
+.node{
+  border:1px solid var(--border);border-radius:5px;
+  padding:11px 13px;background:var(--surface);font-size:12.6px;line-height:1.55;
+}
+.node .nt{font-weight:650;color:var(--text);display:block;font-size:12.8px;margin-bottom:2px;}
+.node .nd{color:var(--text-mute);font-size:11.6px;line-height:1.5;}
+.node.gov{border-color:rgba(240,160,75,.32);background:rgba(240,160,75,.055);}
+.node.ai{border-color:rgba(63,214,192,.32);background:rgba(63,214,192,.05);}
+.node.ai .nt{color:#8ae8da;}
+.node.app{border-color:rgba(90,169,230,.28);background:rgba(90,169,230,.045);}
+.node.app .nt{color:#9ccdf0;}
+.arrowdown{
+  text-align:center;color:#2e4256;font-size:10px;line-height:1;
+  margin:-3px 0 6px 78px;letter-spacing:.45em;
+}
+.legend{
+  display:flex;gap:20px;flex-wrap:wrap;margin-top:16px;padding-top:14px;
+  border-top:1px solid var(--border-soft);font-size:11.5px;color:var(--text-mute);
+}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:middle;}
+
+/* ---------- flow ---------- */
+.flow{
+  display:grid;grid-template-columns:repeat(7,1fr);gap:0;
+  margin:28px 0 12px;border-radius:6px;overflow:hidden;border:1px solid var(--border);
+}
+.flow .step{
+  padding:14px 10px 16px;background:var(--surface);
+  border-right:1px solid var(--border-soft);position:relative;
+}
+.flow .step:last-child{border-right:none;}
+.flow .step .sn{font-family:var(--mono);font-size:10px;color:var(--text-mute);margin-bottom:6px;}
+.flow .step .st{font-size:12.5px;font-weight:650;line-height:1.45;margin-bottom:8px;min-height:36px;}
+.flow .step .sr{height:3px;border-radius:2px;margin-top:auto;}
+.flow .step .role{font-size:10.5px;color:var(--text-mute);line-height:1.4;margin-top:8px;}
+.sr-l1{background:var(--teal);}
+.sr-l2{background:var(--amber);}
+.sr-l3{background:var(--red);}
+.sr-l0{background:var(--gray);}
+
+/* ---------- contract card ---------- */
+.spec{
+  border:1px solid var(--border);border-radius:6px;overflow:hidden;margin:22px 0;
+  background:var(--surface);
+}
+.spec .spec-h{
+  padding:10px 16px;background:var(--surface-2);border-bottom:1px solid var(--border);
+  font-family:var(--mono);font-size:11.5px;color:var(--text-dim);letter-spacing:.05em;
+  display:flex;justify-content:space-between;
+}
+.spec pre{
+  margin:0;padding:18px 20px;overflow-x:auto;
+  font-family:var(--mono);font-size:12.3px;line-height:1.75;color:#c6d4e1;
+}
+.spec pre .k{color:#8ae8da;}
+.spec pre .s{color:#e0c48a;}
+.spec pre .c{color:#5f7183;font-style:italic;}
+.spec pre .n{color:#f0a04b;}
+
+/* ---------- two col cards ---------- */
+.cards2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:22px 0;}
+.card{
+  border:1px solid var(--border);border-radius:6px;padding:18px 20px;background:var(--surface);
+}
+.card .ch{
+  font-size:13px;font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:8px;
+}
+.card p{font-size:13.4px;color:var(--text-dim);margin-bottom:8px;}
+.card p:last-child{margin-bottom:0;}
+.card .badge{
+  font-family:var(--mono);font-size:10px;padding:2px 6px;border-radius:3px;
+  background:var(--red-dim);color:var(--red);border:1px solid rgba(229,100,92,.25);
+}
+
+/* ---------- roadmap ---------- */
+.road{margin:28px 0;position:relative;padding-left:26px;}
+.road::before{content:"";position:absolute;left:7px;top:8px;bottom:8px;width:1px;background:var(--border);}
+.road .phase{position:relative;margin-bottom:26px;}
+.road .phase::before{
+  content:"";position:absolute;left:-24px;top:7px;width:9px;height:9px;border-radius:50%;
+  background:var(--bg);border:2px solid var(--teal);
+}
+.road .phase.p2::before{border-color:var(--amber);}
+.road .phase.p3::before{border-color:var(--red);}
+.road .ph{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px;}
+.road .ph .name{font-size:15.5px;font-weight:700;}
+.road .ph .when{font-family:var(--mono);font-size:11px;color:var(--text-mute);}
+.road .ph .goal{font-size:12px;color:var(--teal);border:1px solid rgba(63,214,192,.25);padding:1px 7px;border-radius:3px;}
+.road .phase p{font-size:13.5px;color:var(--text-dim);margin-bottom:0;}
+
+hr.sep{border:none;border-top:1px solid var(--border-soft);margin:56px 0 0;}
+
+/* ---------- stage blocks ---------- */
+.stage{
+  border:1px solid var(--border);border-radius:7px;overflow:hidden;
+  margin:26px 0;background:var(--surface);
+}
+.stage-h{
+  display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  padding:14px 20px;background:var(--surface-2);border-bottom:1px solid var(--border);
+}
+.stage-h .sidx{
+  font-family:var(--mono);font-size:11px;color:var(--bg);background:var(--teal);
+  width:22px;height:22px;border-radius:4px;display:flex;align-items:center;justify-content:center;
+  font-weight:700;flex-shrink:0;
+}
+.stage-h .sname{font-size:16px;font-weight:700;}
+.stage-h .spurpose{font-size:12.5px;color:var(--text-mute);flex:1;min-width:180px;}
+.stage-b{padding:20px 22px 8px;}
+.stage-b > p:first-child{margin-top:0;}
+.io{
+  display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:16px 0 18px;
+}
+.io > div{
+  border:1px solid var(--border-soft);border-radius:5px;padding:11px 14px;
+  background:rgba(255,255,255,.015);
+}
+.io .lab{
+  font-family:var(--mono);font-size:10px;letter-spacing:.11em;color:var(--text-mute);
+  text-transform:uppercase;margin-bottom:5px;
+}
+.io .val{font-size:12.7px;color:var(--text-dim);line-height:1.65;}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:16px 0;}
+.split > div{border:1px solid var(--border-soft);border-radius:5px;padding:13px 15px;}
+.split .sh{
+  font-size:12px;font-weight:700;margin-bottom:7px;display:flex;align-items:center;gap:7px;
+}
+.split .sh .ic{
+  width:16px;height:16px;border-radius:3px;display:inline-flex;align-items:center;justify-content:center;
+  font-size:10px;font-weight:700;
+}
+.split .ai{border-color:rgba(63,214,192,.22);background:rgba(63,214,192,.035);}
+.split .ai .ic{background:rgba(63,214,192,.18);color:var(--teal);}
+.split .hu{border-color:rgba(240,160,75,.22);background:rgba(240,160,75,.035);}
+.split .hu .ic{background:rgba(240,160,75,.18);color:var(--amber);}
+.split ul{margin:0;padding-left:17px;font-size:12.6px;color:var(--text-dim);line-height:1.7;}
+.split li{margin-bottom:4px;}
+.fail{
+  margin:16px 0 16px;padding:12px 15px;border-radius:5px;
+  background:rgba(229,100,92,.05);border:1px solid rgba(229,100,92,.2);
+  font-size:12.6px;color:var(--text-dim);line-height:1.7;
+}
+.fail b{color:var(--red);font-size:11px;font-family:var(--mono);letter-spacing:.08em;display:block;margin-bottom:3px;text-transform:uppercase;}
+
+footer{
+  margin-top:80px;padding-top:26px;border-top:1px solid var(--border-soft);
+  font-size:12px;color:var(--text-mute);line-height:1.8;
+}
+
+/* ---------- responsive grids ---------- */
+.derive{display:grid;grid-template-columns:1fr 34px 1.15fr;gap:0;align-items:center;}
+.steps4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;align-items:start;}
+
+@media (max-width:1080px){
+  nav.toc{display:none;}
+  main{padding:0 26px 80px;}
+  h1{font-size:30px;}
+  .meta-grid{grid-template-columns:1fr 1fr;}
+  .meta-grid>div:nth-child(2){border-right:none;}
+  .flow{grid-template-columns:repeat(2,1fr);}
+  .cards2{grid-template-columns:1fr;}
+  .layer{grid-template-columns:1fr;}
+  .layer .lname{writing-mode:horizontal-tb;border-right:none;border-bottom:1px solid var(--border-soft);padding-bottom:4px;justify-content:flex-start;}
+  .layer .lbody.c3,.layer .lbody.c4{grid-template-columns:1fr 1fr;}
+  .arrowdown{margin-left:0;}
+  .steps4{grid-template-columns:1fr 1fr;}
+}
+@media (max-width:620px){
+  .io,.split{grid-template-columns:1fr;}
+  .derive{grid-template-columns:1fr;}
+  .derive>.darrow{display:none;}
+  .meta-grid{grid-template-columns:1fr;}
+  .meta-grid>div{border-right:none;}
+  .stage-h .spurpose{display:none;}
+}
+</style>
+</head>
+<body>
+<div class="shell">
+
+<nav class="toc">
+  <div class="brand">System Design</div>
+  <div class="brand-sub">OSCE·Loop<br>AI+OSCE 全流程</div>
+  <ol>
+    <li><a href="#s1">问题与设计公理</a></li>
+    <li><a href="#s2">风险分级模型</a></li>
+    <li><a href="#s3">总体架构</a></li>
+    <li><a href="#s4">评分表即协议</a></li>
+    <li><a href="#s5">全流程七阶段</a></li>
+    <li><a href="#s6">三个核心机制</a></li>
+    <li><a href="#s7">数据模型与版本</a></li>
+    <li><a href="#s8">治理四支柱落地</a></li>
+    <li><a href="#s9">度量与验收</a></li>
+    <li><a href="#s10">路线图与投入</a></li>
+    <li><a href="#s11">反模式清单</a></li>
+  </ol>
+  <div class="toc-foot">
+    工作名：OSCE·Loop<br>
+    Loop = 人机回环 · 生成验证闭环 · 反馈闭环
+  </div>
+</nav>
+
+<main>
+
+<header class="hero">
+  <div class="eyebrow"><span class="dot"></span>V1.0 设计方案 · 2026.11</div>
+  <h1>让 AI 进入 OSCE 的每一个环节，<br>但只在<span class="accent">该放手的地方</span>放手</h1>
+  <p class="lede">
+    这不是一份"AI 能做什么"的功能清单，而是一套<strong>按风险等级分配权限</strong>的系统设计。
+    它把 OSCE 的七个环节逐一定级，为每一级设定 AI 的权限边界、人类的保留决策点、以及可量化的放行闸门。
+    <strong>评分表不是流程的终点产物，而是贯穿全链路的契约</strong>——这是整套设计的主骨架。
+  </p>
+  <div class="meta-grid">
+    <div><div class="k">覆盖范围</div><div class="v">命题 → 反馈全链路</div></div>
+    <div><div class="k">AI 角色</div><div class="v">5 类，分权设计</div></div>
+    <div><div class="k">风险分级</div><div class="v">L0 – L3 四级</div></div>
+    <div><div class="k">落地节奏</div><div class="v">4 阶段 18 个月</div></div>
+  </div>
+</header>
+
+<!-- ============ S1 ============ -->
+<section id="s1">
+  <h2><span class="num">01</span>问题与设计公理</h2>
+  <p class="sub">先把"为什么难"说清楚，否则所有设计都会退化成功能堆叠。</p>
+
+  <h3>OSCE 的三个结构性痛点</h3>
+  <p>OSCE 的困境不是"效率低"，而是三个互相纠缠的结构性问题：</p>
+  <div class="cards2">
+    <div class="card">
+      <div class="ch">反馈延迟</div>
+      <p>一次终结性 OSCE 的反馈往往滞后数周至数月。等到学生拿到评分表，临床轮转早已结束，<strong>形成性价值几乎归零</strong>。学生需要的是"刚才那句话为什么扣分"，而不是"上学期你沟通项偏低"。</p>
+    </div>
+    <div class="card">
+      <div class="ch">专家负荷</div>
+      <p>命题、SP 培训、现场评分、复核、申诉处理，全部压在少数临床教师身上。负荷的直接后果是<strong>评分趋中、行为锚被简化、边缘案例草率判定</strong>——恰恰是最需要精细判断的地方最粗糙。</p>
+    </div>
+    <div class="card">
+      <div class="ch">标准化幻觉</div>
+      <p>OSCE 承诺"客观结构化"，但 SP 每次扮演略有不同、考官宽严不一、站间难度漂移。<strong>标准化是目标而非事实</strong>，而传统手段（培训、校准会）只能压低方差，无法测量方差。</p>
+    </div>
+    <div class="card">
+      <div class="ch">AI 的三个诱惑</div>
+      <p>面对这三座山，AI 提供的诱惑是"全自动"。但评分表可靠性不足、SP 人格会漂移、模型会编造证据——<span class="badge">全自动 = 不可申诉</span>。设计的核心不是拒绝自动化，而是<strong>精确划出自动化的边界</strong>。</p>
+    </div>
+  </div>
+
+  <h3>五条设计公理</h3>
+  <p>后续所有模块设计都可以从这五条推导出来。它们不是价值观宣言，而是会直接决定接口形态和代码结构的约束。</p>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th style="width:22%">公理</th><th style="width:40%">含义</th><th>对设计的直接约束</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>A1 权限随风险递减</strong></td>
+        <td>AI 的自主度不是一个全局开关，而是每个环节、每个评分项各自的属性。</td>
+        <td>系统必须支持<strong>项级（rubric item 级）</strong>的 AI 权限配置，而非站级或系统级。</td>
+      </tr>
+      <tr>
+        <td><strong>A2 证据先于结论</strong></td>
+        <td>任何 AI 给出的分数，必须能回溯到一段可播放、可定位的原始素材。</td>
+        <td>评分数据结构强制包含 <code>evidence_span</code>；无证据的分数在 schema 层就无法写入。</td>
+      </tr>
+      <tr>
+        <td><strong>A3 单一真相源</strong></td>
+        <td>命题、SP 对话、评分、反馈必须共用同一套评分表语义。</td>
+        <td>评分表是<strong>上游驱动</strong>而非下游产物，见第 4 节"评分表即协议"。</td>
+      </tr>
+      <tr>
+        <td><strong>A4 人类保留否决权</strong></td>
+        <td>AI 可以建议、排序、初筛，但不能成为高利害结果的最终裁决者。</td>
+        <td>存在不可绕过的 <code>human_signoff</code> 状态；缺它则成绩不可发布。</td>
+      </tr>
+      <tr>
+        <td><strong>A5 闸门式放行</strong></td>
+        <td>能力上线靠量化门槛，而不是"专家看过觉得可以"。</td>
+        <td>每个 AI 能力有 <code>release_stage</code> 与 <code>exit_criteria</code>，未达标自动降级到人工全量。</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout">
+    <span class="tag">设计推论</span>
+    <p>把 A1 + A3 放在一起，会得到一个不太直觉但很关键的结论：<strong>AI 权限的最小粒度必须是评分项，而不是考站</strong>。同一个站里，"洗手"这种行为锚清晰、视频可验的项可以让 AI 独立判定；而"职业素养/共情"这种高度依赖情境判断的项，即使同站也必须人工主导。一刀切按站定级，要么浪费 AI 能力，要么放过风险。</p>
+  </div>
+
+  <h3>与现有框架的关系</h3>
+  <p>本方案沿用"5 个 AI 角色 + 4 个治理支柱"的功能骨架（学习支持、AI 标准模拟患者、评估支持、案例生成、学习分析 × 人的监督、透明度、伦理与安全、可追溯性），但在两处做了工程化推进：</p>
+  <ul>
+    <li><strong>从"角色"推进到"权限矩阵"</strong>：五个角色是功能视角，本方案补充了每个角色在各环节的<em>权限等级</em>与<em>不可逾越边界</em>，使其可以直接落成配置表。</li>
+    <li><strong>从"治理原则"推进到"闸门指标"</strong>：四个支柱各自对应可采集的指标与自动降级规则，避免治理停留在文档层。</li>
+  </ul>
+</section>
+
+<!-- ============ S2 ============ -->
+<section id="s2">
+  <h2><span class="num">02</span>风险分级模型</h2>
+  <p class="sub">整套系统的"宪法"。先定级，再谈功能。</p>
+
+  <p>分级不看技术难度，只看两个变量：<strong>结果对考生的利害程度</strong>，以及<strong>错误被发现与纠正的成本</strong>。二者共同决定 AI 能走多远。</p>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th style="width:9%">等级</th><th style="width:20%">典型场景</th>
+        <th style="width:26%">AI 权限边界</th><th style="width:22%">人类保留</th><th>失败后果</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="pill p-l0">L0 内部</span></td>
+        <td>草稿生成、素材检索、题干润色、教师内部工具</td>
+        <td>AI 可自主完成，无需逐条审核；输出仅在校内工作台可见，带"未审核"水印。</td>
+        <td>发布前一次性确认</td>
+        <td>返工，无外部影响</td>
+      </tr>
+      <tr>
+        <td><span class="pill p-l1">L1 形成性</span></td>
+        <td>学生自主练习、同伴角色扮演实时反馈、错题重练</td>
+        <td>AI 主导评分与反馈；按 10% 随机抽样做离线审计，不阻塞学生即时看到结果。</td>
+        <td>抽样审计、投诉即全量复核</td>
+        <td>学生被误导，可通过后续教学纠正</td>
+      </tr>
+      <tr>
+        <td><span class="pill p-l2">L2 模拟考</span></td>
+        <td>校内模拟 OSCE、课程形成性考核、A/B 对照研究</td>
+        <td>AI 初评 + 证据提取；低分尾部与低置信项强制人工；其余抽检 20%。</td>
+        <td>边缘案例裁决、成绩确认</td>
+        <td>教学决策偏差，影响分组与辅导资源</td>
+      </tr>
+      <tr>
+        <td><span class="pill p-l3">L3 高利害</span></td>
+        <td>终结性 OSCE、升年级/毕业/执业相关判定</td>
+        <td>AI 仅做<strong>证据提取、排序、异常标记</strong>；分数由人确认；全站 100% 可回溯；实时终止开关。</td>
+        <td>全部最终分数、申诉裁决</td>
+        <td>影响考生前途，可能引发法律争议</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>决策权矩阵（RACI 精简版）</h3>
+  <p>下表回答一个具体问题：<em>这件事最后谁签字</em>。R = 执行，A = 最终负责，C = 需咨询，I = 知会。</p>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead>
+      <tr><th style="width:26%">决策事项</th><th>AI</th><th>命题专家</th><th>考官/评分员</th><th>考务管理者</th><th>学生</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>考站初稿（题干/脚本/评分表草案）</td><td><strong>R</strong></td><td><strong>A</strong></td><td>C</td><td>I</td><td>—</td></tr>
+      <tr><td>评分表行为锚定稿</td><td>C</td><td><strong>A/R</strong></td><td>C</td><td>I</td><td>—</td></tr>
+      <tr><td>难度校准与及格线设定</td><td>C</td><td><strong>A</strong></td><td>C</td><td>I</td><td>—</td></tr>
+      <tr><td>SP 人格卡批准</td><td>R</td><td>C</td><td><strong>A</strong></td><td>I</td><td>—</td></tr>
+      <tr><td>考试实施中的异常终止</td><td>R（建议）</td><td>—</td><td><strong>A</strong></td><td>R</td><td>I</td></tr>
+      <tr><td>单项评分（L3）</td><td>R（证据）</td><td>—</td><td><strong>A</strong></td><td>I</td><td>—</td></tr>
+      <tr><td>边缘案例最终判定</td><td>C</td><td>—</td><td><strong>A</strong></td><td>I</td><td>I</td></tr>
+      <tr><td>成绩发布</td><td>—</td><td>C</td><td>R</td><td><strong>A</strong></td><td>I</td></tr>
+      <tr><td>申诉裁决</td><td>I（提供证据）</td><td>C</td><td>C</td><td><strong>A</strong></td><td>R（发起）</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout warn">
+    <span class="tag">关键约束</span>
+    <p>同一场考试内，<strong>等级只能向上调整，不能向下</strong>。一旦某站因异常被提升为 L3 处置（如发现 AI 证据缺失），该站本场次全部记录进入全量人工复核，且该调整写入审计日志并计入当次考试的质量报告。这条规则防止"出问题就降级"的组织性掩盖。</p>
+  </div>
+</section>
+
+<!-- ============ S3 ============ -->
+<section id="s3">
+  <h2><span class="num">03</span>总体架构</h2>
+  <p class="sub">六层结构，中间两层是设计重点：能力网关 + 流程编排。</p>
+
+  <p>架构设计要回答的核心问题是：<strong>当 AI 能力快速迭代时，业务逻辑要不要跟着改</strong>。答案是不要。因此所有模型调用都收口到"AI 能力网关"，它负责版本绑定、日志、限流、降级与开关。业务层只面向"能力"编程，不面向"某个模型"编程。</p>
+
+  <div class="arch">
+    <div class="arch-title"><span>OSCE·Loop / Layered Architecture</span><span>v1.0</span></div>
+
+    <div class="layer">
+      <div class="lname">GOVERNANCE</div>
+      <div class="lbody c4">
+        <div class="node gov"><span class="nt">审计与追溯</span><span class="nd">全量事件日志 · 版本快照 · 不可变成绩链</span></div>
+        <div class="node gov"><span class="nt">权限与角色</span><span class="nd">RBAC + 站级数据隔离 · 最小可见原则</span></div>
+        <div class="node gov"><span class="nt">模型卡与公平性</span><span class="nd">亚组性能报告 · 漂移监控 · 公开模型卡</span></div>
+        <div class="node gov"><span class="nt">闸门与开关</span><span class="nd">分级放行 · 实时终止 · 自动降级</span></div>
+      </div>
+    </div>
+    <div class="arrowdown">▼ ▼ ▼ ▼</div>
+
+    <div class="layer">
+      <div class="lname">APPLICATION</div>
+      <div class="lbody c3">
+        <div class="node app"><span class="nt">命题工作台</span><span class="nd">蓝图 · 站包编辑 · 差异审阅 · 冻结发布</span></div>
+        <div class="node app"><span class="nt">考试执行台</span><span class="nd">排考 · 轮转 · 实时监考 · 异常处置</span></div>
+        <div class="node app"><span class="nt">评分工作台</span><span class="nd">证据播放器 · 三元操作 · 分歧队列</span></div>
+        <div class="node app"><span class="nt">练习端</span><span class="nd">学生自练 · 即时反馈 · 错题重练</span></div>
+        <div class="node app"><span class="nt">反馈中心</span><span class="nd">能力画像 · 可执行建议 · 纵向趋势</span></div>
+        <div class="node app"><span class="nt">质量看板</span><span class="nd">信度 · 难度 · 区分度 · 亚组差异</span></div>
+      </div>
+    </div>
+    <div class="arrowdown">▼ ▼ ▼</div>
+
+    <div class="layer">
+      <div class="lname">AI CAPABILITY</div>
+      <div class="lbody c3">
+        <div class="node ai"><span class="nt">案例生成器</span><span class="nd">站包初稿 · 评分表草案 · 难度预判</span></div>
+        <div class="node ai"><span class="nt">SP 对话引擎</span><span class="nd">状态机 · 受控生成 · 人格校验闭环</span></div>
+        <div class="node ai"><span class="nt">证据提取器</span><span class="nd">转写对齐 · 行为定位 · rubric 映射</span></div>
+        <div class="node ai"><span class="nt">评分建议器</span><span class="nd">项级打分 · 置信度 · 分歧标记</span></div>
+        <div class="node ai"><span class="nt">反馈生成器</span><span class="nd">证据引用 · 建设性重述 · 语言分级</span></div>
+        <div class="node ai"><span class="nt">能力网关</span><span class="nd">模型路由 · 版本绑定 · 缓存 · 成本计量</span></div>
+      </div>
+    </div>
+    <div class="arrowdown">▼ ▼ ▼</div>
+
+    <div class="layer">
+      <div class="lname">ORCHESTRATION</div>
+      <div class="lbody c4">
+        <div class="node"><span class="nt">流程状态机</span><span class="nd">站包/场次/评分单的生命周期</span></div>
+        <div class="node"><span class="nt">人工任务队列</span><span class="nd">按风险路由 · 优先级 · 超时升级</span></div>
+        <div class="node"><span class="nt">实时通道</span><span class="nd">语音流 · 事件总线 · 低延迟</span></div>
+        <div class="node"><span class="nt">作业调度</span><span class="nd">离线批处理 · 重跑 · 幂等</span></div>
+      </div>
+    </div>
+    <div class="arrowdown">▼ ▼ ▼</div>
+
+    <div class="layer">
+      <div class="lname">DATA</div>
+      <div class="lbody c4">
+        <div class="node"><span class="nt">业务库</span><span class="nd">站包 · 场次 · 评分 · 人员</span></div>
+        <div class="node"><span class="nt">媒体库</span><span class="nd">音视频 · 分片 · 生命周期策略</span></div>
+        <div class="node"><span class="nt">转写与标注</span><span class="nd">带时间戳的 utterance 表</span></div>
+        <div class="node"><span class="nt">知识库</span><span class="nd">指南 · 教材 · 既往站包 · 检索</span></div>
+      </div>
+    </div>
+    <div class="arrowdown">▼ ▼ ▼</div>
+
+    <div class="layer">
+      <div class="lname">INFRA</div>
+      <div class="lbody c4">
+        <div class="node"><span class="nt">模型服务</span><span class="nd">私有化 / 混合部署 · 推理集群</span></div>
+        <div class="node"><span class="nt">身份认证</span><span class="nd">统一登录 · 单点 · 多因子</span></div>
+        <div class="node"><span class="nt">可观测性</span><span class="nd">链路追踪 · 指标 · 告警</span></div>
+        <div class="node"><span class="nt">备份与合规存储</span><span class="nd">加密 · 留存期 · 出境合规</span></div>
+      </div>
+    </div>
+
+    <div class="legend">
+      <span><i style="background:#f0a04b"></i>治理层（横切，对所有层生效）</span>
+      <span><i style="background:#5aa9e6"></i>应用层（人机交互界面）</span>
+      <span><i style="background:#3fd6c0"></i>AI 能力层（可替换、可降级）</span>
+      <span><i style="background:#21303f"></i>编排 / 数据 / 基础设施</span>
+    </div>
+  </div>
+
+  <h3>三个架构决策及其理由</h3>
+
+  <h4>决策一：AI 能力网关是唯一出口，业务层不得直连模型</h4>
+  <p>原因有三。其一，<strong>可追溯性要求"每一次模型调用都能被定位到具体版本"</strong>，散落的 SDK 调用无法保证这一点。其二，高利害场景需要<strong>一键降级</strong>——网关层可以把"AI 评分"整体切到"仅证据提取"，业务层无感。其三，成本与配额必须集中计量，否则无法回答"这套系统到底多少钱一站"。</p>
+  <p>网关的最小接口契约：</p>
+  <div class="spec">
+    <div class="spec-h"><span>POST /gateway/invoke</span><span>所有 AI 调用的唯一入口</span></div>
+<pre>{
+  <span class="k">"capability"</span>: <span class="s">"score.suggest"</span>,        <span class="c">// 能力名，非模型名</span>
+  <span class="k">"release_stage"</span>: <span class="s">"simulation"</span>,      <span class="c">// 当前闸门阶段，决定可用能力集</span>
+  <span class="k">"subject_ref"</span>: { <span class="k">"attempt_id"</span>: <span class="s">"att_8842"</span> },
+  <span class="k">"inputs"</span>: { <span class="k">"rubric_version"</span>: <span class="s">"rb_2026_11_07"</span>, <span class="k">"media_uris"</span>: [<span class="s">"...</span>] },
+  <span class="k">"constraints"</span>: { <span class="k">"max_latency_ms"</span>: <span class="n">3000</span>, <span class="k">"require_evidence"</span>: <span class="n">true</span> },
+  <span class="k">"idempotency_key"</span>: <span class="s">"att_8842:rb_2026_11_07:score:v1"</span>
+}
+<span class="c">// 响应强制包含 model_version / prompt_version / 耗时 / 成本 / 证据链</span></pre>
+  </div>
+  <p><code>require_evidence: true</code> 是硬约束：如果模型无法定位到具体时间片段，网关直接返回<em>拒答</em>而不是低质量答案，由业务层降级到人工。这比"允许 AI 猜"要安全一个数量级。</p>
+
+  <h4>决策二：流程状态机外置，不依赖 LLM 记忆</h4>
+  <p>AI 模拟患者最容易出问题的地方，是<strong>把"该说什么"和"怎么说"混在一次生成里</strong>。本方案把二者拆开：对话状态（已释放哪些信息、当前处于哪个阶段、还剩多少时间）由确定性状态机维护；LLM 只负责把当前该释放的信息<em>自然地说出来</em>。这直接消解了幻觉泄露与人格漂移的根源，详见 6.1。</p>
+
+  <h4>决策三：媒体与评分分离存储，用引用而非拷贝</h4>
+  <p>音视频体积大、留存期长、涉及隐私，而评分记录需要长期可读。二者生命周期不同，混存会导致"为了保住成绩不敢删视频"或"清理视频把证据链一起毁掉"。设计上用 <code>evidence_span</code> 保存 <code>{media_id, start_ms, end_ms, transcript_hash}</code>，媒体按策略归档，成绩记录永久保留且可通过哈希校验完整性。</p>
+
+  <div class="callout neutral">
+    <span class="tag">部署形态建议</span>
+    <p>教学场景（L0–L1）可用公有云 API 模型以压低成本；涉及真实考生音视频的 L2–L3 场景，<strong>建议私有化或专有云部署</strong>，且 ASR 与评分模型不出院/校网。这条不是合规洁癖——真实考场音视频包含可识别的患者信息与考生表现，一旦出境或进入第三方训练语料，申诉与舆情风险不可控。</p>
+  </div>
+</section>
+
+<!-- ============ S4 ============ -->
+<section id="s4">
+  <h2><span class="num">04</span>评分表即协议</h2>
+  <p class="sub">整套设计的主骨架：把 rubric 从"终点产物"变成"全链路的类型定义"。</p>
+
+  <p>传统的流水线是：写病例 → 写 SP 脚本 → 写评分表 → 考 → 评分 → 反馈。评分表在链条末端才出现，于是 SP 演的和考官评的往往是两套逻辑，学生的反馈又是第三套语言。</p>
+  <p>本方案把它反过来：<strong>先定义可观测的行为，再由行为反推剧情与对话</strong>。评分表成为唯一的"契约"，其余产物都是从它<em>派生</em>出来的。</p>
+
+  <h3>一个 rubric item 的四元组</h3>
+  <p>关键的工程改动是：评分项不能只是"一句话 + 分值"，它必须携带足够的信息，让系统能自动派生出下游产物。因此每个 item 定义为四元组：</p>
+
+  <div class="spec">
+    <div class="spec-h"><span>RubricItem — 最小契约单元</span><span>schema v2</span></div>
+<pre>{
+  <span class="k">"item_id"</span>: <span class="s">"HX.03"</span>,
+  <span class="k">"domain"</span>: <span class="s">"history_taking"</span>,
+  <span class="k">"anchor"</span>: {                                  <span class="c">// ① 行为锚：可观测、可判定</span>
+    <span class="k">"observable"</span>: <span class="s">"询问胸痛的放射部位与持续时间"</span>,
+    <span class="k">"positive"</span>: <span class="s">"主动询问放射至左臂/下颌，并追问持续时间"</span>,
+    <span class="k">"partial"</span>: <span class="s">"仅询问其一，或需二次追问才涉及"</span>,
+    <span class="k">"negative"</span>: <span class="s">"未询问放射或持续时间"</span>
+  },
+  <span class="k">"evidence_type"</span>: <span class="s">"utterance"</span>,          <span class="c">// ② 证据形态：决定谁来判</span>
+  <span class="k">"phase"</span>: <span class="s">"information_gathering"</span>,     <span class="c">// ③ 对话阶段：决定何时该触发</span>
+  <span class="k">"weight"</span>: <span class="n">2</span>,
+  <span class="k">"ai_authority"</span>: <span class="s">"suggest"</span>,             <span class="c">// ④ 权限：none | extract | suggest | decide</span>
+  <span class="k">"critical"</span>: <span class="n">false</span>,                        <span class="c">// 关键项：错判即触发人工强制复核</span>
+  <span class="k">"guideline_ref"</span>: <span class="s">"ESC-ACS-2023 §3.2"</span>
+}</pre>
+  </div>
+
+  <p>四个字段各自驱动一条下游链路，这就是"协议"的含义：</p>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th style="width:16%">字段</th><th style="width:30%">驱动什么</th><th>具体机制</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>anchor</code></td>
+        <td>生成 SP 的信息槽与触发条件</td>
+        <td>正向锚中出现的临床信息（"放射至左臂"）自动成为患者需持有的<strong>信息槽</strong>；只有被问及时才释放。锚写不清 → 信息槽无法生成 → 命题阶段就报错。</td>
+      </tr>
+      <tr>
+        <td><code>evidence_type</code></td>
+        <td>决定证据采集方式与 AI 可达权限上限</td>
+        <td><code>utterance</code> 走音频转写；<code>action</code> 走视频/器械日志；<code>document</code> 走笔记 OCR；<code>global</code> 只能人工。系统据此<strong>自动封顶</strong> AI 权限。</td>
+      </tr>
+      <tr>
+        <td><code>phase</code></td>
+        <td>构建对话状态机的阶段与检查点</td>
+        <td>四阶段（开场准备 → 信息采集 → 评估 → 计划与结论）各设"必须触发项"清单；SP 在阶段末若发现关键信息槽未被问及，可<strong>自然引导</strong>（"医生，我还有点担心……"）而非静默漏考。</td>
+      </tr>
+      <tr>
+        <td><code>ai_authority</code></td>
+        <td>评分工作台的交互形态与路由规则</td>
+        <td><code>extract</code>：只高亮证据，不打分；<code>suggest</code>：给分 + 置信度，人确认；<code>decide</code>：可直接入分（仅限 L0/L1 且行为锚为布尔型）；<code>none</code>：不进入 AI 管道。</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>派生关系全景</h3>
+  <p>下图展示一条评分项如何分裂成四类下游资产。注意这是个<strong>一对多</strong>关系，且在版本冻结时同时生成——它们的版本号绑定在一起，不允许单独修改。</p>
+
+  <div class="arch">
+    <div class="arch-title"><span>Rubric → Downstream Derivation</span><span>1 : 4</span></div>
+    <div class="derive">
+
+      <div style="border:1px solid rgba(63,214,192,.35);background:rgba(63,214,192,.06);border-radius:6px;padding:16px 18px;">
+        <div style="font-family:var(--mono);font-size:10.5px;color:var(--teal);letter-spacing:.1em;margin-bottom:8px;">SOURCE OF TRUTH</div>
+        <div style="font-size:14.5px;font-weight:700;margin-bottom:6px;">RubricItem</div>
+        <div style="font-size:12.3px;color:var(--text-dim);line-height:1.6;">行为锚 · 证据形态<br>阶段 · 权限 · 权重</div>
+      </div>
+
+      <div class="darrow" style="text-align:center;color:#4a6379;font-size:22px;">→</div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div style="border:1px solid var(--border);background:var(--surface);border-radius:5px;padding:11px 13px;">
+          <div style="font-size:12.6px;font-weight:650;margin-bottom:3px;">SP 信息槽</div>
+          <div style="font-size:11.4px;color:var(--text-mute);line-height:1.5;">患者"知道什么"<br>及触发条件</div>
+        </div>
+        <div style="border:1px solid var(--border);background:var(--surface);border-radius:5px;padding:11px 13px;">
+          <div style="font-size:12.6px;font-weight:650;margin-bottom:3px;">对话检查点</div>
+          <div style="font-size:11.4px;color:var(--text-mute);line-height:1.5;">阶段转换条件<br>与引导语触发</div>
+        </div>
+        <div style="border:1px solid var(--border);background:var(--surface);border-radius:5px;padding:11px 13px;">
+          <div style="font-size:12.6px;font-weight:650;margin-bottom:3px;">证据探针</div>
+          <div style="font-size:11.4px;color:var(--text-mute);line-height:1.5;">检索式/分类器<br>定位 utterance</div>
+        </div>
+        <div style="border:1px solid var(--border);background:var(--surface);border-radius:5px;padding:11px 13px;">
+          <div style="font-size:12.6px;font-weight:650;margin-bottom:3px;">反馈模板</div>
+          <div style="font-size:11.4px;color:var(--text-mute);line-height:1.5;">扣分时的具体<br>改进建议骨架</div>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border-soft);font-size:11.8px;color:var(--text-mute);line-height:1.7;">
+      派生发生在<strong style="color:var(--text-dim)">站包冻结</strong>时刻，产物与 rubric 共享同一 <code style="font-size:11px">bundle_version</code>。任何单独修改都会导致版本不一致，系统拒绝发布。
+    </div>
+  </div>
+
+  <div class="callout">
+    <span class="tag">为什么这一步值得先做</span>
+    <p>它是<strong>唯一能同时解决三个痛点的单点改动</strong>：① 消除"SP 演一套、考官评一套、学生听第三套"的语言分裂（治标准化）；② 让 AI 评分有明确的判定对象，而不是自由发挥（治可靠性）；③ 让反馈能精确引用"你在 02:14 漏了这一问"（治反馈延迟）。代价是命题阶段更费工——但这笔工本来就该花，只是从"事后返工"前移到了"事前定义"。</p>
+  </div>
+
+  <h3>与 LLM 生成评分表的关系</h3>
+  <p>现有证据很明确：LLM 生成的站包在沟通行为、EPA 对齐上评分尚可（约 4.6/5），但<strong>评分表可靠性是明确短板</strong>，指南一致性维度得分最低且评分者分歧最大。因此本设计的定位是：</p>
+  <ul>
+    <li>LLM 产出 <code>anchor.positive/partial/negative</code> 的<strong>初稿</strong>，并强制标注它引用的指南条款（<code>guideline_ref</code>）；</li>
+    <li>系统对每条 anchor 做<strong>可观测性检查</strong>：是否包含可被判定的动词与可听/可见的对象。含糊表述（"表现出同理心"）自动标红，不允许进入冻结；</li>
+    <li>专家只做<strong>三件事</strong>：改写行为锚、核验指南一致性、校准难度。不做从零编写。</li>
+  </ul>
+  <p>这把人工审核资源从"写整站"压缩到"改三类节点"，也正是设计建议中"AI 初稿 + 结构化人工精修"的具体落地形态。</p>
+</section>
+
+<!-- ============ S5 ============ -->
+<section id="s5">
+  <h2><span class="num">05</span>全流程七阶段</h2>
+  <p class="sub">从能力蓝图到反馈闭环。每个阶段都标注了风险色带与人工保留点。</p>
+
+  <div class="flow">
+    <div class="step"><div class="sn">S1</div><div class="st">蓝图与命题</div><div class="sr sr-l0"></div><div class="role">L0 草稿<br>案例生成</div></div>
+    <div class="step"><div class="sn">S2</div><div class="st">站包精修<br>与冻结</div><div class="sr sr-l2"></div><div class="role">L2 模拟<br>案例生成</div></div>
+    <div class="step"><div class="sn">S3</div><div class="st">SP 构建<br>与认证</div><div class="sr sr-l1"></div><div class="role">L1→L2<br>AI 模拟患者</div></div>
+    <div class="step"><div class="sn">S4</div><div class="st">考务编排</div><div class="sr sr-l1"></div><div class="role">L1 内部<br>学习分析</div></div>
+    <div class="step"><div class="sn">S5</div><div class="st">考试实施</div><div class="sr sr-l3"></div><div class="role">L3 高利害<br>AI SP / 监测</div></div>
+    <div class="step"><div class="sn">S6</div><div class="st">评分与复核</div><div class="sr sr-l3"></div><div class="role">L3 高利害<br>评估支持</div></div>
+    <div class="step"><div class="sn">S7</div><div class="st">反馈与<br>质量分析</div><div class="sr sr-l1"></div><div class="role">L1 形成性<br>学习支持</div></div>
+  </div>
+  <p style="font-size:12px;color:var(--text-mute);margin-top:-2px;">色带为环节的<strong>默认风险级</strong>；实际等级按场次用途（练习/模拟/终结）动态判定，取二者较高者。</p>
+
+  <!-- S5-1 -->
+  <div class="stage">
+    <div class="stage-h">
+      <div class="sidx">1</div>
+      <div class="sname">蓝图与命题</div>
+      <div class="spurpose">把能力要求翻译成可考的站</div>
+      <span class="pill p-l0">L0 内部草稿</span>
+    </div>
+    <div class="stage-b">
+      <p>这一阶段的产出<strong>不允许直接进入考试</strong>。它的唯一价值是把"空白页面"变成"可修改的初稿"，把专家的时间从打字转移到判断。LLM 在这里是最安全的——错了只是返工。</p>
+
+      <div class="io">
+        <div><div class="lab">输入</div><div class="val">培养目标 / 里程碑 · EPA 清单 · 既往站包库 · 临床指南 · 上次考试的质量报告（哪些站区分度低）</div></div>
+        <div><div class="lab">输出</div><div class="val">站包草案 v0.1：考生指令、SP 脚本骨架、rubric 草案（含指南引用）、建议时长与权重</div></div>
+      </div>
+
+      <div class="split">
+        <div class="ai">
+          <div class="sh"><span class="ic">AI</span>生成与检查</div>
+          <ul>
+            <li><strong>蓝图覆盖度分析</strong>：哪些能力域本年度未被任何站覆盖、哪些过度重复</li>
+            <li><strong>站包初稿</strong>：题干 + 指令 + 脚本 + rubric 一体化生成，每条锚必须附指南条款</li>
+            <li><strong>难度预判</strong>：依据历史站包的特征向量（信息密度、干扰项数、时间压力）给出难度区间</li>
+            <li><strong>去重</strong>：与既往站包的语义相似度检索，避免"换汤不换药"</li>
+          </ul>
+        </div>
+        <div class="hu">
+          <div class="sh"><span class="ic">人</span>保留决策</div>
+          <ul>
+            <li>蓝图审批：考什么、不考什么，是教育判断，不可外包</li>
+            <li>临床真实性把关：LLM 倾向生成"教科书病人"</li>
+            <li>删除不合理设定（不符合本院流程、超出学生层级）</li>
+            <li>确认站的<strong>组合</strong>能构成有效的能力抽样</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fail"><b>典型失败模式</b>教科书式病人：症状典型、信息齐备、无共病无干扰。后果是区分度极低——好学生和差学生都能问对。对策：在生成提示中<strong>强制配额</strong>（至少 1 项共病、1 项与主诉无关的合理诉求、1 处主诉模糊），并在 S2 用历史区分度数据反查。</div>
+    </div>
+  </div>
+
+  <!-- S5-2 -->
+  <div class="stage">
+    <div class="stage-h">
+      <div class="sidx">2</div>
+      <div class="sname">站包精修与冻结</div>
+      <div class="spurpose">把草案变成不可变的契约</div>
+      <span class="pill p-l2">L2 模拟考</span>
+    </div>
+    <div class="stage-b">
+      <p>这是整套流程中<strong>人工密度最高</strong>的一步，也是最值得投入的一步。因为冻结之后的一切——SP 怎么演、AI 怎么评、学生看到什么反馈——都由它决定。</p>
+
+      <div class="io">
+        <div><div class="lab">输入</div><div class="val">站包草案 v0.1 · 专家批注 · 历史难度与区分度数据</div></div>
+        <div><div class="lab">输出</div><div class="val">站包冻结版（不可变）· 四类派生资产 · 及格线 · 三方一致性报告</div></div>
+      </div>
+
+      <h4>系统强制执行的四项检查</h4>
+      <div class="tbl-wrap">
+      <table>
+        <thead><tr><th style="width:24%">检查</th><th style="width:36%">判定规则</th><th>不通过时</th></tr></thead>
+        <tbody>
+          <tr><td><strong>可观测性</strong></td><td>行为锚必须含"可被判定的动词 + 可听/可见的对象"。禁止"理解""具备""表现出良好…"</td><td>标红阻断冻结，必须改写</td></tr>
+          <tr><td><strong>可达性</strong></td><td>每个 rubric 项的信息源必须存在于 SP 的信息槽中。考生问不到的信息不能成为考点</td><td>自动补齐信息槽，或建议删除该项</td></tr>
+          <tr><td><strong>指南一致性</strong></td><td><code>guideline_ref</code> 必须能在知识库中检索到原文，且语义匹配</td><td>降级为"待核验"，由专家人工确认</td></tr>
+          <tr><td><strong>三方一致</strong></td><td>题干承诺的考点 ⊆ 脚本可提供的信息 ⊆ rubric 评的内容</td><td>输出差异清单，逐条裁决</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <div class="split">
+        <div class="ai">
+          <div class="sh"><span class="ic">AI</span>检查与建议</div>
+          <ul>
+            <li>四项自动检查 + 差异定位（精确到句子）</li>
+            <li>行为锚改写建议（把"同理心不足"改写为可观测表述）</li>
+            <li>难度校准：对比同类站的历史通过率，提示"预计过难/过易"</li>
+            <li>生成四类派生资产并做交叉校验</li>
+          </ul>
+        </div>
+        <div class="hu">
+          <div class="sh"><span class="ic">人</span>保留决策</div>
+          <ul>
+            <li><strong>改写行为锚</strong>——这是不可委托的核心工作</li>
+            <li>核验指南条款的适用性（同一指南在不同层级有不同推荐强度）</li>
+            <li>设定及格线与关键项（critical item）</li>
+            <li><strong>签字冻结</strong>，并对该版本负责</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fail"><b>典型失败模式</b>评分表"看起来合理但不可判"。例如"能建立良好医患关系"——三位考官会给出三个答案，且都自认为正确。这类项在冻结阶段必须被拦下，否则它会在评分阶段变成永久的争议源，并在申诉时成为机构的软肋。</div>
+    </div>
+  </div>
+
+  <!-- S5-3 -->
+  <div class="stage">
+    <div class="stage-h">
+      <div class="sidx">3</div>
+      <div class="sname">SP 构建与认证</div>
+      <div class="spurpose">让"同一个人"可以重复出现</div>
+      <span class="pill p-l1">L1 练习</span><span class="pill p-l2">L2 模拟</span>
+    </div>
+    <div class="stage-b">
+      <p>这里需要做一个明确的取舍：<strong>AI 模拟患者先用于练习与模拟考，不急于进入高利害终结性考试</strong>。理由不是技术不成熟，而是高利害场景下"SP 表现本身"就是公平性的一部分，一旦 AI 出现人格漂移，无法像真人 SP 那样在事后被召回作证。</p>
+
+      <div class="io">
+        <div><div class="lab">输入</div><div class="val">冻结版 SP 脚本 · 信息槽清单 · 教学目标（该站要训练什么沟通难点）</div></div>
+        <div><div class="lab">输出</div><div class="val">人格卡（版本化）· 对话状态机配置 · 红队测试报告 · SP 认证记录</div></div>
+      </div>
+
+      <h4>人格卡的五维结构</h4>
+      <p>单一"性格"描述不足以覆盖真实教学需求，也无法被稳定复现。人格卡需要多维且可量化：</p>
+      <div class="tbl-wrap">
+      <table>
+        <thead><tr><th style="width:20%">维度</th><th style="width:34%">取值示例</th><th>为什么需要它</th></tr></thead>
+        <tbody>
+          <tr><td>性格与情绪基调</td><td>焦虑 / 克制 / 易怒 / 依赖；情绪唤起阈值 0–1</td><td>决定面对不同提问风格时的反应差异</td></tr>
+          <tr><td>语言熟练度</td><td>母语流利 / 方言口音 / 有限普通话 / 医学词汇不理解</td><td>训练"跨语言沟通"这一真实能力</td></tr>
+          <tr><td>病史记忆水平</td><td>清晰 / 部分模糊 / 需提示才能回忆</td><td>控制信息释放的难度，防止"一问全给"</td></tr>
+          <tr><td>认知混乱度</td><td>0（清晰）– 1（谵妄倾向，答非所问）</td><td>老年/急症站的核心考点</td></tr>
+          <tr><td>披露阈值</td><td>主动 / 需直接询问 / 需建立信任后才说 / 永不主动</td><td>直接决定"共情"类评分项能否被触发</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <div class="split">
+        <div class="ai">
+          <div class="sh"><span class="ic">AI</span>构建与自检</div>
+          <ul>
+            <li>从脚本与信息槽生成人格卡初稿</li>
+            <li>配置对话状态机（阶段、检查点、引导语）</li>
+            <li><strong>红队自测</strong>：自动生成"诱导泄露""反复追问""沉默对抗""超时"等对抗性考生行为，检验是否泄露未授权信息</li>
+            <li>跨会话一致性抽测：同一人格卡跑 20 次，比对关键信息释放顺序</li>
+          </ul>
+        </div>
+        <div class="hu">
+          <div class="sh"><span class="ic">人</span>保留决策</div>
+          <ul>
+            <li>批准人格卡（尤其披露阈值——它决定考点能否成立）</li>
+            <li>审定禁用话术（不承诺诊断、不给治疗建议、不评判考生）</li>
+            <li>验收试演：真人扮演考生走一遍，判断"像不像"</li>
+            <li>决定该 SP 是否可用于 L2 及以上</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fail"><b>典型失败模式</b>过度配合。LLM 的天性是"帮忙"，于是考生一句"你是不是胸口疼"就把全部病史倒出来——考点瞬间失效。技术上靠状态机的<strong>信息槽门控</strong>解决（见 6.1），管理上靠红队测试验收。</div>
+    </div>
+  </div>
+
+  <!-- S5-4 -->
+  <div class="stage">
+    <div class="stage-h">
+      <div class="sidx">4</div>
+      <div class="sname">考务编排</div>
+      <div class="spurpose">在约束中求公平</div>
+      <span class="pill p-l1">L1 内部</span>
+    </div>
+    <div class="stage-b">
+      <p>排考看起来是纯运筹问题，但它直接影响公平性：如果某考生连续抽到三个最难的站，或某站在一天中的最后时段（考官疲劳期）集中出现，分数差异中就会混入与能力无关的方差。</p>
+
+      <div class="io">
+        <div><div class="lab">输入</div><div class="val">站包集合 · 考生名单与特殊需求 · 场地/设备/SP/考官可用时段 · 历史站间难度</div></div>
+        <div><div class="lab">输出</div><div class="val">排考表 · 资源占用图 · 风险提示（疲劳段、设备冲突、SP 超时）</div></div>
+      </div>
+
+      <div class="split">
+        <div class="ai">
+          <div class="sh"><span class="ic">AI</span>求解与预警</div>
+          <ul>
+            <li>约束求解排考（硬约束：设备/人员/时长；软约束：难度均衡、时段均衡）</li>
+            <li>冲突检测与最小改动建议（改一个人而不是重排全场）</li>
+            <li>疲劳与顺序效应预警：标记"同一考官连续评分 &gt; 4 小时"的时段</li>
+            <li>特殊需求适配（延长时长、单独通道、无障碍）</li>
+          </ul>
+        </div>
+        <div class="hu">
+          <div class="sh"><span class="ic">人</span>保留决策</div>
+          <ul>
+            <li>确认软约束权重（公平 vs 效率的取舍是价值判断）</li>
+            <li>审批特殊需求安排</li>
+            <li>处理算法无法表达的人情因素（临时请假、场地突发）</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fail"><b>典型失败模式</b>贪心排考导致难度聚集。正确做法是把"每位考生的加权难度总和"作为约束而非目标——即保证<strong>所有人承受的难度期望相近</strong>，而不是让总体通过率好看。</div>
+    </div>
+  </div>
+
+  <!-- S5-5 -->
+  <div class="stage">
+    <div class="stage-h">
+      <div class="sidx">5</div>
+      <div class="sname">考试实施</div>
+      <div class="spurpose">稳定、公平、全程可回溯</div>
+      <span class="pill p-l3">L3 高利害</span>
+    </div>
+    <div class="stage-b">
+      <p>这个阶段 AI 的角色最需要克制。它应该是<strong>记录员与哨兵</strong>，不是裁判，也不是副考官。</p>
+
+      <div class="io">
+        <div><div class="lab">输入</div><div class="val">冻结站包 · 排考表 · 人格卡 · 设备状态</div></div>
+        <div><div class="lab">输出</div><div class="val">音视频 · 带时间戳转写 · 事件日志 · 异常记录 · 完整性校验值</div></div>
+      </div>
+
+      <h4>实时提示的红线</h4>
+      <p>实施阶段最大的隐性风险是<strong>自动化偏见</strong>：一旦考官看到屏幕上"该生可能不合格"的提示，后续观察会被锚定，评分独立性消失。因此实时提示只允许呈现<em>事实</em>，禁止呈现<em>判断</em>：</p>
+      <div class="tbl-wrap">
+      <table>
+        <thead><tr><th style="width:50%">允许（事实层）</th><th>禁止（判断层）</th></tr></thead>
+        <tbody>
+          <tr><td>"尚未观察到洗手动作"</td><td>"该生无菌操作不合格"</td></tr>
+          <tr><td>"距结束还有 2 分钟，以下 3 项尚无证据"</td><td>"该生可能无法通过本站"</td></tr>
+          <tr><td>"该考生语速较快，转写置信度偏低"</td><td>"该生沟通表现较差"</td></tr>
+          <tr><td>"设备 2 音频中断 8 秒，已标记"</td><td>"本段不计入评分"</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p>并且提示<strong>必须可一键关闭</strong>，且关闭状态记入日志——用于事后分析"提示是否影响了评分"（比较开启/关闭组的分数分布）。</p>
+
+      <div class="split">
+        <div class="ai">
+          <div class="sh"><span class="ic">AI</span>记录与预警</div>
+          <ul>
+            <li>实时流式转写（说话人分离、医学词表增强）</li>
+            <li>异常检测：长时间沉默、情绪激烈、设备中断、超时未结束</li>
+            <li>事实层提示（见上表），可按站配置开关</li>
+            <li>AI SP 对话（仅限练习与已认证的模拟场景）</li>
+          </ul>
+        </div>
+        <div class="hu">
+          <div class="sh"><span class="ic">人</span>保留决策</div>
+          <ul>
+            <li>现场监考与秩序维护</li>
+            <li><strong>异常终止权</strong>：任何技术或伦理异常，人类可立即中止该站</li>
+            <li>中断后的补偿判定（延时/重考/不计分）</li>
+            <li>对 AI 提示的采纳与否，不做强制</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fail"><b>典型失败模式</b>技术故障无补偿机制。录像缺失 30 秒，评分照样进行，申诉时无法举证。<strong>设计对策</strong>：媒体完整性哈希在采集端实时计算，缺口即刻标记 <code>integrity_gap</code>，该站自动升级为"人工全量 + 现场记录补充"，并在成绩单上留痕。</div>
+    </div>
+  </div>
+
+  <!-- S5-6 -->
+  <div class="stage">
+    <div class="stage-h">
+      <div class="sidx">6</div>
+      <div class="sname">评分与复核</div>
+      <div class="spurpose">AI 初筛 + 风险路由的人机回环</div>
+      <span class="pill p-l3">L3 高利害</span>
+    </div>
+    <div class="stage-b">
+      <p>这是证据最成熟、投入产出比最高的环节，也是整套系统的心脏。核心不是"AI 能不能评准"，而是<strong>"当 AI 不确定时，系统知不知道它不确定，并把人放到那个位置"</strong>。</p>
+
+      <div class="io">
+        <div><div class="lab">输入</div><div class="val">音视频 · 转写 · 冻结 rubric · 考生笔记/操作日志</div></div>
+        <div><div class="lab">输出</div><div class="val">项级证据链 · AI 建议分与置信度 · 人工复核记录 · 最终成绩（人类签字）</div></div>
+      </div>
+
+      <h4>三档运行模式，按风险级切换</h4>
+      <div class="tbl-wrap">
+      <table>
+        <thead><tr><th style="width:14%">模式</th><th style="width:16%">适用</th><th style="width:34%">AI 做什么</th><th>人工做什么</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>副驾</strong><br><span class="pill p-l1">L1</span></td>
+            <td>日常练习</td>
+            <td>直接给分 + 反馈，全自动出结果</td>
+            <td>10% 随机抽样审计；投诉触发全量复核</td>
+          </tr>
+          <tr>
+            <td><strong>初筛</strong><br><span class="pill p-l2">L2</span></td>
+            <td>模拟 OSCE</td>
+            <td>初评 + 证据定位；低分尾部与低置信项强制送审</td>
+            <td>复核送审项 + 20% 随机抽检 + 边缘案例裁决</td>
+          </tr>
+          <tr>
+            <td><strong>证据助理</strong><br><span class="pill p-l3">L3</span></td>
+            <td>终结性考试</td>
+            <td>只提取证据、排序、标记异常；不给最终分</td>
+            <td>100% 关键项人工确认；分歧项由高年资医师裁决</td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+
+      <p>三种模式共用同一套数据结构（证据链 + 建议 + 置信度），区别只在<strong>路由规则</strong>。这保证了系统可以从 L1 平滑升级到 L3，而不需要重写评分模块。</p>
+
+      <div class="fail"><b>典型失败模式</b>"全量 AI 评分 + 事后抽查"。看起来高效，实际上把风险推给了抽查没抽中的部分：一旦某位考生的分数是错的且未被抽中，错误就永久固化，而申诉时机构拿不出证据。正确做法是<strong>按风险路由</strong>而非按比例抽样——让"该被看的一定被看"。</div>
+    </div>
+  </div>
+
+  <!-- S5-7 -->
+  <div class="stage">
+    <div class="stage-h">
+      <div class="sidx">7</div>
+      <div class="sname">反馈与质量分析</div>
+      <div class="spurpose">把"分数"变成"下一次怎么做"</div>
+      <span class="pill p-l1">L1 形成性</span>
+    </div>
+    <div class="stage-b">
+      <p>传统 OSCE 最大的浪费，是花了巨大成本采集的高质量行为数据，最后只输出一个分数。这些数据本可以支撑<strong>个人能力画像</strong>与<strong>站级质量改进</strong>两条回路。</p>
+
+      <div class="io">
+        <div><div class="lab">输入</div><div class="val">评分记录 + 证据链 · 历史多次成绩 · 群体数据</div></div>
+        <div><div class="lab">输出</div><div class="val">个人反馈报告（含证据片段）· 能力雷达 · 站级难度/区分度/信度报告 · 教学改进建议</div></div>
+      </div>
+
+      <h4>反馈的三段式结构</h4>
+      <p>只说"沟通待加强"的反馈等于没反馈。每条扣分项必须生成三段：</p>
+      <div class="spec">
+        <div class="spec-h"><span>Feedback Unit — 反馈的最小单元</span><span>由 rubric item 派生</span></div>
+<pre><span class="c">① 证据：发生了什么（可回放，不带评判）</span>
+  <span class="s">"02:14 你问：'疼多久了？' 患者回答后，你直接进入查体。"</span>
+
+<span class="c">② 行为：对应哪个评分项、差在哪一档</span>
+  <span class="s">"HX.03（放射部位与持续时间）：未询问放射，判定为 negative。"</span>
+
+<span class="c">③ 替代方案：下次可以怎么说（可执行）</span>
+  <span class="s">"可追加：'这种疼会不会窜到肩膀或下巴？' —— 一句话即可覆盖该评分项。"</span></pre>
+      </div>
+      <p>第三段是最容易被忽略、也最有价值的。它把评分表从"审判工具"变成"教学工具"，这正是形成性评价的本质。</p>
+
+      <div class="split">
+        <div class="ai">
+          <div class="sh"><span class="ic">AI</span>生成与分析</div>
+          <ul>
+            <li>三段式反馈生成（严格引用 evidence_span，禁止无据评价）</li>
+            <li>跨站能力画像：把 12 个站的表现映射到 6 个能力域</li>
+            <li>纵向趋势：与上次同类站对比，标出进步/退步</li>
+            <li>站级心理测量：难度、区分度、项间相关、Cronbach's α</li>
+            <li>异常站标记：某站全员满分或全员零分 → 疑似评分表或 SP 问题</li>
+          </ul>
+        </div>
+        <div class="hu">
+          <div class="sh"><span class="ic">人</span>保留决策</div>
+          <ul>
+            <li>审核反馈语气（防止打击性表述；对不及格者需人工加一段鼓励）</li>
+            <li>裁定"异常站"的处理：改评分表、改 SP、还是改教学</li>
+            <li>把质量报告转化为下一年度的命题输入（闭环回到 S1）</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="fail"><b>典型失败模式</b>反馈泛化。LLM 在没有强约束时会写出"建议加强沟通技巧，多与患者交流"这类放之四海皆准的话。对策：反馈生成器的输出<strong>必须包含至少一个时间戳与一句可直接背诵的替代话术</strong>，否则校验失败重写。</div>
+    </div>
+  </div>
+
+  <h3>全流程一览</h3>
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th style="width:16%">阶段</th><th style="width:15%">主导 AI 角色</th><th style="width:9%">风险</th><th style="width:28%">人类保留点</th><th>核心产物</th></tr></thead>
+    <tbody>
+      <tr><td>1 命题</td><td>案例生成</td><td><span class="pill p-l0">L0</span></td><td>蓝图审批、真实性把关</td><td>站包草案 v0.1</td></tr>
+      <tr><td>2 精修冻结</td><td>案例生成</td><td><span class="pill p-l2">L2</span></td><td><strong>行为锚改写</strong>、指南核验、及格线、签字</td><td>冻结站包 + 四类派生资产</td></tr>
+      <tr><td>3 SP 构建</td><td>AI 模拟患者</td><td><span class="pill p-l1">L1</span></td><td>人格卡批准、红队验收、L2 准入</td><td>人格卡 + 状态机 + 认证记录</td></tr>
+      <tr><td>4 编排</td><td>学习分析</td><td><span class="pill p-l1">L1</span></td><td>软约束权重、特殊需求</td><td>排考表 + 风险提示</td></tr>
+      <tr><td>5 实施</td><td>AI SP / 监测</td><td><span class="pill p-l3">L3</span></td><td>监考、<strong>终止开关</strong>、补偿判定</td><td>音视频 + 转写 + 事件日志</td></tr>
+      <tr><td>6 评分</td><td>评估支持</td><td><span class="pill p-l3">L3</span></td><td>边缘案例裁决、最终签字</td><td>证据链 + 成绩</td></tr>
+      <tr><td>7 反馈</td><td>学习支持 + 学习分析</td><td><span class="pill p-l1">L1</span></td><td>语气审核、异常站处置</td><td>能力画像 + 质量报告</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>走查：一个站从立项到反馈</h3>
+  <p>以「急性胸痛」站为例，按 L2 模拟考走一遍。这张表的价值在于暴露出<strong>每个环节实际要花的时间和会被卡住的地方</strong>——很多设计文档在时间维度上是空白的，一落到排期就散架。</p>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th style="width:11%">时点</th><th style="width:22%">动作</th><th style="width:31%">AI 做什么</th><th>产出 / 卡点</th></tr></thead>
+    <tbody>
+      <tr><td>T−45d</td><td>蓝图确认</td><td>覆盖度分析显示「胸痛采集」连续两年未考</td><td>立项；确定 1 站、8 分钟、权重 1.0</td></tr>
+      <tr><td>T−40d</td><td>命题</td><td>生成站包草案：题干、脚本、18 条 rubric（4 条 critical）</td><td>草案 v0.1；<strong>不出现在考试</strong></td></tr>
+      <tr><td>T−35d</td><td>精修</td><td>拦下 2 条不可达项（要求询问过敏史，但脚本未提供该信息）；标红 6 条不可观测锚</td><td>专家改写 6 条锚；<strong>卡点：改写最费时</strong></td></tr>
+      <tr><td>T−30d</td><td>冻结</td><td>派生 23 个信息槽、18 个证据探针、18 条反馈模板</td><td>bundle v1.0 冻结，哈希入库</td></tr>
+      <tr><td>T−21d</td><td>SP 构建</td><td>人格卡（65 岁男性 / 焦虑 / 披露阈值=需建立信任后才说"最近瘦了"）；红队测试</td><td><strong>卡点：红队发现 1 处泄露</strong>（考生问"是否担心心梗"时患者直接承认）→ 补槽门控后复测通过</td></tr>
+      <tr><td>T−14d</td><td>SP 认证</td><td>跑 20 次一致性抽测，关键信息释放顺序一致率 96%</td><td>3 名考官试演判定"可信"，准予用于 L2</td></tr>
+      <tr><td>T−7d</td><td>编排</td><td>约束求解：该站与另 9 站组合，每位考生承受的加权难度差 ≤ 0.5</td><td>排考表；标记 2 个考官疲劳时段</td></tr>
+      <tr><td>T−0</td><td>施测</td><td>流式转写 + 事件日志；屏幕提示「尚未观察到询问放射部位」（事实层）</td><td>音视频完整性校验通过，无 integrity_gap</td></tr>
+      <tr><td>T+0</td><td>初评</td><td>18 项建议分 + 证据片段 + 置信度；5 项低于阈值送审</td><td>13 项直接进抽检池，5 项进人工队列</td></tr>
+      <tr><td>T+1</td><td>复核</td><td>自动播放证据片段（前后各 3 秒）</td><td>3 接受 / 1 修正 / 1 拒绝（理由码：行为锚歧义）→ 该锚进入维护看板</td></tr>
+      <tr><td>T+3</td><td>反馈</td><td>三段式：02:14 证据 + HX.03 判定 negative + 替代话术</td><td>学生报告；教师审核语气后发布</td></tr>
+      <tr><td>T+7</td><td>质量报告</td><td>QWK 0.79、区分度 0.41、2 项分歧率 &gt; 15%</td><td><strong>闭环回 S1</strong>：下一年修订该 2 条锚</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout">
+    <span class="tag">这张表说明了什么</span>
+    <p>真正耗时的不是"AI 生成"，而是<strong>T−35d 的锚改写</strong>和<strong>T−21d 的红队返工</strong>。这两处正是设计建议中被反复强调、却最容易被排期忽略的环节。如果按"AI 一键生成、专家扫一眼"来排期，这个站会准时上线，然后在第一次考试后因两处泄露和三条歧义锚全部返工——成本远高于一开始就把这两步做实。</p>
+  </div>
+</section>
+
+<!-- ============ S6 ============ -->
+<section id="s6">
+  <h2><span class="num">06</span>三个核心机制的工程规格</h2>
+  <p class="sub">这一节写给要动手实现的人。每个机制都给出数据结构、判定逻辑与兜底策略。</p>
+
+  <!-- 6.1 -->
+  <h3>6.1 人格一致性控制器</h3>
+
+  <p>问题的根源在于：如果让 LLM 在一次生成里同时决定<strong>"该说什么"</strong>和<strong>"怎么说"</strong>，它就会在两件事上同时犯错，而且错误相互掩盖——考生问了一个不该回答的问题，模型"体贴地"回答了，语气还很像那个患者，于是看起来毫无破绽。</p>
+
+  <p>解法是把这两件事<strong>物理分离</strong>：</p>
+  <ul>
+    <li><strong>"说什么"由确定性状态机决定</strong>。它维护信息槽（information slot）的释放状态，只依据考生的意图标签与当前阶段，不含任何生成能力，因此不可能幻觉。</li>
+    <li><strong>"怎么说"由 LLM 决定</strong>。它拿到的是"本轮允许说出的槽内容 + 人格卡 + 最近 3 轮上下文"，任务被窄化为"把这几句话用这个人的方式说出来"。</li>
+    <li><strong>"说得对不对"由独立验证器判定</strong>。验证器与生成器使用不同模型、不同系统提示、且<em>看不到完整对话历史</em>（只看人格卡 + 本轮草稿 + 允许槽），避免上下文污染导致的自我确认。</li>
+  </ul>
+
+  <div class="arch">
+    <div class="arch-title"><span>Persona Consistency Loop — 单轮时序</span><span>≤ 1.2s</span></div>
+    <div class="steps4">
+      <div style="border:1px solid var(--border);background:var(--surface);border-radius:5px;padding:12px;text-align:center;">
+        <div style="font-family:var(--mono);font-size:10px;color:var(--text-mute);margin-bottom:5px;">STEP 1</div>
+        <div style="font-size:12.6px;font-weight:650;margin-bottom:4px;">意图识别</div>
+        <div style="font-size:11.3px;color:var(--text-mute);line-height:1.5;">ASR → 意图标签<br>（规则 + 小模型）</div>
+      </div>
+      <div style="border:1px solid rgba(63,214,192,.3);background:rgba(63,214,192,.05);border-radius:5px;padding:12px;text-align:center;">
+        <div style="font-family:var(--mono);font-size:10px;color:var(--teal);margin-bottom:5px;">STEP 2</div>
+        <div style="font-size:12.6px;font-weight:650;margin-bottom:4px;">槽释放</div>
+        <div style="font-size:11.3px;color:var(--text-mute);line-height:1.5;">状态机决定<br><strong style="color:var(--teal)">说什么</strong>（确定性）</div>
+      </div>
+      <div style="border:1px solid var(--border);background:var(--surface);border-radius:5px;padding:12px;text-align:center;">
+        <div style="font-family:var(--mono);font-size:10px;color:var(--text-mute);margin-bottom:5px;">STEP 3</div>
+        <div style="font-size:12.6px;font-weight:650;margin-bottom:4px;">受控生成</div>
+        <div style="font-size:11.3px;color:var(--text-mute);line-height:1.5;">LLM 决定<br><strong style="color:var(--text-dim)">怎么说</strong>（窄任务）</div>
+      </div>
+      <div style="border:1px solid rgba(240,160,75,.3);background:rgba(240,160,75,.05);border-radius:5px;padding:12px;text-align:center;">
+        <div style="font-family:var(--mono);font-size:10px;color:var(--amber);margin-bottom:5px;">STEP 4</div>
+        <div style="font-size:12.6px;font-weight:650;margin-bottom:4px;">独立校验</div>
+        <div style="font-size:11.3px;color:var(--text-mute);line-height:1.5;">三项打分<br>≥ 阈值才放行</div>
+      </div>
+    </div>
+    <div style="margin-top:12px;padding:9px 14px;border:1px dashed var(--border);border-radius:5px;font-size:11.6px;color:var(--text-mute);text-align:center;">
+      <span style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--amber);margin-right:8px;">LOOP</span>未通过 → 修正子模块重写 → 再校验（最多 2 次）→ 仍失败则回退安全模板，<strong style="color:var(--amber)">绝不放行低分回应</strong>
+    </div>
+  </div>
+
+  <h4>信息槽的结构</h4>
+  <p>信息槽是这套机制的原子单位。它把"患者知道什么"与"什么时候可以说"编码成可判定条件：</p>
+  <div class="spec">
+    <div class="spec-h"><span>InformationSlot — 信息槽</span><span>由 rubric anchor 派生</span></div>
+<pre>{
+  <span class="k">"slot_id"</span>: <span class="s">"S.07"</span>,
+  <span class="k">"content"</span>: <span class="s">"胸痛会窜到左臂，大概持续二十分钟"</span>,
+  <span class="k">"linked_items"</span>: [<span class="s">"HX.03"</span>],          <span class="c">// 该槽对应哪些评分项</span>
+  <span class="k">"phase"</span>: <span class="s">"information_gathering"</span>,
+  <span class="k">"disclosure"</span>: <span class="s">"on_direct_ask"</span>,        <span class="c">// active | on_direct_ask | on_trust | never</span>
+  <span class="k">"trigger"</span>: {
+    <span class="k">"type"</span>: <span class="s">"any_of"</span>,
+    <span class="k">"conditions"</span>: [
+      { <span class="k">"intent"</span>: <span class="s">"ask_radiation"</span> },
+      { <span class="k">"semantic"</span>: <span class="s">"疼痛是否向其他部位扩散"</span>, <span class="k">"min_sim"</span>: <span class="n">0.82</span> }
+    ]
+  },
+  <span class="k">"leak_guard"</span>: <span class="n">true</span>                  <span class="c">// 未触发时，任何生成内容不得包含 content 的关键实体</span>
+}</pre>
+  </div>
+  <p><code>leak_guard</code> 是最关键的一位。它在生成后对该槽的关键实体（"左臂""二十分钟"）做字符串与语义双重扫描，一旦出现在未被允许的回应中，直接判定泄露并拦截。这比指望 LLM"自觉不说"可靠得多。</p>
+
+  <h4>单轮控制循环</h4>
+  <div class="spec">
+    <div class="spec-h"><span>controller.step() — 每轮对话</span><span>python 伪代码</span></div>
+<pre><span class="k">def</span> <span class="n">step</span>(user_text, st):
+    intent = classify(user_text)                       <span class="c"># 规则优先，兜底小模型</span>
+    released = st.machine.release(intent, st.phase)    <span class="c"># 只返回槽 id 列表</span>
+
+    <span class="k">if</span> <span class="k">not</span> released <span class="k">and</span> st.phase_should_advance():
+        released = st.machine.advance(st.phase)        <span class="c"># 阶段推进时的自然过渡</span>
+        st.phase = st.machine.next_phase(st.phase)
+
+    draft = generator.say(released, st.persona, st.last_k_turns(<span class="n">3</span>))
+
+    <span class="k">for</span> attempt <span class="k">in</span> <span class="n">range</span>(<span class="n">2</span>):
+        v = verifier.check(draft, st.persona, allowed=released,
+                           forbidden=st.machine.unreleased_slots())
+        <span class="k">if</span> v.total &gt;= <span class="n">0.85</span>:
+            <span class="k">return</span> emit(draft, evidence=<span class="k">None</span>)
+        <span class="k">if</span> v.repairable:
+            draft = rewriter.fix(draft, v.violations)
+        <span class="k">else</span>:
+            <span class="k">break</span>
+
+    <span class="k">return</span> emit(safe_template(st.phase, released), degraded=<span class="k">True</span>)
+    <span class="c"># 降级事件必须入库：它既是质量信号，也是红队测试的回归用例</span></pre>
+  </div>
+
+  <h4>验证器的三项判据</h4>
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th style="width:20%">判据</th><th style="width:42%">检查内容</th><th style="width:10%">权重</th><th>不通过处理</th></tr></thead>
+    <tbody>
+      <tr><td><strong>人格保真</strong></td><td>语气、教育水平、情绪基调、口头禅是否与人格卡一致</td><td>0.35</td><td>可修正（改语气）</td></tr>
+      <tr><td><strong>信息边界</strong></td><td>是否泄露未释放槽；是否编造病例未定义的信息（既往史、用药、家属）</td><td>0.50</td><td><strong>不可修正</strong>，直接回退模板</td></tr>
+      <tr><td><strong>临床合理</strong></td><td>是否与病例设定矛盾（时间线、症状组合、生命体征）</td><td>0.15</td><td>不可修正，回退模板并告警</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout warn">
+    <span class="tag">为什么信息边界权重最高</span>
+    <p>人格漂移只是"演得不像"，影响体验与结构效度；而<strong>信息泄露直接摧毁考点</strong>——考生没问就得到了答案，该评分项失去区分能力，且这种失效在数据上表现为"该站全员满分"，很难在事后被发现。因此宁可牺牲对话自然度（回退到略显生硬的模板），也不能放行泄露。</p>
+  </div>
+
+  <p>跨会话一致性则靠三件事保证：人格卡版本化（同一场考试绑定同一 <code>persona_version</code>）、状态机确定性（同输入必同输出）、生成温度锁定在 0.6–0.7 并记录随机种子。这使"同一个人"在不同考生面前至少<em>结构上</em>是可比的。</p>
+
+  <!-- 6.2 -->
+  <h3>6.2 证据锚定的评分与风险路由</h3>
+
+  <p>这一机制要同时满足三个约束：AI 的建议必须可验证、人工的负荷必须可控、错判必须能被发现。三者靠一个共同的数据结构串起来——<strong>证据链</strong>。</p>
+
+  <div class="spec">
+    <div class="spec-h"><span>ScoreRecord — 评分记录（无证据不可写入）</span><span>schema v2</span></div>
+<pre>{
+  <span class="k">"record_id"</span>: <span class="s">"sc_20931"</span>,
+  <span class="k">"attempt_id"</span>: <span class="s">"att_8842"</span>,
+  <span class="k">"item_id"</span>: <span class="s">"HX.03"</span>,
+  <span class="k">"source"</span>: <span class="s">"ai"</span>,                      <span class="c">// ai | human | ai_then_human</span>
+  <span class="k">"score"</span>: <span class="n">0</span>,                          <span class="c">// 0 | 1 | 2 （对应 negative/partial/positive）</span>
+  <span class="k">"confidence"</span>: <span class="n">0.91</span>,
+  <span class="k">"evidence"</span>: [
+    {
+      <span class="k">"media_id"</span>: <span class="s">"v_8842_cam2"</span>,
+      <span class="k">"start_ms"</span>: <span class="n">134200</span>,
+      <span class="k">"end_ms"</span>: <span class="n">139800</span>,
+      <span class="k">"speaker"</span>: <span class="s">"candidate"</span>,
+      <span class="k">"quote"</span>: <span class="s">"这种疼会不会窜到肩膀或者下巴？"</span>,
+      <span class="k">"transcript_hash"</span>: <span class="s">"sha256:9f3c..."</span>
+    }
+  ],
+  <span class="k">"rationale"</span>: <span class="s">"询问了放射方向（肩/下颌），未追问持续时间 → partial"</span>,
+  <span class="k">"routing"</span>: {
+    <span class="k">"requires_human"</span>: <span class="n">true</span>,
+    <span class="k">"reasons"</span>: [<span class="s">"near_cutoff"</span>, <span class="s">"confidence_below_item_floor"</span>]
+  },
+  <span class="k">"review"</span>: <span class="k">null</span>                                        <span class="c">// 人工操作后填充</span>
+}</pre>
+  </div>
+
+  <p><code>routing.reasons</code> 是整个机制的枢纽。它不是布尔开关，而是一组具名原因——这让后续的审计可以回答"我们为什么看了这些、漏了哪些"，而不是只有一个"是否需要复核"的黑箱。</p>
+
+  <h4>路由决策表</h4>
+  <p>按下表顺序求值，命中任一 <code>must_review</code> 即强制送审，<strong>不再看后续规则</strong>（避免优先级歧义）：</p>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th style="width:6%">#</th><th style="width:22%">条件</th><th style="width:20%">路由结果</th><th>理由</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>存在 <code>integrity_gap</code>（媒体缺失/转写断裂）</td><td><span class="pill p-l3">全站人工</span></td><td>证据链不完整，任何自动结论都不可申诉</td></tr>
+      <tr><td>2</td><td><code>item.critical = true</code> 且 AI 判 negative</td><td><span class="pill p-l3">强制双人复核</span></td><td>关键项漏判代价最高，必须两名评分员独立确认</td></tr>
+      <tr><td>3</td><td>总分距及格线 ±5% 以内（边缘案例）</td><td><span class="pill p-l3">高年资裁决</span></td><td>这是 AI 与人工分歧最集中、后果最严重的区间</td></tr>
+      <tr><td>4</td><td><code>confidence &lt; item.confidence_floor</code></td><td><span class="pill p-l2">送审</span></td><td>模型自认不确定时，人的边际价值最大</td></tr>
+      <tr><td>5</td><td>该评分项历史 AI-人分歧率 &gt; 15%</td><td><span class="pill p-l2">送审</span></td><td>持续分歧说明行为锚表述或证据类型有问题，需系统性修</td></tr>
+      <tr><td>6</td><td>考生发起申诉</td><td><span class="pill p-l3">全量重评</span></td><td>申诉权不可被抽样概率稀释</td></tr>
+      <tr><td>7</td><td>以上皆否</td><td><span class="pill p-l1">抽检</span></td><td>L1 抽 10%，L2 抽 20%，L3 抽 30% 并覆盖全部关键项</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h4>人工界面的三条纪律</h4>
+  <ul>
+    <li><strong>默认播放，不默认给分。</strong>打开一条待复核记录时，界面首先自动播放证据片段（前后各留 3 秒），评分按钮才出现。这避免评分员先看到 AI 的分数再"找理由同意"。这是对抗自动化偏见最有效的一个界面细节。</li>
+    <li><strong>三元操作，拒绝自由输入。</strong>只提供"接受 / 修正 / 拒绝"三个动作，修正时从 rubric 的档位中选，不开放自由打分。这样每条人工记录都能直接进入一致性统计，而不需要事后编码。</li>
+    <li><strong>拒绝必须填理由码。</strong>理由码（证据不足 / 判定过严 / 判定过宽 / 行为锚歧义 / 其他）会聚合到 rubric 项的维护看板，直接指向"该改哪条锚"。</li>
+  </ul>
+
+  <h4>校准闭环</h4>
+  <p>每个月用人工确认过的记录作为金标准，计算三项指标并写入模型卡：<strong>加权 Kappa（QWK）</strong>衡量整体一致性、<strong>边缘案例一致率</strong>衡量最关键区间的表现、<strong>项级分歧热力图</strong>定位系统性偏差。任一指标跌破阈值的评分项，自动把 <code>ai_authority</code> 下调一档（<code>decide → suggest → extract</code>），直到重新校准达标。这个是自动的，不需要开会决定。</p>
+
+  <!-- 6.3 -->
+  <h3>6.3 闸门式放行</h3>
+
+  <p>治理最容易被写成"加强管理""严格审核"这类无法执行的句子。闸门的做法是把它变成<strong>带数字的放行条件</strong>，达不到就不放行，而且是系统自动判定，不靠人拍板。</p>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead>
+      <tr><th style="width:14%">闸门</th><th style="width:16%">范围</th><th style="width:44%">放行条件（全部满足）</th><th>失败则</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>G1 练习</strong><br><span style="font-size:11px;color:var(--text-mute)">沙箱环境</span></td>
+        <td>自愿参与的学生<br>结果不计入成绩</td>
+        <td>
+          SP 事实错误率 ≤ 2% · 人格首轮通过率 ≥ 95% · 端到端语音延迟 P95 ≤ 1.5s ·
+          SUS ≥ 70 · 零 P0 安全事故（隐私泄露/错误医疗建议）
+        </td>
+        <td>继续内测，不扩大范围</td>
+      </tr>
+      <tr>
+        <td><strong>G2 模拟</strong><br><span style="font-size:11px;color:var(--text-mute)">A/B 对照</span></td>
+        <td>整班模拟考<br>结果用于教学分组</td>
+        <td>
+          AI-人 QWK ≥ 0.75 · 边缘案例一致率提升 ≥ 10pp · 人工编辑率 ≤ 30% ·
+          亚组分数差 ≤ 0.15 SD · 教师评分工时下降 ≥ 40% · 完整审计链可回放
+        </td>
+        <td>回到 G1，定位差距维度</td>
+      </tr>
+      <tr>
+        <td><strong>G3 有限高利害</strong></td>
+        <td>仅行为锚清晰的站<br>仅非关键项可 AI 建议</td>
+        <td>
+          QWK ≥ 0.80 · 关键项漏判率 = 0（连续 3 场）· 终止开关演练通过 ·
+          申诉通道全流程演练 ≥ 2 次 · 伦理审查与数据合规批准 · 模型卡与数据表公开
+        </td>
+        <td>维持"证据助理"模式</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h4>自动降级规则</h4>
+  <p>闸门不只在"上线前"起作用，运行期也需要持续监测。以下任一情况触发自动降级，且降级<strong>立即生效、无需审批</strong>（事后补报告即可）：</p>
+  <ul>
+    <li>滚动 200 条记录的 QWK 跌破该闸门阈值 − 0.05；</li>
+    <li>任一站出现 <code>integrity_gap</code> 比例 &gt; 2%；</li>
+    <li>亚组分数差连续 2 周 &gt; 0.20 SD；</li>
+    <li>模型或提示词版本变更后未重新校准（系统层面强制：变更即重置为 <code>extract</code> 权限）。</li>
+  </ul>
+
+  <div class="callout danger">
+    <span class="tag">最后一条最容易被绕过</span>
+    <p>"换了个更好的模型"听起来是改进，实际上会让所有历史校准数据失效。因此系统层面必须把<strong>模型版本与权限档位绑定</strong>：任何 <code>model_version</code> 或 <code>prompt_version</code> 变化，自动把该能力的 <code>ai_authority</code> 降为 <code>extract</code>，直到完成新一轮人工比对准许回升。<strong>不允许"静默升级"</strong>——这是可追溯性从口号变成机制的分界线。</p>
+  </div>
+</section>
+
+<!-- ============ S7 ============ -->
+<section id="s7">
+  <h2><span class="num">07</span>数据模型与版本治理</h2>
+  <p class="sub">没有不可变版本，就没有可追溯性。这是最容易被省掉、也最不能省的一层。</p>
+
+  <h3>核心实体</h3>
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th style="width:19%">实体</th><th style="width:44%">关键字段</th><th>生命周期</th></tr></thead>
+    <tbody>
+      <tr><td><code>Blueprint</code></td><td>年度、能力域、目标站数、权重、覆盖矩阵</td><td>年度版本，可修订</td></tr>
+      <tr><td><code>Station</code></td><td>站标识、题目类型、时长、所属蓝图节点</td><td>长期存在，跨年复用</td></tr>
+      <tr><td><code>StationBundle</code></td><td>题干、考生指令、SP 脚本、rubric 快照、<strong>bundle_hash</strong></td><td><strong>冻结即不可变</strong>，新改动生成新版本</td></tr>
+      <tr><td><code>RubricItem</code></td><td>anchor 三档、evidence_type、phase、weight、ai_authority、critical</td><td>随 bundle 冻结</td></tr>
+      <tr><td><code>PersonaCard</code></td><td>五维人格、披露阈值、禁用话术、<strong>persona_version</strong></td><td>版本化，一场考试绑定一版</td></tr>
+      <tr><td><code>InformationSlot</code></td><td>内容、触发条件、关联评分项、leak_guard</td><td>随 bundle 冻结</td></tr>
+      <tr><td><code>ExamSession</code></td><td>场次、用途（练习/模拟/终结）、<strong>风险等级</strong>、绑定 bundle 集合</td><td>一次性</td></tr>
+      <tr><td><code>StationAttempt</code></td><td>考生、站、时间、设备、完整性状态</td><td>一次性，长期留存</td></tr>
+      <tr><td><code>Transcript</code></td><td>utterance 列表、说话人、时间戳、ASR 置信度</td><td>随媒体归档</td></tr>
+      <tr><td><code>ScoreRecord</code></td><td>item、分数、置信度、<strong>evidence[]</strong>、routing、review</td><td>永久</td></tr>
+      <tr><td><code>ReviewAction</code></td><td>操作者、动作（接受/修正/拒绝）、理由码、耗时</td><td>永久</td></tr>
+      <tr><td><code>AuditEvent</code></td><td>主体、动作、对象、前后值、模型/提示版本、时间</td><td>永久，只追加</td></tr>
+      <tr><td><code>ModelCard</code></td><td>能力名、模型版本、校准指标、亚组表现、已知局限</td><td>每次版本变更新增</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>三条版本纪律</h3>
+
+  <p><strong>其一，成绩绑定的是 bundle_hash，不是 station_id。</strong>「第 3 站」这个说法在跨年比较时毫无意义——同一站号可能换过三次题。只有哈希能回答"这位考生当时考的到底是哪一版"。</p>
+
+  <p><strong>其二，冻结后只增不改。</strong>发现错误不改原版本，而是发布新版本并在元数据中记录 <code>supersedes</code> 与 <code>reason</code>。已经考过的场次仍指向旧版本。这是唯一能让申诉站得住脚的做法——若允许原地修改，任何历史结论都可以被事后"修正"。</p>
+
+  <p><strong>其三，AI 输出必须携带三元版本戳。</strong><code>model_version</code> + <code>prompt_version</code> + <code>rubric_version</code>。缺任一项的记录视为无效，不得进入成绩计算。这条看似苛刻，实际省掉了未来无数次的"这个分数是怎么来的"。</p>
+
+  <div class="callout neutral">
+    <span class="tag">留存期建议</span>
+    <p>成绩与评审记录永久保留；音视频按<strong>分级留存</strong>——L3 场次留存至申诉期结束后 6 个月（通常 2–3 年），L1 练习留存 90 天即降采样或删除。这一策略既满足举证需要，又避免"为了合规把几年的考场录像全存着"带来的隐私与存储双重负担。删除动作本身也要记入 <code>AuditEvent</code>。</p>
+  </div>
+</section>
+
+<!-- ============ S8 ============ -->
+<section id="s8">
+  <h2><span class="num">08</span>治理四支柱的可操作实现</h2>
+  <p class="sub">原则要变成机制，否则它在第一次赶进度时就会消失。</p>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th style="width:14%">支柱</th><th style="width:38%">具体机制</th><th>验证方式（怎么知道它真的在起作用）</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>人的监督</strong></td>
+        <td>不可绕过的 <code>human_signoff</code> 状态；L3 关键项双人独立复核；边缘案例高年资裁决；实时终止开关</td>
+        <td>抽查 20 份成绩单，确认签字链完整、时间戳早于发布；终止开关每学期实战演练一次并记录耗时</td>
+      </tr>
+      <tr>
+        <td><strong>透明度</strong></td>
+        <td>模型卡与数据表公开（校内 + 考生可查摘要）；考生知情"AI 参与了哪些环节"；每条 AI 建议附 rationale</td>
+        <td>向考生发放知情说明并留痕；随机访谈 10 名学生，确认其能说出"我的分数里 AI 做了什么"</td>
+      </tr>
+      <tr>
+        <td><strong>伦理与安全</strong></td>
+        <td>AI SP 禁用话术清单（不诊断、不处方、不评价考生）；敏感内容拦截；真实考生数据不出内网；未成年人/模拟患者知情同意</td>
+        <td>每场次运行内容审计抽样；红队测试每季度更新攻击用例；数据流向图年度复核</td>
+      </tr>
+      <tr>
+        <td><strong>可追溯性</strong></td>
+        <td>API 全量日志；三元版本戳；证据哈希；只追加的审计事件流；成绩—证据—操作三者可互查</td>
+        <td>随机抽一条成绩，要求 10 分钟内还原"谁在什么时候依据哪段视频改了什么"——这是最硬的验收</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>公平性监测：从"声明"到"回路"</h3>
+
+  <p>公平性最容易变成一句"我们关注公平"。可操作的做法是定义<strong>三个可采集的差距指标</strong>，并预先规定纠正动作的指向：</p>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th style="width:24%">指标</th><th style="width:16%">阈值</th><th style="width:26%">可能原因</th><th>纠正动作（预先绑定）</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>亚组间分数差（按性别/生源/语言背景）</td>
+        <td>≤ 0.15 SD</td>
+        <td>SP 人格设定带有隐性偏见；病例情境对某群体不熟悉</td>
+        <td>审查人格提示词与病例设定 → 增补该情境的教学暴露 → 重跑对照</td>
+      </tr>
+      <tr>
+        <td>评分员对 AI 建议的<strong>编辑率</strong>差异</td>
+        <td>组间差 ≤ 5pp</td>
+        <td>AI 对某类口音/语速的识别偏差；评分员对某群体更严</td>
+        <td>ASR 词表与声学适配 → 评分员校准会 → 复核该组全部边缘案例</td>
+      </tr>
+      <tr>
+        <td>反馈的可及性（学生自评"看懂了并有帮助"）</td>
+        <td>组间差 ≤ 0.3 分（5 分制）</td>
+        <td>反馈语言难度过高；术语未解释</td>
+        <td>反馈语言分级（按年级可读性）→ 增加术语注释 → 重测</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>关键在于最后一列<strong>是预先绑定的</strong>，而不是发现问题后再开会讨论。这样公平性监测就有了明确的执行路径，也不会因为"归因困难"而不了了之。</p>
+
+  <div class="callout">
+    <span class="tag">一个常被忽略的公平性问题</span>
+    <p>AI 评分可能对<strong>非标准口音</strong>系统性偏低——不是模型有偏见，而是 ASR 在方言口音上的词错率更高，导致证据提取漏掉本该被识别的表述。这在总分上看不出来（被其他项稀释），但在"沟通"类评分项上会形成稳定差距。对策是在 <code>ScoreRecord</code> 中记录 <code>asr_confidence</code>，当该项平均置信度显著低于全体时，自动把该考生该站升级为人工全量复核——<strong>不是降低标准，而是承认工具在该条件下不可靠</strong>。</p>
+  </div>
+</section>
+
+<!-- ============ S9 ============ -->
+<section id="s9">
+  <h2><span class="num">09</span>度量体系与验收标准</h2>
+  <p class="sub">四层指标。技术指标只回答"能不能用"，运营指标才回答"值不值得用"。</p>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th style="width:13%">层次</th><th style="width:27%">指标</th><th style="width:16%">目标值</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr>
+        <td rowspan="5"><strong>技术</strong></td>
+        <td>SP 对话事实错误率</td><td>≤ 2%</td><td>编造或与病例矛盾的信息占比；对标公开报告的 1.77%</td>
+      </tr>
+      <tr><td>人格一致性首轮通过率</td><td>≥ 95%</td><td>未经修正即达阈值的比例；过低说明人格卡或生成提示有问题</td></tr>
+      <tr><td>证据定位准确率</td><td>≥ 95%</td><td>时间戳误差 ≤ 2s 且引用文本与转写一致</td></tr>
+      <tr><td>端到端语音延迟</td><td>P95 ≤ 1.5s</td><td>超过 2s 对话会明显"卡顿"，破坏真实感</td></tr>
+      <tr><td>医学专名 ASR 词错率</td><td>≤ 8%</td><td>需领域词表增强；直接影响证据提取召回</td></tr>
+
+      <tr>
+        <td rowspan="4"><strong>评分质量</strong></td>
+        <td>AI-人 QWK</td><td>L2 ≥ 0.75<br>L3 ≥ 0.80</td><td>加权 Kappa，对有序档位比准确率更合适</td>
+      </tr>
+      <tr><td>边缘案例一致率提升</td><td>≥ 10pp</td><td>相对纯人工基线的提升，这是 AI 价值最集中的区间</td></tr>
+      <tr><td>关键项漏判率</td><td>= 0（L3）</td><td>任何一次漏判都应触发根因分析</td></tr>
+      <tr><td>人工编辑率</td><td>≤ 30%</td><td>过高说明 AI 建议无价值；过低（&lt;5%）反而要警惕"橡皮图章"</td></tr>
+
+      <tr>
+        <td rowspan="4"><strong>运营</strong></td>
+        <td>单站单次成本</td><td>练习 ≤ ¥15<br>考试 ≤ ¥60</td><td>含 ASR、模型调用、存储摊销</td></tr>
+      <tr><td>教师评分工时</td><td>下降 ≥ 40%</td><td>相对全量人工基线；这是最直接的价值主张</td></tr>
+      <tr><td>反馈时延</td><td>练习 &lt; 1 分钟<br>考试 &lt; 72 小时</td><td>从"数月"到"分钟级"是形成性评价成立的前提</td></tr>
+      <tr><td>人工复核占比</td><td>L2 ≤ 35%<br>L3 ≤ 60%</td><td>若接近 100%，说明风险路由失效，退化为全人工</td></tr>
+
+      <tr>
+        <td rowspan="4"><strong>体验与公平</strong></td>
+        <td>SUS 可用性</td><td>≥ 75</td><td>对标公开报告的 77.5 中位数</td></tr>
+      <tr><td>学生实用性/真实感评分</td><td>≥ 7.0 / 10</td><td>低于 6 分说明练习平台不会被主动使用</td></tr>
+      <tr><td>亚组分数差</td><td>≤ 0.15 SD</td><td>见第 8 节公平性回路</td></tr>
+      <tr><td>申诉率与改判率</td><td>申诉 &lt; 3%<br>改判 &lt; 20%</td><td>改判率高说明初评系统性偏严或偏松</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout warn">
+    <span class="tag">一个反直觉的验收标准</span>
+    <p>「人工编辑率过低」应当被视为<strong>告警</strong>而非成绩。如果评分员对 AI 建议的接受率是 98%，通常不是 AI 太准，而是界面设计诱导了"橡皮图章"——比如默认选中 AI 分数、一键通过、批量确认。这会让复核形同虚设，且在人机一致性指标上呈现出虚假的优秀。健康区间大约是 15%–30% 的编辑率：说明人真的在看，且看得懂。</p>
+  </div>
+</section>
+
+<!-- ============ S10 ============ -->
+<section id="s10">
+  <h2><span class="num">10</span>路线图与投入</h2>
+  <p class="sub">顺序不是按"技术酷炫度"，而是按"证据成熟度 × 风险可控性"。</p>
+
+  <div class="road">
+    <div class="phase">
+      <div class="ph">
+        <span class="name">P0 · 评分副驾</span>
+        <span class="when">0–3 个月</span>
+        <span class="goal">第一优先</span>
+      </div>
+      <p>范围限定为<strong>离线跑历史录像</strong>：选 1 个学科、30–50 个既有考站、近两年的存档视频，不接触在考考生。产出是证据提取链路 + 复核工作台 + 与人工金标准的 QWK 基线。这一步的真正价值不只是省工时，而是<strong>顺带产出了后续所有环节需要的标注数据</strong>——哪些项 AI 判得准、哪些项天然有歧义，直接决定 P1 的人格卡和 rubric 该怎么改。</p>
+      <p style="margin-top:8px;color:var(--text-mute);font-size:12.6px;"><strong>放行条件</strong>：历史数据上 QWK ≥ 0.70，证据定位准确率 ≥ 90%，人工复核单条耗时 ≤ 90 秒。</p>
+    </div>
+
+    <div class="phase">
+      <div class="ph">
+        <span class="name">P1 · AI SP 练习平台</span>
+        <span class="when">3–9 个月</span>
+        <span class="goal">第二优先</span>
+      </div>
+      <p>落地人格卡 + 状态机 + 独立验证器的完整闭环，配套三段式反馈。对象是学生自愿练习，结果不计入任何成绩。这一阶段要刻意<strong>把"练得像"和"评得准"分开验收</strong>——很多项目在这里把两件事混在一起调，结果两边都调不好。</p>
+      <p style="margin-top:8px;color:var(--text-mute);font-size:12.6px;"><strong>放行条件</strong>：通过 G1 闸门全部指标（事实错误率、人格通过率、延迟、SUS、零安全事故）。</p>
+    </div>
+
+    <div class="phase p2">
+      <div class="ph">
+        <span class="name">P2 · 模拟 OSCE 与治理闸门</span>
+        <span class="when">9–15 个月</span>
+        <span class="goal">第三优先</span>
+      </div>
+      <p>整班模拟考 + A/B 对照（AI 辅助组 vs 纯人工组），同步上线公平性监测与自动降级机制。这一阶段最容易被压缩——因为"系统已经能跑了"。但恰恰是这里的对照数据，决定了机构能否在伦理审查和学术委员会面前站住。</p>
+      <p style="margin-top:8px;color:var(--text-mute);font-size:12.6px;"><strong>放行条件</strong>：通过 G2 闸门；A/B 报告经学术委员会审议。</p>
+    </div>
+
+    <div class="phase p3">
+      <div class="ph">
+        <span class="name">P3 · 有限高利害</span>
+        <span class="when">15–18 个月起</span>
+        <span class="goal">渐进开放</span>
+      </div>
+      <p>仅对<strong>行为锚清晰、证据类型为 utterance/action 的非关键项</strong>开放 AI 建议权；关键项与全局评分始终人工。同步完成终止开关演练、申诉全流程演练、模型卡公开。范围扩张遵循"一次只放开一档"的原则，每次扩张都要重新走一遍 G3。</p>
+      <p style="margin-top:8px;color:var(--text-mute);font-size:12.6px;"><strong>放行条件</strong>：通过 G3 闸门；连续 3 场零关键项漏判。</p>
+    </div>
+  </div>
+
+  <h3>团队与投入</h3>
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th style="width:24%">角色</th><th style="width:12%">投入</th><th>关键职责</th></tr></thead>
+    <tbody>
+      <tr><td>产品负责人</td><td>1.0 FTE</td><td>风险分级表的维护者；在"想加功能"和"守住闸门"之间做取舍</td></tr>
+      <tr><td>临床教育专家</td><td>0.5 FTE</td><td>行为锚改写、难度校准、边缘案例裁决的最终权威</td></tr>
+      <tr><td>后端工程师</td><td>2.0 FTE</td><td>流程状态机、评分服务、审计链、权限</td></tr>
+      <tr><td>前端工程师</td><td>1.0 FTE</td><td>复核工作台（证据播放器是关键）、命题工作台</td></tr>
+      <tr><td>AI 工程师</td><td>1.5 FTE</td><td>证据提取、SP 引擎、验证器、路由与校准</td></tr>
+      <tr><td>数据/评测</td><td>1.0 FTE</td><td>金标准数据集、QWK/亚组统计、回归测试集维护</td></tr>
+      <tr><td>运维与安全</td><td>0.5 FTE</td><td>私有化推理、媒体存储、数据合规</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p style="font-size:13px;color:var(--text-mute);">合计约 <strong style="color:var(--text-dim)">7.5 FTE</strong>。硬件侧，若采用私有化推理，2 张中高端推理卡即可支撑单院/单校规模（日均 200 站次以内）；ASR 与评分模型可共享同一组卡，通过批处理削峰。</p>
+
+  <div class="callout">
+    <span class="tag">一个务实建议</span>
+    <p>如果资源只够做一件事，做 <strong>P0</strong>。它不需要改造任何现场流程、不接触在考学生、不涉及伦理审查的新增风险，却能在三个月内给出两个硬答案：<em>这套 AI 在我们自己的数据上到底准不准</em>，以及<em>我们的评分表到底有多不可判</em>。第二个答案往往比第一个更让人意外，也更有价值。</p>
+  </div>
+</section>
+
+<!-- ============ S11 ============ -->
+<section id="s11">
+  <h2><span class="num">11</span>反模式清单</h2>
+  <p class="sub">这些做法在演示时都很漂亮，在真实考试里都会出事。</p>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th style="width:26%">反模式</th><th style="width:34%">为什么诱人</th><th>为什么出事</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>让 LLM 直接产出可用评分表</strong></td>
+        <td>一键生成整站，看起来效率提升十倍</td>
+        <td>评分表可靠性恰是 LLM 最弱的环节，指南一致性得分最低、评分者分歧最大。上线后所有争议都会回到"这条锚到底什么意思"</td>
+      </tr>
+      <tr>
+        <td><strong>单 prompt 扮演 SP</strong></td>
+        <td>实现成本极低，Demo 效果惊艳</td>
+        <td>人格随对话漂移、一问就给全部信息、编造未定义的病史。且这些失效在单次对话里几乎不可见</td>
+      </tr>
+      <tr>
+        <td><strong>全量 AI 评分 + 事后抽查</strong></td>
+        <td>省人力最彻底，报表最好看</td>
+        <td>没被抽中的错误永久固化；申诉时拿不出证据。抽查比例越低，系统性错判越难暴露</td>
+      </tr>
+      <tr>
+        <td><strong>追求全模态（三摄像头 + 音频 + 笔记全上）</strong></td>
+        <td>"数据越全越准"的直觉</td>
+        <td>成本翻数倍，而三摄像头相对音频的增量主要出现在体格检查类站。多数站用音频 + 笔记已足够，全模态属于为 5% 的场景付 300% 的价钱</td>
+      </tr>
+      <tr>
+        <td><strong>同一个模型既生成又评判</strong></td>
+        <td>省一次调用，架构简单</td>
+        <td>自我确认偏差：它会认为自己的输出是合理的。必须换模型、换提示、且限制验证器的可见上下文</td>
+      </tr>
+      <tr>
+        <td><strong>先上线再补治理</strong></td>
+        <td>"先跑起来，日志以后再加"</td>
+        <td>日志与版本戳必须从第一条记录就存在，事后无法补造。没有它们，前面积累的所有效率收益都无法被机构合法采纳</td>
+      </tr>
+      <tr>
+        <td><strong>用统一风险等级管所有站</strong></td>
+        <td>配置简单，沟通成本低</td>
+        <td>要么对"洗手"这种可自动判定的项过度保护（浪费人力），要么对"共情"这种高歧义项过度放权（制造风险）。粒度必须是评分项</td>
+      </tr>
+      <tr>
+        <td><strong>把"人机一致率高"当作唯一成功指标</strong></td>
+        <td>数字漂亮，容易向上汇报</td>
+        <td>如果人工只是橡皮图章，一致率会虚高。必须同时看编辑率、边缘案例表现、以及"AI 独立判断被人推翻后谁对"</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<hr class="sep">
+
+<section id="appendix" style="padding-top:48px;">
+  <h2 style="font-size:20px;"><span class="num">A</span>附录：本方案与设计建议的对应</h2>
+  <p class="sub">确保没有遗漏原始材料中的关键判断。</p>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th style="width:34%">设计建议中的要点</th><th>本方案的落点</th></tr></thead>
+    <tbody>
+      <tr><td>5 个 AI 角色 + 4 个治理支柱的框架</td><td>第 3 节架构（角色落到能力层）、第 8 节（支柱落到机制与验证方式）</td></tr>
+      <tr><td>考站生成：LLM 做初稿，评分表是短板</td><td>S1 定位为 L0 草稿；S2 四项强制检查；第 4 节把 rubric 前置为协议</td></tr>
+      <tr><td>评分表重组为四阶段对话结构</td><td>第 4 节 <code>phase</code> 字段 + 阶段检查点机制；S3 状态机</td></tr>
+      <tr><td>人格一致性控制器（生成—检测—修正—再检测）</td><td>6.1 完整工程规格，含"说什么/怎么说"分离与信息槽门控</td></tr>
+      <tr><td>人格注入多维轴（性格/语言/记忆/认知）</td><td>S3 人格卡五维表，补充"披露阈值"这一关键维度</td></tr>
+      <tr><td>评分：AI 初筛 + 低分尾部路由人工；时间戳证据；三元操作</td><td>6.2 路由决策表七条规则、ScoreRecord schema、界面三条纪律</td></tr>
+      <tr><td>RAVEN 式"考官条件化的第二评分员"</td><td>6.2 三档模式中的"初筛"与 L3 分歧裁决</td></tr>
+      <tr><td>多模态取舍（三摄像头 QWK 0.832，音频与笔记各覆盖不同侧面）</td><td>第 3 节决策三、第 11 节反模式第 4 条、S9 成本指标</td></tr>
+      <tr><td>治理：模型卡、API 日志、RBAC、亚组报告；三阶段推进与放行条件</td><td>第 8 节四支柱表、6.3 三闸门与自动降级、第 7 节版本纪律</td></tr>
+      <tr><td>公平性：亚组差异、编辑率、反馈可及性；纠正指向人格提示词/锚表述/教学支持</td><td>第 8 节公平性回路，纠正动作<strong>预先绑定</strong>而非事后归因</td></tr>
+      <tr><td>练习平台：即时、结构化、对齐 OSCE 评分框架；双模式</td><td>S7 三段式反馈；第 4 节"单一真相源"消除两套评价语言</td></tr>
+      <tr><td>优先级：评分 → SP 人格 → 治理闸门；暂缓 LLM 独立命题</td><td>第 10 节 P0/P1/P2 顺序完全对应</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>术语</h3>
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th style="width:22%">术语</th><th>含义</th></tr></thead>
+    <tbody>
+      <tr><td><code>StationBundle</code></td><td>一次冻结的考站全量内容（题干/指令/脚本/rubric），以哈希标识，不可变</td></tr>
+      <tr><td><code>InformationSlot</code></td><td>SP 持有的单条信息及其释放条件，是防止信息泄露的最小控制单元</td></tr>
+      <tr><td><code>EvidenceSpan</code></td><td>指向媒体某一片段的引用（含起止时间与转写哈希），使评分可回放</td></tr>
+      <tr><td><code>ai_authority</code></td><td>项级 AI 权限：<code>none / extract / suggest / decide</code> 四档</td></tr>
+      <tr><td><code>QWK</code></td><td>加权 Kappa，衡量有序评分档位上的人机一致性，比简单准确率更稳健</td></tr>
+      <tr><td><code>near_cutoff</code></td><td>总分落在及格线附近的状态，是 AI 最不可靠、人工最不可省的区间</td></tr>
+      <tr><td><code>integrity_gap</code></td><td>媒体或转写不完整的状态，触发全站人工复核</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout neutral" style="margin-top:36px;">
+    <span class="tag">本方案的前提假设</span>
+    <p>① 场景为院校或教学医院的 OSCE（含形成性与终结性），非执业资格考试；② 具备音视频采集条件与内网部署能力；③ 有稳定的临床教育专家团队参与命题与裁决；④ 指标阈值为<strong>基于公开文献的起始建议值</strong>，必须在本地数据上重新校准——不同学科、不同层级、不同评分表的容差差别很大，直接照搬数字比不设指标更危险。</p>
+  </div>
+</section>
+
+<footer>
+  OSCE·Loop — AI+OSCE 全流程系统设计方案 · v1.0<br>
+  基于《设计建议》所梳理的循证框架展开，重点在两处推进：从"AI 角色"推进到"项级权限矩阵"，从"治理原则"推进到"可自动判定的闸门指标"。<br>
+  文中指标为目标值，需在本地数据上校准后使用。
+</footer>
+
+</main>
+</div>
+</body>
+</html>
