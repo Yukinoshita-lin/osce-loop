@@ -48,6 +48,10 @@ def test_generate_schedule_satisfies_hard_constraints(conn):
         assert len(candidates_in_round) == len(set(candidates_in_round)) == 8
     assert schedule["quality"]["difficulty_spread"] <= 1.0
     assert schedule["quality"]["late_difficulty_spread"] <= 1.0
+    usage_spread = (
+        schedule["quality"]["station_usage_max"] - schedule["quality"]["station_usage_min"]
+    )
+    assert usage_spread <= 1
     assert schedule["quality"]["total_minutes"] > 0
     assert any("延长" in w for w in schedule["quality"]["warnings"])
     assert any("安静候考" in w for w in schedule["quality"]["warnings"])

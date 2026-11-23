@@ -1,4 +1,4 @@
-"""考务编排：在约束下生成轮转排考表，并检查难度均衡、疲劳与特殊需求。"""
+﻿"""考务编排：在约束下生成轮转排考表，并检查难度均衡、疲劳与特殊需求。"""
 from __future__ import annotations
 
 import json
@@ -78,10 +78,15 @@ def _solve_assignments(
     rounds: int,
     target: float,
     seed: int,
+    attempts: int = 40,
 ) -> dict[str, list[tuple[int, str]]]:
+    """多随机种子回溯，优先满足难度约束，再最小化考站使用次数差。"""
     if len(candidates) > len(stations):
         raise ValueError("考生人数不能超过单轮并行考站数（演示版约束）")
-    for attempt in range(40):
+    station_map = {s["station_id"]: s for s in stations}
+    best_result: dict[str, list[tuple[int, str]]] | None = None
+    best_score: tuple[float, ...] | None = None
+    for attempt in range(attempts):
         rng = random.Random(seed + attempt)
         visited: dict[str, set[str]] = {c["candidate_id"]: set() for c in candidates}
         current: dict[str, float] = {c["candidate_id"]: 0.0 for c in candidates}
@@ -109,7 +114,8 @@ def _solve_assignments(
                 ]
                 options.sort(
                     key=lambda s: (
-                        abs(current[candidate_id] + s["difficulty"] - target),
+                        abs(current[candidate_id] + s["difficulty"] - target)
+                        + usage[s["station_id"]] * 0.35,
                         usage[s["station_id"]],
                         rng.random(),
                     )
@@ -132,9 +138,35 @@ def _solve_assignments(
 
             return place(0)
 
-        if backtrack(0):
-            return result
-    raise ValueError("在当前约束下未找到可行排考方案")
+        if not backtrack(0):
+            continue
+        totals = [current[c["candidate_id"]] for c in candidates]
+        late = [
+            sum(
+                station_map[station_id]["difficulty"]
+                for round_index, station_id in result[c["candidate_id"]]
+                if round_index >= rounds - 2
+            )
+            for c in candidates
+        ]
+        difficulty_spread = max(totals) - min(totals)
+        late_spread = max(late) - min(late)
+        usage_spread = max(usage.values()) - min(usage.values())
+        over_limit = max(0.0, difficulty_spread - 1.0) + max(0.0, late_spread - 1.0)
+        score = (
+            round(over_limit, 3),
+            usage_spread,
+            max(usage.values()),
+            round(difficulty_spread, 3),
+            round(late_spread, 3),
+            attempt,
+        )
+        if best_score is None or score < best_score:
+            best_score = score
+            best_result = result
+    if best_result is None:
+        raise ValueError("在当前约束下未找到可行排考方案")
+    return best_result
 
 
 def generate_schedule(
@@ -268,6 +300,10 @@ def generate_schedule(
         warnings.append(f"考生加权难度差 {difficulty_spread}，超过 1.0，建议重新排考。")
     if late_spread > 1.0:
         warnings.append(f"后两轮难度差 {late_spread}，存在顺序效应风险。")
+    if usage_counts and max(usage_counts) - min(usage_counts) > 1:
+        warnings.append(
+            f"考站使用次数差 {max(usage_counts) - min(usage_counts)}，建议调整轮次或考站配置。"
+        )
     for examiner, minutes in examiner_minutes.items():
         if minutes > FATIGUE_LIMIT_MIN:
             warnings.append(f"考官 {examiner} 连续评分 {minutes:.0f} 分钟，超过疲劳阈值。")
