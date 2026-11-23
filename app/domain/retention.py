@@ -295,6 +295,8 @@ def purge_expired(
     timestamp = db.now_iso()
     deleted_files = 0
     freed_bytes = 0
+    purged_attempts = 0
+    failed = 0
     for item in items:
         if item["file_action"] == "delete":
             path = _media_path(item["media_url"], media_dir)
@@ -303,13 +305,25 @@ def purge_expired(
                     path.unlink()
                     deleted_files += 1
                     freed_bytes += item["size_bytes"]
-                except OSError as exc:  # 文件被占用或权限不足时保留记录，等待下次重试
+                except OSError as exc:  # 文件被占用或权限不足：不标记已清理，等待下次重试
                     item["file_action"] = "delete_failed"
                     item["file_action_label"] = f"删除失败：{exc}"
+                    failed += 1
+                    db.append_audit(
+                        conn,
+                        actor=actor,
+                        action="media.purge_failed",
+                        object_type="StationAttempt",
+                        object_id=item["attempt_id"],
+                        before={"media_url": item["media_url"], "retain_until": item["retain_until"]},
+                        after={"purged_at": None, "error": str(exc)},
+                    )
+                    continue
         conn.execute(
             "UPDATE attempts SET media_purged_at = ?, media_purged_by = ? WHERE attempt_id = ?",
             (timestamp, actor, item["attempt_id"]),
         )
+        purged_attempts += 1
         db.append_audit(
             conn,
             actor=actor,
@@ -328,6 +342,8 @@ def purge_expired(
                 "file_deleted": item["file_action"] == "delete",
             },
         )
+    summary["purged_attempts"] = purged_attempts
+    summary["failed"] = failed
     db.append_audit(
         conn,
         actor=actor,
@@ -336,7 +352,8 @@ def purge_expired(
         object_id=moment.date().isoformat(),
         before={"candidates": summary["total"], "media_urls": summary["media_urls"]},
         after={
-            "purged_attempts": summary["purged_attempts"],
+            "purged_attempts": purged_attempts,
+            "failed": failed,
             "deleted_files": deleted_files,
             "freed_bytes": freed_bytes,
         },

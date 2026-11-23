@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -143,6 +144,26 @@ def test_apply_purges_media_and_keeps_audit_chain(env):
     assert media_access(conn, own, url) == "purged"
     assert media_access(conn, other, url) == "forbidden"
     assert media_access(conn, {"role": "admin"}, url) == "purged"
+
+
+def test_delete_failure_keeps_attempt_for_retry(env, monkeypatch):
+    conn, media = env
+    path = media / "uploads" / "locked.wav"
+    url = _write_media(media, "locked.wav", 2048)
+    _insert(conn, "att_locked", days_old=200, media_url=url)
+
+    def fail_unlink(self, *args, **kwargs):
+        raise OSError("file is locked")
+
+    monkeypatch.setattr(Path, "unlink", fail_unlink)
+    result = purge_expired(conn, actor="考务", dry_run=False, media_dir=media)
+    assert result["summary"]["failed"] == 1
+    assert result["summary"]["purged_attempts"] == 0
+    assert path.exists()
+    row = conn.execute("SELECT media_purged_at FROM attempts WHERE attempt_id = 'att_locked'").fetchone()
+    assert row["media_purged_at"] is None
+    actions = [r["action"] for r in conn.execute("SELECT action FROM audit_events ORDER BY rowid").fetchall()]
+    assert "media.purge_failed" in actions
 
 
 def test_expired_media_access_blocked_before_cleanup(env):

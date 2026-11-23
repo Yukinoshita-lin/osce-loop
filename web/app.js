@@ -1939,7 +1939,8 @@ document.addEventListener('click', async (e) => {
     if (!confirm('将按留存策略清理所有到期媒体文件。成绩、转写与证据哈希保留，删除动作写入审计链。继续？')) return;
     try {
       const result = await api('/api/retention/purge', { method: 'POST', body: { apply: true } });
-      toast(`已清理 ${result.summary.purged_attempts} 个场次媒体，删除 ${result.deleted_files} 个文件，释放 ${bytesText(result.freed_bytes)}`);
+      const failed = result.summary.failed || 0;
+      toast(`已清理 ${result.summary.purged_attempts} 个场次媒体，删除 ${result.deleted_files} 个文件，释放 ${bytesText(result.freed_bytes)}${failed ? `；${failed} 个文件删除失败，将重试` : ''}`);
       await viewQuality();
     } catch (err) {
       toast(err.message, true);
