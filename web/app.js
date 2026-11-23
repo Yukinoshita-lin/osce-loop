@@ -1178,14 +1178,16 @@ function p3SectionHtml(gov, gates) {
           <div class="version-row"><span class="k">终止开关演练</span><span class="v">${switchDrill ? (switchDrill.passed ? '<span class="pill teal">通过</span>' : '<span class="pill red">未通过</span>') + ` · ${num(switchDrill.duration_ms, 0)}ms` : '<span class="pill muted">未演练</span>'}</span></div>
           <div class="version-row"><span class="k">申诉流程演练</span><span class="v">${appeal.passed || 0} / 2 次通过</span></div>
           <div class="version-row"><span class="k">伦理与数据合规</span><span class="v">${gov.ethics_approved ? '<span class="pill teal">已批准</span>' : '<span class="pill red">未批准</span>'}</span></div>
-          <div class="version-row"><span class="k">模型卡公开</span><span class="v">${gov.model_card_public ? '<span class="pill teal">已公开</span>' : '<span class="pill red">未公开</span>'}</span></div>
+          <div class="version-row"><span class="k">学术委员会审议</span><span class="v">${gov.academic_committee_approved ? '<span class="pill teal">已审议</span>' : '<span class="pill red">未审议</span>'}</span></div>
+          <div class="version-row"><span class="k">模型卡与数据表</span><span class="v">${gov.model_card_public && gov.data_sheet_public ? '<span class="pill teal">已公开</span>' : '<span class="pill red">未公开</span>'}</span></div>
         </div>
         <div>
           <div class="btn-row">
             <button class="btn small" data-action="termination-drill">终止开关演练</button>
             <button class="btn small" data-action="appeal-drill">申诉流程演练</button>
             <button class="btn small" data-action="approve-ethics">登记伦理批准</button>
-            <button class="btn small" data-action="publish-model-card">公开模型卡</button>
+            <button class="btn small" data-action="approve-committee">登记学术委员会审议</button>
+            <button class="btn small" data-action="publish-model-card">公开模型卡与数据表</button>
           </div>
           <div class="sep"></div>
           <div class="btn-row">
@@ -1195,7 +1197,7 @@ function p3SectionHtml(gov, gates) {
         </div>
       </div>
       <div class="sep"></div>
-      <div class="tiny muted">G3 放行条件：QWK ≥ 0.80 · 关键项漏判 = 0 · 终止开关演练通过 · 申诉演练 ≥ 2 次 · 伦理与数据合规批准 · 模型卡公开。</div>
+      <div class="tiny muted">G3 放行条件：QWK ≥ 0.80 · 关键项漏判 = 0 · 终止开关演练通过 · 申诉演练 ≥ 2 次 · 伦理与数据合规批准 · 模型卡与数据表公开。</div>
       <div class="tiny muted" style="margin-top:4px">${esc((gov.model_card || {}).card_id ? '模型卡：' + gov.model_card.card_id : '')}</div>
     </div>`;
 }
@@ -1227,7 +1229,7 @@ async function viewQuality() {
           if (c.value !== null && c.value !== undefined) {
             if (c.key === 'subgroup_gap') value = num(c.value, 3) + ' SD';
             else if (c.key === 'near_improvement') value = num(c.value * 100, 1) + 'pp';
-            else if (c.key === 'switch_drill' || c.key === 'ethics' || c.key === 'model_card') value = c.value >= 1 ? '通过' : '未完成';
+            else if (c.key === 'switch_drill' || c.key === 'ethics' || c.key === 'model_card' || c.key === 'academic_committee') value = c.value >= 1 ? '通过' : '未完成';
             else if (c.key === 'appeal_drill') value = `${c.value}/2`;
             else if (c.key === 'evidence_rate' || c.key === 'edit_rate' || c.key === 'teacher_hours' || c.key === 'sp_fact_error' || c.key === 'persona_pass') value = pct(c.value, c.value < 0.1 ? 1 : 0);
             else if (c.key === 'sus') value = num(c.value, 1);
@@ -1395,13 +1397,30 @@ document.addEventListener('click', async (e) => {
     }
     return;
   }
+  if (action === 'approve-committee') {
+    try {
+      await api('/api/governance/approvals', {
+        method: 'POST',
+        body: {
+          approval_type: 'academic_committee',
+          approver: state.reviewer || '学术委员会',
+          note: 'A/B 对照报告经学术委员会审议（演示）',
+        },
+      });
+      toast('学术委员会审议已登记');
+      await viewQuality();
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
   if (action === 'publish-model-card') {
     try {
       await api('/api/governance/model-card/publish', {
         method: 'POST',
         body: { actor: state.reviewer || '系统' },
       });
-      toast('模型卡已公开');
+      toast('模型卡与数据表已公开');
       await viewQuality();
     } catch (err) {
       toast(err.message, true);

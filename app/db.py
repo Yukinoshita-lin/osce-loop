@@ -227,6 +227,15 @@ CREATE TABLE IF NOT EXISTS governance_approvals (
     note TEXT,
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS data_sheets (
+    data_sheet_id TEXT PRIMARY KEY,
+    version TEXT NOT NULL,
+    content TEXT NOT NULL,
+    is_public INTEGER NOT NULL DEFAULT 0,
+    published_at TEXT,
+    created_at TEXT NOT NULL
+);
 """
 
 

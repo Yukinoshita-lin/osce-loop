@@ -309,6 +309,12 @@ def publish_model_card(conn, *, actor: str = "系统") -> dict[str, Any]:
         "UPDATE model_cards SET is_public = 1, published_at = ? WHERE card_id = ?",
         (timestamp, row["card_id"]),
     )
+    sheet = conn.execute("SELECT * FROM data_sheets ORDER BY created_at DESC LIMIT 1").fetchone()
+    if sheet:
+        conn.execute(
+            "UPDATE data_sheets SET is_public = 1, published_at = ? WHERE data_sheet_id = ?",
+            (timestamp, sheet["data_sheet_id"]),
+        )
     conn.commit()
     db.append_audit(
         conn,
@@ -317,11 +323,16 @@ def publish_model_card(conn, *, actor: str = "系统") -> dict[str, Any]:
         object_type="ModelCard",
         object_id=row["card_id"],
         before={"is_public": bool(row["is_public"])},
-        after={"is_public": True},
+        after={"is_public": True, "data_sheet": sheet["data_sheet_id"] if sheet else None},
         model_version=row["model_version"],
         prompt_version=row["prompt_version"],
     )
-    return {"card_id": row["card_id"], "is_public": True, "published_at": timestamp}
+    return {
+        "card_id": row["card_id"],
+        "is_public": True,
+        "published_at": timestamp,
+        "data_sheet": sheet["data_sheet_id"] if sheet else None,
+    }
 
 
 def governance_status(conn) -> dict[str, Any]:
@@ -337,6 +348,9 @@ def governance_status(conn) -> dict[str, Any]:
     model_card = conn.execute(
         "SELECT card_id, is_public, published_at FROM model_cards ORDER BY created_at DESC LIMIT 1"
     ).fetchone()
+    data_sheet = conn.execute(
+        "SELECT data_sheet_id, version, is_public, published_at FROM data_sheets ORDER BY created_at DESC LIMIT 1"
+    ).fetchone()
     return {
         "release_stage": db.get_state(conn, "release_stage", "G0_offline"),
         "emergency_stop": emergency_stop_active(conn),
@@ -351,8 +365,14 @@ def governance_status(conn) -> dict[str, Any]:
             row["approval_type"] == "ethics_and_data" and row["status"] == "approved"
             for row in approvals
         ),
+        "academic_committee_approved": any(
+            row["approval_type"] == "academic_committee" and row["status"] == "approved"
+            for row in approvals
+        ),
         "model_card": dict(model_card) if model_card else None,
         "model_card_public": bool(model_card and model_card["is_public"]),
+        "data_sheet": dict(data_sheet) if data_sheet else None,
+        "data_sheet_public": bool(data_sheet and data_sheet["is_public"]),
     }
 
 

@@ -378,6 +378,12 @@ def test_ab_report_compares_groups(conn):
 
 
 def test_g2_gate_uses_ab_and_fairness_metrics(conn):
+    register_approval(
+        conn,
+        approval_type="academic_committee",
+        approver="学术委员会",
+        note="A/B 报告审议（测试）",
+    )
     report = quality_report(conn)
     gates = evaluate_gates(conn, report, "G0_offline")
     g2 = next(g for g in gates["gates"] if g["id"] == "G2")
@@ -386,6 +392,7 @@ def test_g2_gate_uses_ab_and_fairness_metrics(conn):
     assert values["near_improvement"] is not None
     assert values["subgroup_gap"] is not None
     assert values["qwk_ai"] is not None
+    assert values["academic_committee"] == 1.0
     assert g2["status"] == "pass"
 
 
@@ -509,6 +516,12 @@ def test_p3_readiness_and_release(seeded_path, tmp_path):
         approval_type="ethics_and_data",
         approver="伦理委员会",
         note="P3 测试批准",
+    )
+    register_approval(
+        conn,
+        approval_type="academic_committee",
+        approver="学术委员会",
+        note="A/B 报告审议（P3 测试）",
     )
     publish_model_card(conn, actor="test")
     report = quality_report(conn)

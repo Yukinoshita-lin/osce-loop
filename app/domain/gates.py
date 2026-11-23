@@ -43,6 +43,7 @@ GATES = [
             ("edit_rate", "人工编辑率", "≤ 30%", 0.30, "le"),
             ("subgroup_gap", "亚组分数差", "≤ 0.15 SD", 0.15, "le"),
             ("teacher_hours", "教师评分工时下降", "≥ 40%", 0.40, "ge"),
+            ("academic_committee", "A/B 报告学术委员会审议", "通过", 1.0, "ge"),
             ("audit_replay", "审计链可回放", "100%", 1.0, "ge"),
         ],
     },
@@ -57,7 +58,7 @@ GATES = [
             ("switch_drill", "终止开关演练", "通过", 1.0, "ge"),
             ("appeal_drill", "申诉演练", "≥ 2 次", 2, "ge"),
             ("ethics", "伦理与合规批准", "通过", 1.0, "ge"),
-            ("model_card", "模型卡公开", "通过", 1.0, "ge"),
+            ("model_card", "模型卡与数据表公开", "通过", 1.0, "ge"),
         ],
     },
 ]
@@ -91,6 +92,9 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
     public_card_count = conn.execute(
         "SELECT COUNT(*) AS n FROM model_cards WHERE is_public = 1"
     ).fetchone()["n"]
+    public_sheet_count = conn.execute(
+        "SELECT COUNT(*) AS n FROM data_sheets WHERE is_public = 1"
+    ).fetchone()["n"]
     version_complete = version_stamped == ai_records and ai_records > 0
     sus_row = conn.execute("SELECT value FROM system_state WHERE key = 'sus_score'").fetchone()
     sus_score = float(sus_row["value"]) if sus_row else None
@@ -105,7 +109,11 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
         "SELECT status FROM governance_approvals WHERE approval_type = 'ethics_and_data'"
     ).fetchone()
     ethics = 1.0 if ethics_row and ethics_row["status"] == "approved" else 0.0
-    model_card_public = 1.0 if public_card_count > 0 else 0.0
+    committee_row = conn.execute(
+        "SELECT status FROM governance_approvals WHERE approval_type = 'academic_committee'"
+    ).fetchone()
+    academic_committee = 1.0 if committee_row and committee_row["status"] == "approved" else 0.0
+    model_card_public = 1.0 if public_card_count > 0 and public_sheet_count > 0 else 0.0
     cert_row = conn.execute(
         "SELECT report FROM sp_certifications ORDER BY created_at DESC LIMIT 1"
     ).fetchone()
@@ -138,6 +146,7 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
         "near_improvement": ab.get("comparison", {}).get("near_improvement"),
         "subgroup_gap": fairness.get("overall_gap_sd"),
         "teacher_hours": ab.get("comparison", {}).get("teacher_hours_reduction"),
+        "academic_committee": academic_committee,
         "switch_drill": switch_drill,
         "appeal_drill": appeal_drill,
         "ethics": ethics,

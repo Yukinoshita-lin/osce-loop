@@ -933,6 +933,7 @@ def seed_if_empty(conn) -> bool:
     _seed_reviews(conn)
     _seed_ab_reviews(conn)
     _write_model_card(conn)
+    _write_data_sheet(conn)
     for key, value in {
         "model_version": MODEL_VERSION,
         "prompt_version": PROMPT_VERSION,
@@ -1064,6 +1065,37 @@ def _seed_ab_reviews(conn) -> None:
                     db.now_iso(),
                 ),
             )
+    conn.commit()
+
+
+def _write_data_sheet(conn) -> None:
+    content = {
+        "name": "OSCE·Loop 合成演示数据集",
+        "version": "1.0",
+        "source": "合成考站、合成对话与程序生成音频；不含真实考生、患者或可识别个人信息。",
+        "attempts": 13,
+        "rubric_items": 15,
+        "labels": "gold_score 为合成人工金标准，仅用于离线评测与闸门演示。",
+        "media": "data/media/demo_chest_pain.wav 为程序生成的占位音轨，仅用于证据片段播放。",
+        "limitations": [
+            "不能用于真实高利害考试。",
+            "ASR 与评分器均为 Mock，不代表真实模型性能。",
+            "公平性亚组为合成标签，仅验证监测回路。",
+        ],
+        "retention": "演示数据随数据库重置；真实部署需按 L1–L3 分级留存策略执行。",
+    }
+    conn.execute(
+        "INSERT INTO data_sheets(data_sheet_id, version, content, is_public, published_at, created_at) "
+        "VALUES(?,?,?,?,?,?)",
+        (
+            db.new_id("ds"),
+            "1.0",
+            json.dumps(content, ensure_ascii=False),
+            0,
+            None,
+            db.now_iso(),
+        ),
+    )
     conn.commit()
 
 
