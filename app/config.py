@@ -17,6 +17,16 @@ PROMPT_VERSION = os.getenv("OSCELOOP_PROMPT_VERSION", "score-prompt-1.0")
 SP_MODEL_VERSION = os.getenv("OSCELOOP_SP_MODEL_VERSION", "mock-sp-1.0")
 SP_PROMPT_VERSION = os.getenv("OSCELOOP_SP_PROMPT_VERSION", "sp-prompt-1.0")
 
+# 评分能力提供方：默认 mock；配置 http 后走 OpenAI 兼容接口。
+# L2–L3 真实考生场景应使用私有化/专有云部署，避免音视频与转写出院/校网。
+AI_PROVIDER = os.getenv("OSCELOOP_AI_PROVIDER", "mock").strip().lower()
+AI_BASE_URL = os.getenv("OSCELOOP_AI_BASE_URL", "").strip()
+AI_API_KEY = os.getenv("OSCELOOP_AI_API_KEY", "").strip()
+AI_MODEL = os.getenv("OSCELOOP_AI_MODEL", "").strip()
+AI_TIMEOUT_SECONDS = float(os.getenv("OSCELOOP_AI_TIMEOUT_SECONDS", "30"))
+AI_MAX_RETRIES = int(os.getenv("OSCELOOP_AI_MAX_RETRIES", "1"))
+AI_FALLBACK = os.getenv("OSCELOOP_AI_FALLBACK", "mock").strip().lower()
+
 # 当前能力闸门阶段。P0 为离线历史录像，尚未进入真实考生场景。
 RELEASE_STAGE = os.getenv("OSCELOOP_RELEASE_STAGE", "G0_offline")
 
@@ -37,6 +47,7 @@ REASON_LABELS = {
     "manual_only": "该项 AI 无权限，人工评分",
     "extract_only": "AI 仅提取证据，人工评分",
     "ai_refusal": "AI 拒答（无法定位证据）",
+    "ai_degraded": "主模型不可用，兜底评分需人工确认",
     "risk_escalation": "风险等级上调，全站人工",
     "l3_human_confirmation": "L3 高利害，AI 建议必须人工确认",
 }

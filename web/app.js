@@ -31,6 +31,7 @@ const REASON_COLOR = {
   manual_only: 'blue',
   extract_only: 'blue',
   ai_refusal: 'amber',
+  ai_degraded: 'amber',
   sampling: 'muted',
 };
 
@@ -1769,6 +1770,7 @@ async function viewQuality() {
       <span class="v">${p.days} 天 · ${p.count} 场次 · 到期 ${p.expired} · ${bytesText(p.bytes)}</span>
     </div>`).join('');
   const canPurge = state.user && ['admin', 'exam_manager'].includes(state.user.role);
+  const provider = data.ai_provider || {};
   const modelCards = data.model_cards.map((c) => `
     <div class="card tight" style="margin-bottom:8px">
       <div class="card-title" style="margin-bottom:4px">${esc(c.capability)}<span class="sub">${esc(c.model_version)}</span></div>
@@ -1835,6 +1837,11 @@ async function viewQuality() {
       </div>
       <div class="card">
         <div class="card-title">AI 调用<span class="sub">网关唯一出口</span></div>
+        <div class="version-row"><span class="k">评分提供方</span><span class="v">${esc(provider.provider || 'mock-score')} · ${provider.configured ? '真实模型已配置' : '默认 Mock'}</span></div>
+        <div class="version-row"><span class="k">降级兜底</span><span class="v">${esc(provider.fallback || '未启用')}</span></div>
+        <div class="version-row"><span class="k">超时 / 重试</span><span class="v">${num(provider.timeout_seconds, 0)}s · ${provider.max_retries ?? 0} 次</span></div>
+        ${provider.reason ? `<div class="tiny muted" style="color:var(--amber)">${esc(provider.reason)}</div>` : ''}
+        <div class="sep"></div>
         <div class="version-row"><span class="k">调用次数</span><span class="v">${data.ai_calls.count}</span></div>
         <div class="version-row"><span class="k">P95 延迟</span><span class="v">${num(data.ai_calls.p95_latency_ms, 2)} ms</span></div>
         <div class="version-row"><span class="k">平均延迟</span><span class="v">${num(data.ai_calls.avg_latency_ms, 2)} ms</span></div>

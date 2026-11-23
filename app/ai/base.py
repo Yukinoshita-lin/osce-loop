@@ -33,13 +33,22 @@ class Suggestion:
 
 
 class CapabilityGateway:
-    """所有 AI 调用的唯一入口：版本绑定、证据强制、耗时与状态留痕。"""
+    """所有 AI 调用的唯一入口：版本绑定、证据强制、降级兜底、耗时与状态留痕。"""
 
-    def __init__(self, conn, provider, model_version: str, prompt_version: str):
+    def __init__(
+        self,
+        conn,
+        provider,
+        model_version: str,
+        prompt_version: str,
+        *,
+        fallback_provider=None,
+    ):
         self.conn = conn
         self.provider = provider
         self.model_version = model_version
         self.prompt_version = prompt_version
+        self.fallback_provider = fallback_provider
 
     def score_item(
         self,
@@ -49,22 +58,59 @@ class CapabilityGateway:
         attempt_meta: dict[str, Any],
         subject_ref: str,
     ) -> dict[str, Any]:
-        return self._invoke(
-            "score.suggest",
-            lambda: self.provider.score_item(
+        def primary():
+            return self.provider.score_item(
                 item=item,
                 transcript=transcript,
                 attempt_meta=attempt_meta,
-            ),
+            )
+
+        def fallback():
+            return self.fallback_provider.score_item(
+                item=item,
+                transcript=transcript,
+                attempt_meta=attempt_meta,
+            )
+
+        return self._invoke(
+            "score.suggest",
+            primary,
             subject_ref=subject_ref,
             require_evidence=True,
+            fallback_fn=fallback if self.fallback_provider else None,
         )
 
-    def _invoke(self, capability: str, fn, *, subject_ref: str, require_evidence: bool = False) -> dict[str, Any]:
+    def _invoke(
+        self,
+        capability: str,
+        fn,
+        *,
+        subject_ref: str,
+        require_evidence: bool = False,
+        fallback_fn=None,
+    ) -> dict[str, Any]:
         started = time.perf_counter()
         status = "ok"
+        used_model = self.model_version
+        used_prompt = self.prompt_version
+        detail: dict[str, Any] = {}
         try:
-            output = fn()
+            try:
+                output = fn()
+            except Exception as exc:
+                if fallback_fn is None:
+                    raise
+                output = fallback_fn()
+                status = "degraded"
+                used_model = getattr(self.fallback_provider, "model_version", self.model_version)
+                used_prompt = getattr(self.fallback_provider, "prompt_version", self.prompt_version)
+                detail.update(
+                    {
+                        "primary_error": str(exc),
+                        "primary_model_version": self.model_version,
+                        "fallback": getattr(self.fallback_provider, "name", "fallback"),
+                    }
+                )
             if require_evidence and isinstance(output, Suggestion):
                 if output.score is not None and not output.evidence:
                     output.refusal = True
@@ -73,8 +119,6 @@ class CapabilityGateway:
                     output.confidence = None
                     status = "refused_no_evidence"
         except Exception as exc:  # 网关兜底：任何模型异常都降级到人工
-            output = None
-            status = "error"
             db.log_ai_call(
                 self.conn,
                 capability=capability,
@@ -82,13 +126,13 @@ class CapabilityGateway:
                 prompt_version=self.prompt_version,
                 subject_ref=subject_ref,
                 latency_ms=(time.perf_counter() - started) * 1000,
-                status=status,
+                status="error",
                 detail={"error": str(exc)},
             )
             raise
 
         latency_ms = (time.perf_counter() - started) * 1000
-        detail: dict[str, Any] = {"status": status}
+        detail.update({"status": status})
         if isinstance(output, Suggestion):
             detail.update(
                 {
@@ -102,8 +146,8 @@ class CapabilityGateway:
         db.log_ai_call(
             self.conn,
             capability=capability,
-            model_version=self.model_version,
-            prompt_version=self.prompt_version,
+            model_version=used_model,
+            prompt_version=used_prompt,
             subject_ref=subject_ref,
             latency_ms=latency_ms,
             status=status,
@@ -111,9 +155,10 @@ class CapabilityGateway:
         )
         return {
             "status": status,
+            "degraded": status == "degraded",
             "output": output,
-            "model_version": self.model_version,
-            "prompt_version": self.prompt_version,
+            "model_version": used_model,
+            "prompt_version": used_prompt,
             "latency_ms": round(latency_ms, 2),
         }
 

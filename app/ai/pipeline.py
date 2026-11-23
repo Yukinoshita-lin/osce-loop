@@ -27,6 +27,23 @@ def _item_disagreement(conn, bundle_hash: str) -> dict[str, float]:
     }
 
 
+def _mark_degraded(routing: dict[str, Any], response: dict[str, Any]) -> dict[str, Any]:
+    """主模型失败并启用兜底时，任何分数都必须回到人工确认。"""
+    if not response.get("degraded"):
+        return routing
+    reasons = list(dict.fromkeys([*(routing.get("reasons") or []), "ai_degraded"]))
+    routing.update(
+        {
+            "requires_human": True,
+            "route": "manual",
+            "reason": "ai_degraded",
+            "reasons": reasons,
+            "reason_text": "主评分模型不可用，已使用兜底评分，必须人工确认",
+        }
+    )
+    return routing
+
+
 def _weighted_total(items: list[dict[str, Any]], scores: dict[str, int | None]) -> float | None:
     earned = 0.0
     total_weight = 0.0
@@ -146,6 +163,7 @@ def run_scoring(
                 "reason_text": "AI 仅提取证据，人工评分",
                 "detail": {},
             }
+            _mark_degraded(routing, response)
             if suggestion and suggestion.score is not None and not json.loads(evidence_json or "[]"):
                 raise ValueError(f"{item_id}: 仅提取证据模式缺少 evidence")
             conn.execute(
@@ -170,6 +188,7 @@ def run_scoring(
                 "reason_text": (suggestion.refusal_reason if suggestion else None) or "AI 仅提取证据，人工评分",
                 "detail": {},
             }
+            _mark_degraded(routing, response)
             status = "manual_pending" if authority == "extract" else "pending_review"
             evidence_json = evidence_to_json(suggestion.evidence) if suggestion else "[]"
             rationale = (suggestion.rationale if suggestion else "") or "AI 未给出分数，转人工。"
@@ -200,6 +219,7 @@ def run_scoring(
             appeal=bool(attempt.get("appeal")),
             item_disagreement_rate=disagreement.get(item_id, 0.0),
         )
+        _mark_degraded(routing, response)
         evidence_json = evidence_to_json(suggestion.evidence)
         _assert_schema(evidence_json, response, item_id, allow_null_score=False)
         auto = not routing["requires_human"]

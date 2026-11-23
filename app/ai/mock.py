@@ -22,6 +22,8 @@ class MockScoringProvider:
     """规则证据提取器。刻意保留转写/同义词遗漏，以便暴露人机分歧。"""
 
     name = "mock-score"
+    model_version = "mock-score-1.0"
+    prompt_version = "score-prompt-1.0"
 
     def score_item(
         self,

@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from . import db
 from .ai.base import CapabilityGateway
-from .ai.mock import MockScoringProvider
+from .ai.factory import build_scoring_provider, scoring_provider_info
 from .config import (
     MEDIA_DIR,
     MODEL_VERSION,
@@ -385,6 +385,7 @@ def _priority(routing: dict[str, Any]) -> int:
     order = {
         "risk_escalation": 0,
         "integrity_gap": 0,
+        "ai_degraded": 1,
         "critical_negative": 1,
         "near_cutoff": 2,
         "l3_human_confirmation": 2,
@@ -515,11 +516,13 @@ async def ingest_attempt(
     media = await _save_media(media_file)
     code = candidate_code.strip() or f"C-UPLOAD-{db.new_id('cu')[-6:].upper()}"
     name = candidate_name.strip() or "未命名考生"
+    provider_bundle = build_scoring_provider()
     gateway = CapabilityGateway(
         conn,
-        MockScoringProvider(),
-        db.get_state(conn, "model_version", MODEL_VERSION),
-        db.get_state(conn, "prompt_version", PROMPT_VERSION),
+        provider_bundle.primary,
+        provider_bundle.model_version,
+        provider_bundle.prompt_version,
+        fallback_provider=provider_bundle.fallback,
     )
     attempt_id = create_ingested_attempt(
         conn,
@@ -1023,6 +1026,7 @@ def quality(conn=Depends(get_conn)):
         "ab": ab_report(conn),
         "latest_self_check": latest_self_check(conn),
         "governance": governance_status(conn),
+        "ai_provider": scoring_provider_info(),
         "versions": {
             "model": db.get_state(conn, "model_version", MODEL_VERSION),
             "prompt": db.get_state(conn, "prompt_version", PROMPT_VERSION),
