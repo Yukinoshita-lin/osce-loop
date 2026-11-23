@@ -339,7 +339,10 @@ def test_practice_report_has_three_part_feedback(bundle):
 
 
 def test_gate_g1_uses_sp_certification(conn):
-    ensure_certification(conn)
+    bundle_row = conn.execute(
+        "SELECT bundle_id FROM bundles ORDER BY frozen_at DESC, rowid DESC LIMIT 1"
+    ).fetchone()
+    certify_bundle(conn, get_bundle(conn, bundle_row["bundle_id"]), actor="test")
     report = quality_report(conn)
     gates = evaluate_gates(conn, report, "G0_offline")
     g1 = next(g for g in gates["gates"] if g["id"] == "G1")
@@ -524,6 +527,10 @@ def test_p3_readiness_and_release(seeded_path, tmp_path):
         note="A/B 报告审议（P3 测试）",
     )
     publish_model_card(conn, actor="test")
+    bundle_row = conn.execute(
+        "SELECT bundle_id FROM bundles ORDER BY frozen_at DESC, rowid DESC LIMIT 1"
+    ).fetchone()
+    certify_bundle(conn, get_bundle(conn, bundle_row["bundle_id"]), actor="test")
     report = quality_report(conn)
     gates = evaluate_gates(conn, report, "G0_offline")
     g3 = next(g for g in gates["gates"] if g["id"] == "G3")
@@ -536,7 +543,7 @@ def test_p3_readiness_and_release(seeded_path, tmp_path):
     )
     assert result["new_stage"] == "G3_limited"
     assert db.get_state(conn, "release_stage") == "G3_limited"
-    bundle = get_bundle(conn, conn.execute("SELECT bundle_id FROM bundles LIMIT 1").fetchone()["bundle_id"])
+    bundle = get_bundle(conn, bundle_row["bundle_id"])
     item = next(i for i in bundle["payload"]["rubric"] if i["item_id"] == "HX.01")
     assert effective_authority(conn, bundle, item, "L3", "G3_limited") == "suggest"
     critical = next(i for i in bundle["payload"]["rubric"] if i["item_id"] == "HX.04")

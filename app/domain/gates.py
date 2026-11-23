@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 from .ab import ab_report
+from .bundle import list_bundles
 from .fairness import fairness_report
 
 GATES = [
@@ -114,9 +115,21 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
     ).fetchone()
     academic_committee = 1.0 if committee_row and committee_row["status"] == "approved" else 0.0
     model_card_public = 1.0 if public_card_count > 0 and public_sheet_count > 0 else 0.0
-    cert_row = conn.execute(
-        "SELECT report FROM sp_certifications ORDER BY created_at DESC LIMIT 1"
-    ).fetchone()
+    bundles = list_bundles(conn)
+    current_bundle = bundles[0] if bundles else None
+    sp_cert_issue = None
+    cert_row = None
+    if current_bundle:
+        cert_row = conn.execute(
+            "SELECT report, persona_version FROM sp_certifications WHERE bundle_id = ? "
+            "ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            (current_bundle["bundle_id"],),
+        ).fetchone()
+        if not cert_row:
+            sp_cert_issue = "missing"
+        elif cert_row["persona_version"] != current_bundle["bundle_hash"]:
+            sp_cert_issue = "stale"
+            cert_row = None
     sp_cert = json.loads(cert_row["report"]) if cert_row else None
     sp_fact_error = None
     sp_persona_pass = None
@@ -142,7 +155,8 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
         "persona_pass": sp_persona_pass,
         "p95_latency": sp_p95_latency,
         "sus": sus_score,
-        "p0_incidents": sp_p0 if sp_p0 is not None else 0,
+        "p0_incidents": sp_p0,
+        "sp_cert_issue": sp_cert_issue,
         "near_improvement": ab.get("comparison", {}).get("near_improvement"),
         "subgroup_gap": fairness.get("overall_gap_sd"),
         "teacher_hours": ab.get("comparison", {}).get("teacher_hours_reduction"),
@@ -216,6 +230,22 @@ def evaluate_gates(conn, report: dict[str, Any], current_stage: str) -> dict[str
                 "level": "danger",
                 "title": "证据链缺口比例超限",
                 "detail": f"integrity_gap 比例 {report['integrity_gap_rate']:.1%} > 2%，相关场次应全站人工复核。",
+            }
+        )
+    if values.get("sp_cert_issue") == "missing":
+        alerts.append(
+            {
+                "level": "danger",
+                "title": "当前站包尚未完成 SP 认证",
+                "detail": "站包改版或首次部署后必须重新运行红队与一致性抽测；G1 的 SP 指标按未采集处理。",
+            }
+        )
+    elif values.get("sp_cert_issue") == "stale":
+        alerts.append(
+            {
+                "level": "danger",
+                "title": "SP 认证未覆盖当前 persona_version",
+                "detail": "认证仍绑定旧 persona_version，G1 的 SP 指标按未采集处理；需重新运行红队与一致性抽测。",
             }
         )
     overrides = conn.execute("SELECT COUNT(*) AS n FROM authority_overrides").fetchone()["n"]

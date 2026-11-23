@@ -79,7 +79,7 @@ from .domain.scheduling import (
     schedule_inputs,
 )
 from .domain.slots import DialogueStateMachine, SPController
-from .domain.spqa import certify_bundle, ensure_certification, latest_certification
+from .domain.spqa import certification_for_bundle, certify_bundle, ensure_certification
 from .domain.stats import domain_scores, quality_report
 from .domain.transcript import parse_transcript
 from .seed import apply_startup_governance, seed_if_empty
@@ -1002,6 +1002,7 @@ def feedback(attempt_id: str, request: Request, conn=Depends(get_conn)):
 @app.get("/api/quality")
 def quality(conn=Depends(get_conn)):
     report = quality_report(conn)
+    bundles_list = list_bundles(conn)
     gates = evaluate_gates(conn, report, _stage(conn))
     model_cards = db.rows_to_dicts(conn.execute("SELECT * FROM model_cards ORDER BY created_at DESC").fetchall())
     for card in model_cards:
@@ -1021,7 +1022,9 @@ def quality(conn=Depends(get_conn)):
             "by_status": _count_by(calls, "status"),
         },
         "overrides": list_overrides(conn),
-        "sp_certification": latest_certification(conn),
+        "sp_certification": certification_for_bundle(conn, bundles_list[0])
+        if bundles_list
+        else None,
         "fairness": fairness_report(conn),
         "ab": ab_report(conn),
         "latest_self_check": latest_self_check(conn),
@@ -1393,7 +1396,7 @@ def sp_persona(bundle_id: str | None = None, conn=Depends(get_conn)):
             for p in bundle["derived"].get("phase_order", [])
         ],
         "slots": masked_slots,
-        "certification": latest_certification(conn, bundle["bundle_id"]),
+        "certification": certification_for_bundle(conn, bundle),
     }
 
 

@@ -97,7 +97,7 @@ def get_bundle(conn, bundle_id: str) -> dict[str, Any] | None:
 
 
 def list_bundles(conn) -> list[dict[str, Any]]:
-    rows = conn.execute("SELECT * FROM bundles ORDER BY frozen_at DESC").fetchall()
+    rows = conn.execute("SELECT * FROM bundles ORDER BY frozen_at DESC, rowid DESC").fetchall()
     return [get_bundle(conn, row["bundle_id"]) for row in rows]
 
 

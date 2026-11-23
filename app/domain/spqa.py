@@ -290,7 +290,10 @@ def run_certification(bundle: dict[str, Any]) -> dict[str, Any]:
         "bundle_id": bundle["bundle_id"],
         "station_title": bundle["payload"].get("title"),
         "persona_version": bundle["bundle_hash"],
+        "current_persona_version": bundle["bundle_hash"],
         "status": status,
+        "valid": status == "certified",
+        "stale": False,
         "checks": checks,
         "red_team": red_team,
         "consistency": consistency,
@@ -336,31 +339,58 @@ def certify_bundle(conn, bundle: dict[str, Any], actor: str = "SP 认证员") ->
     return report
 
 
-def latest_certification(conn, bundle_id: str | None = None) -> dict[str, Any] | None:
-    if bundle_id:
-        row = conn.execute(
-            "SELECT * FROM sp_certifications WHERE bundle_id = ? ORDER BY created_at DESC LIMIT 1",
-            (bundle_id,),
-        ).fetchone()
-    else:
-        row = conn.execute(
-            "SELECT * FROM sp_certifications ORDER BY created_at DESC LIMIT 1"
-        ).fetchone()
-    if not row:
-        return None
+def _attach_persona_state(conn, row) -> dict[str, Any]:
     data = json.loads(row["report"])
     data["cert_id"] = row["cert_id"]
     data["actor"] = row["actor"]
     data["status"] = row["status"]
     data["created_at"] = row["created_at"]
+    data["persona_version"] = row["persona_version"]
+    bundle_row = conn.execute(
+        "SELECT bundle_hash FROM bundles WHERE bundle_id = ?", (row["bundle_id"],)
+    ).fetchone()
+    current_hash = bundle_row["bundle_hash"] if bundle_row else None
+    data["current_persona_version"] = current_hash
+    data["stale"] = bool(current_hash and row["persona_version"] != current_hash)
+    data["valid"] = data["status"] == "certified" and not data["stale"]
     return data
 
 
+def latest_certification(conn, bundle_id: str | None = None) -> dict[str, Any] | None:
+    if bundle_id:
+        row = conn.execute(
+            "SELECT * FROM sp_certifications WHERE bundle_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            (bundle_id,),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT * FROM sp_certifications ORDER BY created_at DESC, rowid DESC LIMIT 1"
+        ).fetchone()
+    if not row:
+        return None
+    return _attach_persona_state(conn, row)
+
+
+def certification_for_bundle(conn, bundle: dict[str, Any]) -> dict[str, Any] | None:
+    cert = latest_certification(conn, bundle["bundle_id"])
+    if not cert:
+        return None
+    cert["stale"] = cert["persona_version"] != bundle["bundle_hash"]
+    cert["current_persona_version"] = bundle["bundle_hash"]
+    cert["valid"] = cert["status"] == "certified" and not cert["stale"]
+    return cert
+
+
 def ensure_certification(conn) -> dict[str, Any] | None:
-    existing = latest_certification(conn)
-    if existing:
-        return existing
     bundles = list_bundles(conn)
     if not bundles:
         return None
-    return certify_bundle(conn, bundles[0], actor="系统初始化认证")
+    bundle = bundles[0]
+    existing = certification_for_bundle(conn, bundle)
+    if existing and existing["valid"]:
+        return existing
+    has_any = conn.execute("SELECT COUNT(*) AS n FROM sp_certifications").fetchone()["n"]
+    if has_any:
+        # 站包版本变更后不自动重发认证，必须由人重新跑红队与一致性抽测。
+        return existing
+    return certify_bundle(conn, bundle, actor="系统初始化认证")

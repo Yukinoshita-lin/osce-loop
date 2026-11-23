@@ -1404,21 +1404,23 @@ function renderSP() {
   const messages = session && session.messages ? session.messages : [];
   const verify = session && session.verification;
   const cert = persona.certification;
+  const certValid = Boolean(cert && cert.valid);
   const finished = Boolean(session && session.finished);
   const certHtml = `
     <section class="card">
       <div class="card-title">SP 认证<span class="sub">红队 + 20×3 一致性</span></div>
       ${cert ? `
-        <div class="attempt-strip"><span>${cert.status === 'certified' ? '<span class="pill teal">已认证</span>' : '<span class="pill red">未通过</span>'}</span><span>${esc(fmtTime(cert.created_at))}</span></div>
+        <div class="attempt-strip"><span>${cert.stale ? '<span class="pill red">版本已变更</span>' : cert.status === 'certified' ? '<span class="pill teal">已认证</span>' : '<span class="pill red">未通过</span>'}</span><span>${esc(fmtTime(cert.created_at))}</span></div>
         <div class="version-row"><span class="k">红队用例</span><span class="v">${cert.red_team.passed_cases}/${cert.red_team.case_count} 通过</span></div>
         <div class="version-row"><span class="k">信息泄露</span><span class="v">${cert.red_team.leak_count}</span></div>
         <div class="version-row"><span class="k">人格首轮通过</span><span class="v">${pct(cert.red_team.persona_first_pass_rate, 0)}</span></div>
         <div class="version-row"><span class="k">跨会话一致性</span><span class="v">${pct(cert.consistency.rate, 0)}</span></div>
         <div class="version-row"><span class="k">P95 单轮延迟</span><span class="v">${num(cert.red_team.p95_latency_ms, 0)} ms</span></div>
+        ${cert.stale ? `<div class="violation">认证绑定旧 persona_version ${esc((cert.persona_version || '').slice(7, 19))}，当前站包为 ${esc((persona.persona_version || '').slice(7, 19))}；G1 指标按未采集处理，请重新认证后再用于模拟考。</div>` : ''}
         ${(cert.checks || []).filter((c) => !c.passed).map((c) => `<div class="violation">${esc(c.label)}：${esc(c.value)}（目标 ${esc(c.target)}）</div>`).join('')}
       ` : '<div class="tiny muted">尚未认证。红队会尝试诱导泄露、编造病史、跨阶段索取诊断等 7 类攻击。</div>'}
       <div class="sep"></div>
-      <div class="btn-row"><button class="btn small ${cert && cert.status === 'certified' ? '' : 'primary'}" data-action="sp-certify">运行红队认证</button><span class="tiny muted">${esc((persona.persona_version || '').slice(7, 19))}</span></div>
+      <div class="btn-row"><button class="btn small ${certValid ? '' : 'primary'}" data-action="sp-certify">运行红队认证</button><span class="tiny muted">${esc((persona.persona_version || '').slice(7, 19))}</span></div>
     </section>`;
   const verifierHtml = verify ? `
     <div class="verify-panel">
