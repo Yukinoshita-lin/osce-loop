@@ -47,6 +47,8 @@ const state = {
   reviewScore: null,
   reviewStartedAt: 0,
   sp: null,
+  spBundleId: null,
+  spStations: [],
   feedbackId: null,
   bundleCurrent: null,
   bundlePayload: null,
@@ -762,12 +764,15 @@ const SAMPLE_TRANSCRIPT = [
 ];
 
 async function viewIngest() {
-  const bundles = await api('/api/bundles');
-  if (!bundles.length) {
+  const stationData = await api('/api/bundles/stations');
+  const stations = stationData.stations || [];
+  if (!stations.length) {
     $('#view').innerHTML = '<div class="empty">尚无冻结站包，无法录入</div>';
     return;
   }
-  const bundle = bundles[0];
+  const stationOptions = stations
+    .map((s) => `<option value="${dataAttr(s.bundle_id)}">${esc(s.station_id)} · ${esc(s.title)} · v${esc(s.version)}</option>`)
+    .join('');
   $('#view').innerHTML = `
     <div class="view-head">
       <div>
@@ -789,17 +794,20 @@ async function viewIngest() {
           <li>评分提供方与超时/降级配置可在「质量与闸门」查看；Mock 为默认演示模式。</li>
         </ul>
         <div class="sep"></div>
-        <div class="card-title" style="margin-bottom:5px">当前站包</div>
-        <div class="version-row"><span class="k">${esc(bundle.station_id)}</span><span class="v">v${esc(bundle.version)}</span></div>
-        <div class="small dim">${esc(bundle.title)}</div>
+        <div class="card-title" style="margin-bottom:5px">可选考站<span class="sub">${stations.length} 个</span></div>
+        ${stations.map((s) => `
+          <div class="version-row"><span class="k">${esc(s.station_id)}</span><span class="v">v${esc(s.version)}</span></div>
+          <div class="small dim" style="margin-bottom:6px">${esc(s.title)}</div>`).join('')}
         <div class="sep"></div>
         <div class="tiny muted">JSON 样例字段：speaker / start_ms / end_ms / text；可选 phase 与 asr_confidence。</div>
       </div>
       <div class="card">
         <div class="card-title">上传与评分<span class="sub">录入后自动进入复核队列</span></div>
         <form id="ingest-form">
-          <input type="hidden" name="bundle_id" value="${dataAttr(bundle.bundle_id)}">
-          <div class="grid c2">
+          <label class="field">考站
+            <select class="input" name="bundle_id" required>${stationOptions}</select>
+          </label>
+          <div class="grid c2" style="margin-top:10px">
             <label class="field">考生编号
               <input class="input" name="candidate_code" value="C2026-UPLOAD" maxlength="40">
             </label>
@@ -1461,8 +1469,14 @@ async function renderFeedback(attemptId) {
 }
 
 /* ---------- SP ---------- */
-async function viewSP() {
-  const persona = await api('/api/sp/persona');
+async function viewSP(bundleId = state.spBundleId || '') {
+  const query = bundleId ? `?bundle_id=${encodeURIComponent(bundleId)}` : '';
+  const [persona, stationData] = await Promise.all([
+    api(`/api/sp/persona${query}`),
+    api('/api/bundles/stations'),
+  ]);
+  state.spBundleId = persona.bundle_id;
+  state.spStations = stationData.stations || [];
   if (!state.sp || state.sp.persona.bundle_id !== persona.bundle_id) {
     state.sp = { persona, session: null };
     await createSpSession();
@@ -1501,6 +1515,9 @@ function renderSP() {
   const cert = persona.certification;
   const certValid = Boolean(cert && cert.valid);
   const finished = Boolean(session && session.finished);
+  const stationOptions = (state.spStations || [])
+    .map((s) => `<option value="${dataAttr(s.bundle_id)}" ${s.bundle_id === persona.bundle_id ? 'selected' : ''}>${esc(s.station_id)} · ${esc(s.title)} · v${esc(s.version)}</option>`)
+    .join('');
   const certHtml = `
     <section class="card">
       <div class="card-title">SP 认证<span class="sub">红队 + 20×3 一致性</span></div>
@@ -1536,7 +1553,10 @@ function renderSP() {
         <h2>SP 演练</h2>
         <p>“说什么”由确定性状态机维护信息槽；“怎么说”交给生成器；独立验证器只做三件事：人格保真、信息边界、临床合理。</p>
       </div>
-      <div class="btn-row"><button class="btn" data-action="sp-new">开始新会话</button></div>
+      <div class="btn-row">
+        <select class="input" id="sp-station" style="max-width:320px" aria-label="选择考站">${stationOptions}</select>
+        <button class="btn" data-action="sp-new">开始新会话</button>
+      </div>
     </div>
     <div class="sp-layout">
       <div style="display:flex;flex-direction:column;gap:12px">
@@ -1614,6 +1634,14 @@ function renderSP() {
       const text = (input.value || '').trim();
       if (!text) return;
       await sendSpMessage(text);
+    });
+  }
+  const stationSelect = $('#sp-station');
+  if (stationSelect) {
+    stationSelect.addEventListener('change', async (e) => {
+      state.spBundleId = e.target.value;
+      state.sp = null;
+      await viewSP(e.target.value);
     });
   }
 }

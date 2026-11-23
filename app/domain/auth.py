@@ -242,6 +242,8 @@ def rbac_allowed(method: str, path: str, role: str) -> bool:
             return role in ("exam_manager", "auditor")
         if path.startswith("/api/overview"):
             return role in ("exam_manager", "examiner", "auditor")
+        if path == "/api/bundles/stations":
+            return role in ("student", "examiner", "exam_manager", "auditor")
         if path.startswith("/api/bundles"):
             return role in ("exam_manager", "examiner", "auditor")
         if path.startswith("/api/ops/"):

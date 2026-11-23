@@ -203,6 +203,23 @@ def list_bundles(conn) -> list[dict[str, Any]]:
     return [get_bundle(conn, row["bundle_id"]) for row in rows]
 
 
+def list_station_bundles(conn) -> list[dict[str, Any]]:
+    """每个考站只保留最新冻结版本，供录入与 SP 演练选择。"""
+    latest: dict[str, dict[str, Any]] = {}
+    for bundle in list_bundles(conn):
+        if bundle["station_id"] in latest:
+            continue
+        latest[bundle["station_id"]] = {
+            "bundle_id": bundle["bundle_id"],
+            "station_id": bundle["station_id"],
+            "title": bundle["title"],
+            "version": bundle["version"],
+            "bundle_hash": bundle["bundle_hash"],
+            "frozen_at": bundle["frozen_at"],
+        }
+    return list(latest.values())
+
+
 def get_override(conn, bundle_id: str, item_id: str) -> dict[str, Any] | None:
     row = conn.execute(
         "SELECT * FROM authority_overrides WHERE bundle_id = ? AND item_id = ?",

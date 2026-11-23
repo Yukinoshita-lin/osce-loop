@@ -58,6 +58,7 @@ from .domain.bundle import (
     get_bundle,
     list_bundles,
     list_overrides,
+    list_station_bundles,
 )
 from .domain.calibration import calibration_report, import_gold_scores, parse_gold_file
 from .domain.export import build_attempt_package
@@ -1101,6 +1102,11 @@ def bundles(conn=Depends(get_conn)):
         }
         for b in list_bundles(conn)
     ]
+
+
+@app.get("/api/bundles/stations")
+def bundle_stations(conn=Depends(get_conn)):
+    return {"stations": list_station_bundles(conn)}
 
 
 @app.get("/api/bundles/{bundle_id}")

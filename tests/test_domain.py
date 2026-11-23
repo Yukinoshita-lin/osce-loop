@@ -16,6 +16,7 @@ from app.domain.bundle import (
     effective_authority,
     freeze_bundle,
     get_bundle,
+    list_station_bundles,
 )
 from app.domain.rubric import (
     cap_authority,
@@ -324,6 +325,32 @@ def test_freeze_enforces_version_discipline(seeded_path, tmp_path):
         bad_version["title"] = bad_version["title"] + "（非法版本）"
         with pytest.raises(ValueError, match="格式"):
             freeze_bundle(conn, bad_version, actor="test", version="v2")
+    finally:
+        conn.close()
+
+
+def test_list_station_bundles_keeps_latest_per_station(seeded_path, tmp_path):
+    path = tmp_path / "stations.db"
+    shutil.copy(seeded_path, path)
+    conn = db.connect(path)
+    try:
+        payload = build_bundle_payload()
+        first = freeze_bundle(conn, payload, actor="test", version="1.0")
+        revised = copy.deepcopy(payload)
+        revised["title"] = revised["title"] + "（第二版）"
+        second = freeze_bundle(
+            conn, revised, actor="test", version="2.0", supersedes=first["bundle_id"], reason="修订"
+        )
+        other = copy.deepcopy(payload)
+        other["station_id"] = "ST-OTHER-001"
+        other["title"] = "其他考站"
+        other_bundle = freeze_bundle(conn, other, actor="test", version="1.0")
+
+        stations = {item["station_id"]: item for item in list_station_bundles(conn)}
+        assert set(stations) == {"ST-CARDIO-001", "ST-OTHER-001"}
+        assert stations["ST-CARDIO-001"]["bundle_id"] == second["bundle_id"]
+        assert stations["ST-CARDIO-001"]["version"] == "2.0"
+        assert stations["ST-OTHER-001"]["bundle_id"] == other_bundle["bundle_id"]
     finally:
         conn.close()
 
