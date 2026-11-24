@@ -153,9 +153,12 @@ from .domain.schedule_policy import (
     presets_payload,
 )
 from .domain.scheduling import (
+    add_blackout,
+    delete_blackout,
     ensure_schedule_inputs,
     generate_schedule,
     latest_schedule,
+    list_blackouts,
     repair_schedule,
     schedule_inputs,
 )
@@ -2110,6 +2113,51 @@ def ab(conn=Depends(get_conn)):
 def get_schedule_inputs(conn=Depends(get_conn)):
     ensure_schedule_inputs(conn)
     return schedule_inputs(conn)
+
+
+class ScheduleBlackoutBody(BaseModel):
+    station_id: str = Field(min_length=1, max_length=40)
+    from_round: int = Field(ge=1, le=50)
+    to_round: int = Field(ge=1, le=50)
+    reason: str = Field(min_length=4, max_length=200)
+
+
+@app.get("/api/schedule/blackouts")
+def get_schedule_blackouts(conn=Depends(get_conn)):
+    ensure_schedule_inputs(conn)
+    return {"blackouts": list_blackouts(conn)}
+
+
+@app.post("/api/schedule/blackouts")
+def create_schedule_blackout(
+    body: ScheduleBlackoutBody, request: Request, conn=Depends(get_conn)
+):
+    ensure_schedule_inputs(conn)
+    try:
+        blackout = add_blackout(
+            conn,
+            station_id=body.station_id,
+            from_round=body.from_round,
+            to_round=body.to_round,
+            reason=body.reason,
+            actor=request.state.user["display_name"],
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "blackout": blackout, "blackouts": list_blackouts(conn)}
+
+
+@app.delete("/api/schedule/blackouts/{blackout_id}")
+def remove_schedule_blackout(
+    blackout_id: str, request: Request, conn=Depends(get_conn)
+):
+    try:
+        removed = delete_blackout(
+            conn, blackout_id, actor=request.state.user["display_name"]
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "removed": removed, "blackouts": list_blackouts(conn)}
 
 
 class ScheduleBody(BaseModel):

@@ -44,6 +44,129 @@ EQUIPMENT_COUNTS = {
     "出院小结": 1,
 }
 FATIGUE_LIMIT_MIN = 240
+MIN_BLACKOUT_REASON = 4
+MAX_BLACKOUT_REASON = 200
+
+
+def list_blackouts(conn) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        "SELECT * FROM schedule_blackouts ORDER BY from_round, station_id, created_at"
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def add_blackout(
+    conn,
+    *,
+    station_id: str,
+    from_round: int,
+    to_round: int,
+    reason: str,
+    actor: str = "考务编排",
+) -> dict[str, Any]:
+    """登记考站在若干轮次不可用（考官请假、场地占用等），生成排考时强制避开。"""
+    station = conn.execute(
+        "SELECT station_id FROM schedule_stations WHERE station_id = ?", (station_id,)
+    ).fetchone()
+    if not station:
+        raise ValueError("考站不存在")
+    try:
+        from_round = int(from_round)
+        to_round = int(to_round)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("不可用轮次必须是整数") from exc
+    if from_round < 1 or to_round < 1 or to_round < from_round:
+        raise ValueError("不可用轮次范围不合法，需满足 1 ≤ 开始轮次 ≤ 结束轮次")
+    if to_round > 50:
+        raise ValueError("不可用轮次不能超过 50")
+    reason = (reason or "").strip()
+    if len(reason) < MIN_BLACKOUT_REASON:
+        raise ValueError(f"不可用原因不少于 {MIN_BLACKOUT_REASON} 字")
+    if len(reason) > MAX_BLACKOUT_REASON:
+        raise ValueError(f"不可用原因不能超过 {MAX_BLACKOUT_REASON} 字")
+    overlap = conn.execute(
+        "SELECT blackout_id FROM schedule_blackouts "
+        "WHERE station_id = ? AND NOT (to_round < ? OR from_round > ?)",
+        (station_id, from_round, to_round),
+    ).fetchone()
+    if overlap:
+        raise ValueError("该考站在所选轮次已有不可用记录，请先删除或调整范围")
+    blackout_id = db.new_id("blk")
+    created_at = db.now_iso()
+    conn.execute(
+        "INSERT INTO schedule_blackouts(blackout_id, station_id, from_round, to_round, "
+        "reason, actor, created_at) VALUES(?,?,?,?,?,?,?)",
+        (blackout_id, station_id, from_round, to_round, reason, actor, created_at),
+    )
+    conn.commit()
+    db.append_audit(
+        conn,
+        actor=actor,
+        action="exam.schedule_blackout_add",
+        object_type="ScheduleBlackout",
+        object_id=blackout_id,
+        before=None,
+        after={
+            "station_id": station_id,
+            "from_round": from_round,
+            "to_round": to_round,
+            "reason": reason,
+        },
+    )
+    return {
+        "blackout_id": blackout_id,
+        "station_id": station_id,
+        "from_round": from_round,
+        "to_round": to_round,
+        "reason": reason,
+        "actor": actor,
+        "created_at": created_at,
+    }
+
+
+def delete_blackout(conn, blackout_id: str, *, actor: str = "考务编排") -> dict[str, Any]:
+    row = conn.execute(
+        "SELECT * FROM schedule_blackouts WHERE blackout_id = ?", (blackout_id,)
+    ).fetchone()
+    if not row:
+        raise ValueError("不可用时段记录不存在")
+    conn.execute("DELETE FROM schedule_blackouts WHERE blackout_id = ?", (blackout_id,))
+    conn.commit()
+    db.append_audit(
+        conn,
+        actor=actor,
+        action="exam.schedule_blackout_delete",
+        object_type="ScheduleBlackout",
+        object_id=blackout_id,
+        before=dict(row),
+        after=None,
+    )
+    return dict(row)
+
+
+def blackouts_by_round(conn, rounds: int) -> dict[int, set[str]]:
+    """返回每一轮被封锁的考站集合，供生成与修复共用。"""
+    mapping: dict[int, set[str]] = {}
+    for row in list_blackouts(conn):
+        start = max(1, int(row["from_round"]))
+        end = min(int(rounds), int(row["to_round"]))
+        for round_no in range(start, end + 1):
+            mapping.setdefault(round_no, set()).add(row["station_id"])
+    return mapping
+
+
+def blackout_warnings(blackouts: list[dict[str, Any]], rounds: int) -> list[str]:
+    messages: list[str] = []
+    for row in blackouts:
+        if int(row["from_round"]) > rounds:
+            continue
+        start = max(1, int(row["from_round"]))
+        end = min(int(rounds), int(row["to_round"]))
+        span = f"第 {start} 轮" if start == end else f"第 {start}–{end} 轮"
+        messages.append(
+            f"{row['station_id']} 在{span}为不可用时段，已避开（{row['reason']}）。"
+        )
+    return messages
 
 
 def equipment_conflicts(
@@ -108,6 +231,7 @@ def schedule_inputs(conn) -> dict[str, Any]:
         "stations": stations,
         "candidates": candidates,
         "resources": {**RESOURCE_COUNTS, "equipment": EQUIPMENT_COUNTS},
+        "blackouts": list_blackouts(conn),
         "fatigue_limit_min": FATIGUE_LIMIT_MIN,
     }
 
@@ -120,10 +244,12 @@ def _solve_assignments(
     seed: int,
     attempts: int = 40,
     fairness_weight: float = 0.5,
+    blocked_by_round: dict[int, set[str]] | None = None,
 ) -> dict[str, list[tuple[int, str]]]:
     """多随机种子回溯，按确认的公平权重平衡难度与考站使用。"""
     if len(candidates) > len(stations):
         raise ValueError("考生人数不能超过单轮并行考站数（演示版约束）")
+    blocked_by_round = blocked_by_round or {}
     station_map = {s["station_id"]: s for s in stations}
     best_result: dict[str, list[tuple[int, str]]] | None = None
     best_score: tuple[float, ...] | None = None
@@ -152,6 +278,7 @@ def _solve_assignments(
                     for station in stations
                     if station["station_id"] not in visited[candidate_id]
                     and station["station_id"] not in used_in_round[round_index]
+                    and station["station_id"] not in blocked_by_round.get(round_index + 1, set())
                     and (
                         not candidate.get("accessible_required")
                         or bool(station.get("accessible"))
@@ -263,8 +390,15 @@ def generate_schedule(
         raise ValueError("公平权重必须在 0 到 1 之间")
 
     target = round(mean(s["difficulty"] for s in stations) * rounds, 3)
+    blackout_rows = list_blackouts(conn)
     assignments = _solve_assignments(
-        candidates, stations, rounds, target, seed, fairness_weight=fairness_weight
+        candidates,
+        stations,
+        rounds,
+        target,
+        seed,
+        fairness_weight=fairness_weight,
+        blocked_by_round=blackouts_by_round(conn, rounds),
     )
     station_map = {s["station_id"]: s for s in stations}
     candidate_map = {c["candidate_id"]: c for c in candidates}
@@ -378,6 +512,7 @@ def generate_schedule(
             f"第 {conflict['round']} 轮 {conflict['equipment']} 同时需求 {conflict['demand']} 台，"
             f"可用 {conflict['available']} 台，存在设备冲突。"
         )
+    warnings.extend(blackout_warnings(blackout_rows, rounds))
     for candidate in candidate_rows:
         if candidate["extra_time_min"]:
             warnings.append(
@@ -413,6 +548,7 @@ def generate_schedule(
         "rounds": rounds,
         "buffer_min": buffer_min,
         "seed": seed,
+        "blackouts": blackout_rows,
         "candidates": candidate_rows,
         "rounds_detail": round_rows,
         "quality": {
@@ -775,8 +911,10 @@ def _repair_schedule(
     schedule: dict[str, Any],
     conflicts: list[dict[str, Any]],
     stations: list[dict[str, Any]],
+    blocked_by_round: dict[int, set[str]] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """以换站链为主的最小改动修复：优先空闲站，必要时顺次顶替直到空闲站。"""
+    blocked_by_round = blocked_by_round or {}
     repaired = json.loads(json.dumps(schedule))
     round_rows = _round_map(repaired)
     candidates = _candidate_map(repaired)
@@ -832,7 +970,7 @@ def _repair_schedule(
             round_row,
             candidates,
             stations,
-            all_down_stations,
+            all_down_stations | blocked_by_round.get(round_no, set()),
             conflicted_rounds,
         )
         if not moves:
@@ -924,7 +1062,12 @@ def repair_schedule(
             raise ValueError("尚未生成排考表")
     original = json.loads(row["schedule"])
     inputs = schedule_inputs(conn)
-    repaired, report = _repair_schedule(original, conflicts, inputs["stations"])
+    repaired, report = _repair_schedule(
+        original,
+        conflicts,
+        inputs["stations"],
+        blocked_by_round=blackouts_by_round(conn, int(original.get("rounds") or 0)),
+    )
 
     repaired["schedule_id"] = db.new_id("sched")
     repaired["created_at"] = db.now_iso()

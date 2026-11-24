@@ -995,6 +995,7 @@ async function viewSchedule() {
   ]);
   let schedule = latest.schedule;
   let specialNeeds = latest.special_needs;
+  let blackouts = inputs.blackouts || [];
   let policy = policyData.latest;
   const policyPresets = policyData.presets || [];
   const policyHtml = `<div class="card" style="margin-bottom:16px">
@@ -1043,6 +1044,26 @@ async function viewSchedule() {
         <button class="btn primary" type="submit" id="schedule-submit" ${policy ? '' : 'disabled'}>生成排考表</button>
       </form>
       <div class="tiny muted" style="margin-top:8px">每位考生从考站集合中抽取 ${schedule ? schedule.rounds : 6} 站；同一轮同一考站只安排一名考生。</div>
+    </div>
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">考站不可用时段<span class="sub">考官请假 / 场地占用 · 生成排考自动避开</span></div>
+      <form id="blackout-form" class="btn-row" style="align-items:flex-end;gap:10px;flex-wrap:wrap">
+        <label class="field">考站
+          <select id="blackout-station" class="input">${scheduleStations}</select>
+        </label>
+        <label class="field">开始轮次
+          <select id="blackout-from" class="input">${roundOptions(10)}</select>
+        </label>
+        <label class="field">结束轮次
+          <select id="blackout-to" class="input">${roundOptions(10)}</select>
+        </label>
+        <label class="field" style="flex:1;min-width:200px">原因
+          <input id="blackout-reason" class="input" maxlength="200" placeholder="例如：E03 考官请假 / 场地临时占用">
+        </label>
+        <button class="btn" type="submit">添加不可用</button>
+      </form>
+      <div id="blackout-list" style="margin-top:10px">${blackoutListHtml(blackouts)}</div>
+      <div class="tiny muted" style="margin-top:6px">不可用时段只影响新生成的排考表；修复改派也会避开这些轮次，已生成的排考请重新生成。</div>
     </div>
     <div class="card" style="margin-bottom:16px">
       <div class="card-title">冲突最小改动修复<span class="sub">只改受影响的人 · 原排考表保留</span></div>
@@ -1227,6 +1248,72 @@ async function viewSchedule() {
       }
     });
   }
+  const blackoutForm = $('#blackout-form');
+  const blackoutList = $('#blackout-list');
+  if (blackoutForm) {
+    blackoutForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const stationId = $('#blackout-station').value;
+      const fromRound = Number($('#blackout-from').value);
+      const toRound = Number($('#blackout-to').value);
+      const reason = ($('#blackout-reason').value || '').trim();
+      if (reason.length < 4) {
+        toast('不可用原因不少于 4 字', true);
+        return;
+      }
+      if (toRound < fromRound) {
+        toast('结束轮次不能早于开始轮次', true);
+        return;
+      }
+      const submit = blackoutForm.querySelector('button[type="submit"]');
+      if (submit) submit.disabled = true;
+      try {
+        const data = await api('/api/schedule/blackouts', {
+          method: 'POST',
+          body: { station_id: stationId, from_round: fromRound, to_round: toRound, reason },
+        });
+        blackouts = data.blackouts || [];
+        if (blackoutList) blackoutList.innerHTML = blackoutListHtml(blackouts);
+        $('#blackout-reason').value = '';
+        toast('已登记不可用时段，重新生成排考后生效');
+      } catch (err) {
+        toast(err.message, true);
+      } finally {
+        if (submit) submit.disabled = false;
+      }
+    });
+  }
+  if (blackoutList) {
+    blackoutList.addEventListener('click', async (e) => {
+      const button = e.target.closest('[data-blackout-delete]');
+      if (!button) return;
+      button.disabled = true;
+      try {
+        const data = await api(`/api/schedule/blackouts/${encodeURIComponent(button.dataset.blackoutDelete)}`, {
+          method: 'DELETE',
+        });
+        blackouts = data.blackouts || [];
+        blackoutList.innerHTML = blackoutListHtml(blackouts);
+        toast('已删除不可用时段');
+      } catch (err) {
+        toast(err.message, true);
+        button.disabled = false;
+      }
+    });
+  }
+}
+
+function blackoutListHtml(rows) {
+  if (!rows || !rows.length) return '<div class="tiny muted">尚无不可用时段记录。</div>';
+  return rows.map((row) => {
+    const span = Number(row.from_round) === Number(row.to_round)
+      ? `第 ${row.from_round} 轮`
+      : `第 ${row.from_round}–${row.to_round} 轮`;
+    return `<div class="version-row">
+      <span class="k">${esc(row.station_id)} · ${span}</span>
+      <span class="v">${esc(row.reason)} · ${esc(row.actor)} <button class="link-btn" data-blackout-delete="${esc(row.blackout_id)}">删除</button></span>
+    </div>`;
+  }).join('');
 }
 
 function specialNeedsHtml(schedule, data) {

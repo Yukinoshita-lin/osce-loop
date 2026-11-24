@@ -410,6 +410,16 @@ CREATE TABLE IF NOT EXISTS exam_schedules (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS schedule_blackouts (
+    blackout_id TEXT PRIMARY KEY,
+    station_id TEXT NOT NULL,
+    from_round INTEGER NOT NULL,
+    to_round INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS schedule_special_needs_approvals (
     approval_id TEXT PRIMARY KEY,
     schedule_id TEXT NOT NULL,

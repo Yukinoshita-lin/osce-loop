@@ -267,6 +267,10 @@ def rbac_allowed(method: str, path: str, role: str) -> bool:
         return True
     if path == "/api/auth/logout":
         return True
+    if method == "DELETE":
+        if path.startswith("/api/schedule/blackouts/"):
+            return role == "exam_manager"
+        return False
     if method != "POST":
         return False
     if path == "/api/sp/consent":
@@ -293,6 +297,7 @@ def rbac_allowed(method: str, path: str, role: str) -> bool:
         "/api/schedule/generate",
         "/api/schedule/repair",
         "/api/schedule/special-needs",
+        "/api/schedule/blackouts",
         "/api/schedule/policy",
     ):
         return role == "exam_manager"
