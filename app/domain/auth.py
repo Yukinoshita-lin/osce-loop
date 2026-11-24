@@ -283,6 +283,8 @@ def rbac_allowed(method: str, path: str, role: str) -> bool:
         return role == "exam_manager"
     if path == "/api/ops/maintenance":
         return role == "exam_manager"
+    if path.startswith("/api/feedback/"):
+        return role in ("student", "exam_manager", "examiner", "auditor")
     if path == "/api/quality/sus":
         return role in ("student", "examiner", "exam_manager")
     if path == "/api/calibration/import":

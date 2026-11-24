@@ -36,6 +36,11 @@ from .config import (
     WEB_DIR,
 )
 from .domain.ab import ab_report
+from .domain.accessibility import (
+    feedback_accessibility,
+    submit_feedback_survey,
+    survey_for_attempt,
+)
 from .domain.auth import (
     SESSION_TTL_HOURS,
     authenticate,
@@ -1301,8 +1306,37 @@ def feedback(attempt_id: str, request: Request, conn=Depends(get_conn)):
         "deductions": deductions,
         "strengths": strengths,
         "feedback_quality": summarize_feedback(deductions),
+        "survey": survey_for_attempt(conn, attempt_id),
         "feedback_rule": "每条扣分项必须包含：可回放证据 + 对应评分项档位 + 可直接背诵的替代话术。",
     }
+
+
+class FeedbackSurveyBody(BaseModel):
+    rating: int = Field(ge=1, le=5)
+    participant_label: str = Field(default="", max_length=40)
+
+
+@app.post("/api/feedback/{attempt_id}/survey")
+def feedback_survey(
+    attempt_id: str,
+    body: FeedbackSurveyBody,
+    request: Request,
+    conn=Depends(get_conn),
+):
+    _ensure_not_stopped(conn)
+    attempt = _attempt_row(conn, attempt_id)
+    _ensure_attempt_access(request.state.user, attempt)
+    try:
+        survey = submit_feedback_survey(
+            conn,
+            attempt_id=attempt_id,
+            rating=body.rating,
+            participant_label=body.participant_label,
+            actor=request.state.user["display_name"],
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "survey": survey, "accessibility": feedback_accessibility(conn)}
 
 
 @app.get("/api/quality/stations")

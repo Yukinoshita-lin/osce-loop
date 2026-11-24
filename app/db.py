@@ -195,6 +195,14 @@ CREATE TABLE IF NOT EXISTS sus_responses (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS feedback_surveys (
+    survey_id TEXT PRIMARY KEY,
+    attempt_id TEXT NOT NULL UNIQUE,
+    rating INTEGER NOT NULL,
+    participant_label TEXT,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS candidate_profiles (
     attempt_id TEXT PRIMARY KEY,
     gender TEXT,

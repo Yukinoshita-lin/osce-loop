@@ -5,6 +5,8 @@ import json
 import statistics
 from typing import Any
 
+from .accessibility import feedback_accessibility
+
 DIMENSIONS = [
     ("gender", "性别"),
     ("origin", "生源"),
@@ -183,11 +185,7 @@ def fairness_report(conn) -> dict[str, Any]:
             "gap_pp": edit_gap_pp,
             "threshold_pp": EDIT_GAP_THRESHOLD_PP,
         },
-        "feedback_accessibility": {
-            "status": "unmeasured",
-            "threshold": 0.3,
-            "note": "需在练习反馈中加入学生自评“看懂了并有帮助”，当前演示未采集。",
-        },
+        "feedback_accessibility": feedback_accessibility(conn),
         "overall_gap_sd": max(measured_gaps) if measured_gaps else None,
         "sample": {
             "attempts": len(attempt_scores),

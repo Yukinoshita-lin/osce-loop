@@ -1485,6 +1485,21 @@ async function renderFeedback(attemptId) {
         <div class="sep"></div>
         <audio id="fb-audio" preload="metadata" controls></audio>
         <div class="tiny muted" style="margin-top:6px">点击任意时间戳播放对应证据片段。</div>
+        <div class="sep"></div>
+        ${data.survey ? `<div class="tiny muted">反馈问卷已提交：<span class="pill teal">${data.survey.rating}/5</span> · ${fmtTime(data.survey.created_at)}</div>` : `
+        <div class="card-title" style="margin-bottom:6px">看懂了并有帮助吗？</div>
+        <form id="feedback-survey" class="btn-row" style="align-items:center;flex-wrap:wrap">
+          <select class="input" name="rating" style="max-width:150px">
+            <option value="5">5 非常清楚</option>
+            <option value="4">4 比较清楚</option>
+            <option value="3">3 一般</option>
+            <option value="2">2 不太清楚</option>
+            <option value="1">1 完全没看懂</option>
+          </select>
+          <input class="input" name="participant_label" placeholder="标签（可选）" maxlength="40" style="max-width:180px">
+          <button class="btn small primary" type="submit">提交自评</button>
+        </form>
+        <div id="feedback-survey-result" class="tiny muted"></div>`}
       </div>
     </div>
 
@@ -1498,6 +1513,28 @@ async function renderFeedback(attemptId) {
     audio.addEventListener('timeupdate', () => {
       const end = Number(audio.dataset.clipEnd || 0);
       if (end && audio.currentTime >= end) audio.pause();
+    });
+  }
+  const surveyForm = $('#feedback-survey');
+  if (surveyForm) {
+    surveyForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const box = $('#feedback-survey-result');
+      const formData = new FormData(surveyForm);
+      try {
+        const result = await api(`/api/feedback/${encodeURIComponent(data.attempt_id)}/survey`, {
+          method: 'POST',
+          body: {
+            rating: Number(formData.get('rating')),
+            participant_label: String(formData.get('participant_label') || ''),
+          },
+        });
+        toast(`反馈自评已提交：${result.survey.rating}/5`);
+        await viewFeedback();
+      } catch (err) {
+        if (box) box.textContent = err.message;
+        toast(err.message, true);
+      }
     });
   }
 }
@@ -1800,6 +1837,14 @@ function abSectionHtml(ab) {
 function fairnessSectionHtml(fairness) {
   const dims = fairness.dimensions || [];
   const editDims = (fairness.edit_rate || {}).dimensions || [];
+  const acc = fairness.feedback_accessibility || {};
+  const accLabel = {
+    pass: '达标',
+    fail: '未达标',
+    insufficient: '样本不足',
+    unmeasured: '未采集',
+  }[acc.status] || '未采集';
+  const accClass = acc.status === 'pass' ? 'teal' : acc.status === 'fail' ? 'red' : acc.status === 'insufficient' ? 'amber' : 'muted';
   return `
     <div class="card">
       <div class="card-title">公平性监测<span class="sub">阈值 ≤0.15 SD · 编辑率 ≤5pp</span></div>
@@ -1816,7 +1861,7 @@ function fairnessSectionHtml(fairness) {
         ${d.status === 'fail' ? `<div class="violation">纠正路径：${esc(d.corrective_action)}</div>` : ''}
       `).join('')}
       <div class="sep"></div>
-      <div class="tiny muted">反馈可及性：${esc((fairness.feedback_accessibility || {}).note || '未采集')}</div>
+      <div class="tiny muted">反馈可及性：<span class="pill ${accClass}">${accLabel}</span> ${esc(acc.note || '')}</div>
       <div class="tiny muted" style="margin-top:4px">${esc(fairness.note)}</div>
     </div>`;
 }
