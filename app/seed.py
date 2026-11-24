@@ -23,6 +23,7 @@ from .config import (
     SP_PROMPT_VERSION,
 )
 from .domain.bundle import apply_authority_reset, freeze_bundle
+from .domain.consent import record_consent
 from .domain.integrity import transcript_digest
 from .domain.media import file_sha256
 from .domain.rubric import PHASE_RANK
@@ -944,6 +945,16 @@ def seed_if_empty(conn) -> bool:
     _seed_ab_reviews(conn)
     _write_model_card(conn)
     _write_data_sheet(conn)
+    record_consent(
+        conn,
+        sp_name="王建国（演示 SP）",
+        sp_role="adult_sp",
+        consent_type="informed_use",
+        version="demo-v1.0",
+        bundle_id=None,
+        notes="演示数据；SP 级知情同意覆盖所有站包，真实部署必须由 SP 本人签署。",
+        actor="演示种子",
+    )
     for key, value in {
         "model_version": MODEL_VERSION,
         "prompt_version": PROMPT_VERSION,

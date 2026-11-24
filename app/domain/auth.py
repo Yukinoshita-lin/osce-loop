@@ -254,11 +254,15 @@ def rbac_allowed(method: str, path: str, role: str) -> bool:
             return role in ("exam_manager", "examiner", "auditor")
         if path.startswith("/api/attempts/"):
             return role in ("exam_manager", "examiner", "auditor")
+        if path.startswith("/api/sp/consents"):
+            return role in ("exam_manager", "examiner", "auditor")
         return True
     if path == "/api/auth/logout":
         return True
     if method != "POST":
         return False
+    if path == "/api/sp/consent":
+        return role in ("exam_manager", "examiner")
     if path.startswith("/api/sp/"):
         return role in ("student", "examiner", "exam_manager")
     if path.startswith("/api/review/"):

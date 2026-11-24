@@ -7,6 +7,7 @@ from typing import Any
 
 from .ab import ab_report
 from .bundle import list_bundles
+from .consent import consent_status
 from .fairness import fairness_report
 from .sus import sus_summary
 
@@ -32,6 +33,7 @@ GATES = [
             ("persona_pass", "人格首轮通过率", "≥ 95%", 0.95, "ge"),
             ("p95_latency", "语音延迟 P95", "≤ 1.5 秒", 1.5, "le"),
             ("sus", "SUS 可用性", "≥ 70", 70, "ge"),
+            ("sp_consent", "SP 知情同意", "= 已签署", 1.0, "ge"),
             ("p0_incidents", "P0 安全事故", "= 0", 0, "eq"),
         ],
     },
@@ -125,6 +127,8 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
     model_card_public = 1.0 if public_card_count > 0 and public_sheet_count > 0 else 0.0
     bundles = list_bundles(conn)
     current_bundle = bundles[0] if bundles else None
+    sp_consent = consent_status(conn, current_bundle["bundle_id"]) if current_bundle else None
+    sp_consent_value = None if sp_consent is None else (1.0 if sp_consent["valid"] else 0.0)
     sp_cert_issue = None
     cert_row = None
     if current_bundle:
@@ -180,6 +184,7 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
         "p95_latency": sp_p95_latency,
         "sus": sus_score,
         "sus_source": sus_source,
+        "sp_consent": sp_consent_value,
         "p0_incidents": sp_p0,
         "sp_cert_issue": sp_cert_issue,
         "near_improvement": ab.get("comparison", {}).get("near_improvement"),
@@ -279,6 +284,23 @@ def evaluate_gates(conn, report: dict[str, Any], current_stage: str) -> dict[str
                 "level": "danger",
                 "title": "SP 认证已过期",
                 "detail": "认证有效期已结束，G1 的 SP 指标按未采集处理；需按季度更新红队用例并重新认证。",
+            }
+        )
+    if values.get("sp_consent") == 0.0:
+        bundle_row = conn.execute(
+            "SELECT bundle_id FROM bundles ORDER BY frozen_at DESC, rowid DESC LIMIT 1"
+        ).fetchone()
+        consent = consent_status(conn, bundle_row["bundle_id"]) if bundle_row else None
+        missing_labels = (
+            [consent["type_labels"].get(key, key) for key in consent["missing"] + consent["expired"]]
+            if consent
+            else ["SP 知情同意"]
+        )
+        alerts.append(
+            {
+                "level": "danger",
+                "title": "当前站包缺少有效 SP 知情同意",
+                "detail": "缺少或过期：" + "、".join(missing_labels) + "；签署后才能开放 G1 练习场景。",
             }
         )
     if values.get("sus_source") == "legacy":

@@ -69,6 +69,7 @@ from .domain.bundle import (
     list_station_bundles,
 )
 from .domain.calibration import calibration_report, import_gold_scores, parse_gold_file
+from .domain.consent import consent_status, record_consent
 from .domain.cost import ai_cost_summary
 from .domain.coverage import blueprint_coverage
 from .domain.content_audit import run_content_audit
@@ -2310,6 +2311,43 @@ def sp_certifications(conn=Depends(get_conn), bundle_id: str | None = None):
             }
         )
     return result
+
+
+@app.get("/api/sp/consents")
+def sp_consents(conn=Depends(get_conn), bundle_id: str | None = None):
+    return consent_status(conn, bundle_id)
+
+
+class SpConsentBody(BaseModel):
+    sp_name: str = Field(min_length=1, max_length=40)
+    sp_role: str = Field(pattern=r"^(adult_sp|minor_sp|guardian)$")
+    consent_type: str = Field(pattern=r"^(informed_use|minor_guardian|data_use)$")
+    version: str = Field(min_length=1, max_length=40)
+    bundle_id: str | None = None
+    notes: str | None = Field(default=None, max_length=300)
+
+
+@app.post("/api/sp/consent")
+def sp_consent_create(body: SpConsentBody, request: Request, conn=Depends(get_conn)):
+    _ensure_not_stopped(conn)
+    try:
+        consent = record_consent(
+            conn,
+            sp_name=body.sp_name,
+            sp_role=body.sp_role,
+            consent_type=body.consent_type,
+            version=body.version,
+            bundle_id=body.bundle_id,
+            notes=body.notes,
+            actor=request.state.user["display_name"],
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {
+        "ok": True,
+        "consent": consent,
+        "status": consent_status(conn, body.bundle_id),
+    }
 
 
 @app.post("/api/sp/sessions/{session_id}/finish")

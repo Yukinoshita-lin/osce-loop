@@ -1702,12 +1702,14 @@ async function renderFeedback(attemptId) {
 /* ---------- SP ---------- */
 async function viewSP(bundleId = state.spBundleId || '') {
   const query = bundleId ? `?bundle_id=${encodeURIComponent(bundleId)}` : '';
-  const [persona, stationData] = await Promise.all([
+  const [persona, stationData, consentData] = await Promise.all([
     api(`/api/sp/persona${query}`),
     api('/api/bundles/stations'),
+    api(`/api/sp/consents${query}`).catch(() => ({ valid: false, consents: [], note: '知情同意记录仅考务可查看。' })),
   ]);
   state.spBundleId = persona.bundle_id;
   state.spStations = stationData.stations || [];
+  state.spConsent = consentData;
   if (!state.sp || state.sp.persona.bundle_id !== persona.bundle_id) {
     state.sp = { persona, session: null };
     await createSpSession();
@@ -1767,6 +1769,37 @@ function renderSP() {
       <div class="sep"></div>
       <div class="btn-row"><button class="btn small ${certValid ? '' : 'primary'}" data-action="sp-certify">运行红队认证</button><span class="tiny muted">${esc((persona.persona_version || '').slice(7, 19))}</span></div>
     </section>`;
+  const consent = state.spConsent || {};
+  const consentValid = Boolean(consent.valid);
+  const canManageConsent = Boolean(state.user && ['admin', 'exam_manager', 'examiner'].includes(state.user.role));
+  const consentHtml = `
+    <section class="card">
+      <div class="card-title">SP 知情同意<span class="sub">365 天有效 · 未成年需监护人</span></div>
+      <div class="attempt-strip" style="margin-bottom:6px">
+        <span>${consentValid ? '<span class="pill teal">有效</span>' : '<span class="pill red">缺失或已过期</span>'}</span>
+        <span>${(consent.consents || []).length} 份记录</span>
+      </div>
+      ${(consent.consents || []).slice(0, 3).map((c) => `
+        <div class="version-row"><span class="k">${esc(c.sp_name)} · ${esc((consent.type_labels || {})[c.consent_type] || c.consent_type)}</span>
+          <span class="v">${esc(c.version)} · ${c.valid ? '<span class="pill teal">有效</span>' : '<span class="pill red">已过期</span>'}</span></div>`).join('') || '<div class="tiny muted">尚未记录 SP 知情同意。</div>'}
+      ${canManageConsent ? `<div class="sep"></div>
+      <form id="sp-consent-form" class="btn-row" style="flex-wrap:wrap;gap:6px">
+        <input class="input" name="sp_name" placeholder="SP 姓名" style="max-width:110px" required>
+        <select class="input" name="sp_role" style="max-width:135px" aria-label="SP 类型">
+          <option value="adult_sp">成年模拟患者</option>
+          <option value="minor_sp">未成年模拟患者</option>
+          <option value="guardian">监护人</option>
+        </select>
+        <select class="input" name="consent_type" style="max-width:150px" aria-label="同意类型">
+          <option value="informed_use">知情同意</option>
+          <option value="minor_guardian">监护人同意</option>
+          <option value="data_use">数据使用同意</option>
+        </select>
+        <input class="input" name="version" value="v2026.1" style="max-width:90px" aria-label="同意书版本">
+        <button class="btn small" type="submit">记录同意</button>
+      </form>` : '<div class="tiny muted" style="margin-top:4px">知情同意由考务维护。</div>'}
+      <div class="tiny muted" style="margin-top:4px">${esc(consent.note || '知情同意有效期 365 天；未成年 SP 还需监护人同意。')}</div>
+    </section>`;
   const verifierHtml = verify ? `
     <div class="verify-panel">
       <div class="verify-item ${verify.persona >= 0.85 ? 'pass' : 'fail'}"><div class="k">人格保真 · 0.35</div><div class="v">${num(verify.persona, 2)}</div></div>
@@ -1809,6 +1842,7 @@ function renderSP() {
           <div class="tiny muted">禁用话术：${(p.forbidden || []).map(esc).join(' · ')}</div>
         </section>
         ${certHtml}
+        ${consentHtml}
         <section class="card">
           <div class="card-title">阶段<span class="sub">状态机驱动</span></div>
           <div class="phase-steps">
@@ -1873,6 +1907,29 @@ function renderSP() {
       state.spBundleId = e.target.value;
       state.sp = null;
       await viewSP(e.target.value);
+    });
+  }
+  const consentForm = $('#sp-consent-form');
+  if (consentForm) {
+    consentForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const data = new FormData(consentForm);
+      try {
+        await api('/api/sp/consent', {
+          method: 'POST',
+          body: {
+            sp_name: String(data.get('sp_name') || '').trim(),
+            sp_role: data.get('sp_role'),
+            consent_type: data.get('consent_type'),
+            version: String(data.get('version') || '').trim(),
+            bundle_id: state.sp && state.sp.persona ? state.sp.persona.bundle_id : null,
+          },
+        });
+        toast('已记录 SP 知情同意');
+        await viewSP(state.spBundleId);
+      } catch (err) {
+        toast(err.message, true);
+      }
     });
   }
 }

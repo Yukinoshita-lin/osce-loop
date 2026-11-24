@@ -181,6 +181,19 @@ CREATE TABLE IF NOT EXISTS sp_certifications (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS sp_consents (
+    consent_id TEXT PRIMARY KEY,
+    sp_name TEXT NOT NULL,
+    sp_role TEXT NOT NULL,
+    bundle_id TEXT,
+    consent_type TEXT NOT NULL,
+    version TEXT NOT NULL,
+    signed_at TEXT NOT NULL,
+    notes TEXT,
+    created_by TEXT,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS sp_reports (
     session_id TEXT PRIMARY KEY,
     bundle_id TEXT NOT NULL,
