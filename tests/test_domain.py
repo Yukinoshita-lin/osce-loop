@@ -88,6 +88,18 @@ def test_bundle_passes_four_checks():
     assert validation["counts"]["critical"] == 3
 
 
+def test_guideline_semantic_mismatch_is_pending_not_blocking():
+    payload = build_bundle_payload()
+    target = next(item for item in payload["rubric"] if item["item_id"] == "HX.05")
+    target["guideline_ref"] = "ESC-ACS-2023 §3.2"
+    validation = validate_bundle(payload)
+    guideline = next(check for check in validation["checks"] if check["key"] == "guideline")
+    assert guideline["status"] == "warn"
+    assert any("语义相关性低" in issue for issue in guideline["issues"])
+    assert validation["guideline_similarity"]["HX.05"] < 0.03
+    assert validation["can_freeze"] is True
+
+
 def test_vague_anchor_blocks_freeze():
     payload = build_bundle_payload()
     bad = copy.deepcopy(payload)

@@ -37,16 +37,32 @@ AUDIO_SECONDS = 180
 
 GUIDELINE_KB = [
     {
+        "ref": "ESC-ACS-2023 §2.3",
+        "text": "持续胸痛伴出汗、恶心或呼吸困难提示高危，应立即启动紧急评估与处理。",
+    },
+    {
         "ref": "ESC-ACS-2023 §3.2",
         "text": "胸痛评估应采集疼痛性质、部位、持续时间、放射部位及伴随症状。",
     },
     {
         "ref": "ESC-ACS-2023 §4.1",
-        "text": "疑似急性冠脉综合征应在 10 分钟内完成 12 导联心电图。",
+        "text": "疑似急性冠脉综合征应在 10 分钟内完成 12 导联心电图，并监测心律与心肌标志物。",
+    },
+    {
+        "ref": "中国胸痛中心规范 2023 §3",
+        "text": "首次医疗接触应主动表明身份、核对患者信息，并说明接诊目的与初步安排。",
     },
     {
         "ref": "中国胸痛中心规范 2023 §5",
-        "text": "胸痛患者应评估生命体征、危险因素与用药史，并尽早完成风险分层。",
+        "text": "胸痛患者应评估生命体征、危险因素与用药史，并核对药物过敏史、尽早完成风险分层。",
+    },
+    {
+        "ref": "医患沟通与知情同意规范 §1",
+        "text": "应使用患者能理解的语言解释病情与检查目的，回应其担忧，并在结束前总结确认。",
+    },
+    {
+        "ref": "医患沟通与知情同意规范 §2",
+        "text": "进行体格检查或操作前，应说明检查内容并征得患者同意。",
     },
 ]
 
@@ -111,7 +127,7 @@ def build_bundle_payload() -> dict[str, Any]:
             phase="opening",
             weight=1,
             authority="suggest",
-            guideline="中国胸痛中心规范 2023 §5",
+            guideline="中国胸痛中心规范 2023 §3",
             slot={
                 "content": "我叫王建国，今年六十五。",
                 "triggers": ["姓名", "怎么称呼", "年龄"],
@@ -134,7 +150,7 @@ def build_bundle_payload() -> dict[str, Any]:
             phase="opening",
             weight=1,
             authority="suggest",
-            guideline="中国胸痛中心规范 2023 §5",
+            guideline="中国胸痛中心规范 2023 §3",
             slot={
                 "content": "行，你问吧，我配合。",
                 "triggers": ["配合", "问吧", "同意"],
@@ -251,7 +267,7 @@ def build_bundle_payload() -> dict[str, Any]:
             phase="information_gathering",
             weight=1,
             authority="suggest",
-            guideline="ESC-ACS-2023 §3.2",
+            guideline="中国胸痛中心规范 2023 §5",
             slot={
                 "content": "高血压十来年了，烟抽了三十年，一天一包。",
                 "triggers": ["高血压", "糖尿病", "吸烟", "血脂", "既往", "危险因素"],
@@ -297,7 +313,7 @@ def build_bundle_payload() -> dict[str, Any]:
             phase="assessment",
             weight=1,
             authority="extract",
-            guideline="中国胸痛中心规范 2023 §5",
+            guideline="医患沟通与知情同意规范 §2",
             slot={
                 "content": "行，你听吧。",
                 "triggers": ["听诊", "查体", "检查一下", "量血压"],
@@ -320,7 +336,7 @@ def build_bundle_payload() -> dict[str, Any]:
             phase="assessment",
             weight=3,
             authority="suggest",
-            guideline="ESC-ACS-2023 §4.1",
+            guideline="ESC-ACS-2023 §2.3",
             critical=True,
             confidence_floor=0.60,
             slot={
@@ -393,7 +409,7 @@ def build_bundle_payload() -> dict[str, Any]:
             phase="information_gathering",
             weight=2,
             authority="none",
-            guideline="中国胸痛中心规范 2023 §5",
+            guideline="医患沟通与知情同意规范 §1",
             feedback_alt="可回应：“我理解您现在很担心，我们会尽快把最危险的情况排除掉。”",
         ),
         _item(
@@ -409,7 +425,7 @@ def build_bundle_payload() -> dict[str, Any]:
             phase="plan",
             weight=1,
             authority="suggest",
-            guideline="中国胸痛中心规范 2023 §5",
+            guideline="医患沟通与知情同意规范 §1",
             slot={
                 "content": "你这么说我就明白点了。",
                 "triggers": ["明白", "听懂", "解释"],
@@ -432,7 +448,7 @@ def build_bundle_payload() -> dict[str, Any]:
             phase="closing",
             weight=1,
             authority="suggest",
-            guideline="中国胸痛中心规范 2023 §5",
+            guideline="医患沟通与知情同意规范 §1",
             slot={
                 "content": "好，那我先去检查，有问题再问您。",
                 "triggers": ["清楚", "明白", "还有问题", "总结"],

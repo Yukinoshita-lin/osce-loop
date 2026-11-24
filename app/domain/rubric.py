@@ -83,6 +83,38 @@ def is_observable(text: str) -> tuple[bool, str]:
     return True, "ok"
 
 
+GUIDELINE_RELEVANCE_FLOOR = 0.03
+
+
+def _relevance_terms(text: str) -> set[str]:
+    """中英混排的粗粒度词项：中文按二字片段，英文/数字按整词。"""
+    terms: set[str] = set()
+    for part in re.findall(r"[a-z0-9]+|[\u4e00-\u9fff]+", (text or "").lower()):
+        if re.fullmatch(r"[a-z0-9]+", part):
+            terms.add(part)
+        elif len(part) == 1:
+            terms.add(part)
+        else:
+            terms.update(part[index : index + 2] for index in range(len(part) - 1))
+    return terms
+
+
+def guideline_relevance(item: dict[str, Any], guideline_text: str) -> float:
+    """返回评分项与指南条款的词汇重合度，供人工核验语义适用性。"""
+    anchor = item.get("anchor") or {}
+    item_text = " ".join(
+        [
+            str(item.get("title") or ""),
+            *(str(anchor.get(field) or "") for field in ANCHOR_FIELDS),
+        ]
+    )
+    item_terms = _relevance_terms(item_text)
+    guideline_terms = _relevance_terms(guideline_text)
+    if not item_terms or not guideline_terms:
+        return 0.0
+    return round(len(item_terms & guideline_terms) / len(item_terms), 4)
+
+
 def validate_rubric_item(item: dict[str, Any]) -> list[str]:
     issues: list[str] = []
     item_id = _text(item.get("item_id")) or "(缺少 item_id)"
@@ -160,17 +192,21 @@ def validate_bundle(payload: dict[str, Any]) -> dict[str, Any]:
         for i in issues
         if "缺少可派生的 SP 信息槽" in i or "信息槽阶段" in i or "global 证据项" in i
     ]
-    # 3. 指南一致性
+    # 3. 指南一致性：先查原文是否在库，再做粗粒度语义相关性筛查
     guideline_issues: list[str] = []
     guideline_pending: list[str] = []
+    guideline_similarity: dict[str, float] = {}
     for item in rubric:
         ref = _text(item.get("guideline_ref"))
         if ref and ref not in kb:
             guideline_pending.append(f"{item.get('item_id')}: 指南条款未在知识库中命中，需人工核验「{ref}」")
         elif ref:
-            guideline_issues.extend(
-                [f"{item.get('item_id')}: {x}" for x in []]
-            )
+            score = guideline_relevance(item, str(kb[ref].get("text") or ""))
+            guideline_similarity[item.get("item_id")] = score
+            if score < GUIDELINE_RELEVANCE_FLOOR:
+                guideline_pending.append(
+                    f"{item.get('item_id')}: 指南条款语义相关性低（{score:.2f}），需人工确认适用性「{ref}」"
+                )
     guideline_status = "fail" if guideline_issues else ("warn" if guideline_pending else "pass")
 
     # 4. 三方一致：考生指令承诺的考点 ⊆ rubric；脚本信息槽 ⊆ rubric
@@ -208,7 +244,7 @@ def validate_bundle(payload: dict[str, Any]) -> dict[str, Any]:
         {
             "key": "guideline",
             "label": "指南一致性",
-            "rule": "guideline_ref 必须能在知识库中检索到原文",
+            "rule": "guideline_ref 必须能在知识库中检索到原文，且与行为锚语义相关",
             "status": guideline_status,
             "issues": guideline_issues + guideline_pending,
         },
@@ -231,6 +267,7 @@ def validate_bundle(payload: dict[str, Any]) -> dict[str, Any]:
         "issues": issues,
         "blocking": blocking,
         "can_freeze": not blocking,
+        "guideline_similarity": guideline_similarity,
         "counts": {
             "items": len(rubric),
             "critical": sum(1 for i in rubric if i.get("critical")),
