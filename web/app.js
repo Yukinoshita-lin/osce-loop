@@ -2176,6 +2176,7 @@ function renderSP() {
   }).join('');
   const messages = session && session.messages ? session.messages : [];
   const verify = session && session.verification;
+  const guidance = session && session.intent && session.intent.guidance ? session.intent : null;
   const cert = persona.certification;
   const certValid = Boolean(cert && cert.valid);
   const finished = Boolean(session && session.finished);
@@ -2341,6 +2342,7 @@ function renderSP() {
           <div class="chat-log" id="chat-log">
             ${messages.map((m) => `<div class="msg ${m.role}"><div class="who">${m.role === 'patient' ? 'SP' : '考生'}</div>${esc(m.text)}</div>`).join('')}
           </div>
+          ${guidance ? `<div class="tiny" style="padding:8px 15px;border-top:1px solid var(--border-soft);color:var(--amber)">阶段末自然引导：本阶段仍有 ${(guidance.missing_items || []).length} 个关键评分项未被问及，SP 已提示；可继续追问，或再次尝试推进阶段。</div>` : ''}
           ${finished ? '<div class="tiny muted" style="padding:12px 15px;border-top:1px solid var(--border-soft)">本次练习已生成反馈。开始新会话可再练一次。</div>' : `
           <div class="chat-suggestions">
             ${['您哪里不舒服？', '疼多久了？', '有没有高血压？', '我理解您很担心', '我要给您听诊一下'].map((t) => `<button class="btn small ghost" data-action="sp-suggest" data-text="${dataAttr(t)}">${esc(t)}</button>`).join('')}
