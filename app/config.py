@@ -77,6 +77,7 @@ REASON_LABELS = {
     "critical_negative": "关键项 AI 判阴性",
     "review_disagreement": "双人复核不一致，待高年资裁决",
     "near_cutoff": "总分处于及格线边缘",
+    "low_score_tail": "低分尾部，强制人工复核",
     "confidence_below_floor": "置信度低于项阈值",
     "item_disagreement": "该项历史人机分歧偏高",
     "appeal": "考生申诉，全量重评",

@@ -35,6 +35,8 @@ def route_item(
     appeal: bool = False,
     item_disagreement_rate: float = 0.0,
     asr_confidence: float | None = None,
+    low_score_tail: bool = False,
+    low_score_detail: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     floor = float(item.get("confidence_floor", 0.55))
     rate = SAMPLE_RATES.get(risk_level, 0.2)
@@ -88,6 +90,16 @@ def route_item(
     # 3. 边缘案例：高年资裁决
     if near_cutoff:
         return _route("senior_arbitration", "near_cutoff", requires_human=True)
+
+    # 3b. L2 低分尾部：低于及格线的场次全部 AI 建议强制人工，避免错误固化
+    if low_score_tail:
+        return _route(
+            "send_review",
+            "low_score_tail",
+            requires_human=True,
+            reason_text="场次处于低分尾部（AI 暂定总分低于及格线），全部建议分强制人工复核",
+            detail=low_score_detail or {},
+        )
 
     # 4. 置信度低于项阈值
     if confidence is not None and confidence < floor:

@@ -133,6 +133,7 @@ def run_scoring(
     }
     ai_total = _weighted_total(rubric, ai_scores)
     near = is_near_cutoff(ai_total, pass_line)
+    low_tail = risk_level == "L2" and ai_total is not None and ai_total < pass_line
     integrity_gap = bool(attempt.get("integrity_gap"))
 
     for item in rubric:
@@ -237,6 +238,8 @@ def run_scoring(
             appeal=bool(attempt.get("appeal")),
             item_disagreement_rate=disagreement.get(item_id, 0.0),
             asr_confidence=item_asr,
+            low_score_tail=low_tail,
+            low_score_detail={"ai_total": ai_total, "pass_line": pass_line},
         )
         _mark_degraded(routing, response)
         evidence_json = evidence_to_json(suggestion.evidence)
@@ -270,6 +273,7 @@ def run_scoring(
         "attempt_id": attempt_id,
         "ai_total": ai_total,
         "near_cutoff": near,
+        "low_score_tail": low_tail,
         "integrity_gap": integrity_gap,
         "pending_review": pending,
         "records": len(rubric),

@@ -202,6 +202,20 @@ def test_routing_priority_and_sampling():
     assert dual["route"] == "dual_review"
     assert dual["dual_review"]["required"] == 2
     assert route_item(**{**common, "near_cutoff": True})["reason"] == "near_cutoff"
+    low_tail = route_item(
+        **{
+            **common,
+            "low_score_tail": True,
+            "low_score_detail": {"ai_total": 42.0, "pass_line": 60},
+        }
+    )
+    assert low_tail["reason"] == "low_score_tail"
+    assert low_tail["route"] == "send_review"
+    assert low_tail["detail"]["ai_total"] == 42.0
+    assert (
+        route_item(**{**common, "near_cutoff": True, "low_score_tail": True})["reason"]
+        == "near_cutoff"
+    )
     assert route_item(**{**common, "confidence": 0.3})["reason"] == "confidence_below_floor"
     assert route_item(**{**common, "item_disagreement_rate": 0.2})["reason"] == "item_disagreement"
     assert route_item(**{**common, "appeal": True})["reason"] == "appeal"

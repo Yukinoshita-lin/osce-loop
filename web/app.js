@@ -26,6 +26,7 @@ const REASON_COLOR = {
   critical_negative: 'red',
   review_disagreement: 'red',
   near_cutoff: 'amber',
+  low_score_tail: 'amber',
   l3_human_confirmation: 'amber',
   confidence_below_floor: 'amber',
   item_disagreement: 'amber',
