@@ -91,13 +91,13 @@ def freeze_bundle(
     if not validation["can_freeze"]:
         raise ValueError("站包校验未通过，禁止冻结：" + "；".join(validation["blocking"][:5]))
 
-    diffs = (validation.get("consistency_details") or {}).get("diffs") or []
+    diffs = validation.get("review_diffs") or (validation.get("consistency_details") or {}).get("diffs") or []
     judgement = adjudicate_diffs(diffs, adjudications)
     if judgement["invalid"]:
         raise ValueError("差异裁决无效：" + "；".join(judgement["invalid"][:5]))
     if judgement["pending"]:
         raise ValueError(
-            "三方一致差异尚未逐条裁决：" + "、".join(judgement["pending"][:5])
+            "冻结前待核验项尚未逐条裁决：" + "、".join(judgement["pending"][:5])
             + (f" 等 {len(judgement['pending'])} 条" if len(judgement["pending"]) > 5 else "")
         )
     if judgement["fix_required"]:

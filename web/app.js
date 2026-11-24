@@ -1415,13 +1415,14 @@ async function viewBundle() {
     <div class="audit-row"><div class="act">${esc(ev.action)}</div><div class="obj">${esc(ev.actor)}</div><div class="time">${fmtTime(ev.created_at)}</div></div>`).join('');
   const adjudications = data.adjudications || [];
   const consistencyDetails = (data.validation && data.validation.consistency_details) || {};
-  const consistencyDiffs = consistencyDetails.diffs || [];
+  const consistencyDiffs = (data.validation && data.validation.review_diffs) || consistencyDetails.diffs || [];
   const adjudicationByDiff = {};
   adjudications.forEach((a) => { adjudicationByDiff[a.diff_id] = a; });
   const diffLocate = (d) => {
     const loc = d.location || {};
     if (loc.section === 'rubric') {
       let text = `评分项 ${esc(loc.item_id)}：${esc(loc.sentence)}`;
+      if (loc.guideline_ref) text += ` · 指南「${esc(loc.guideline_ref)}」`;
       if (loc.closest_instruction) {
         text += ` · 最接近题干句「${esc(loc.closest_instruction.sentence)}」`;
       }
@@ -1437,7 +1438,7 @@ async function viewBundle() {
   };
   const adjudicationCard = consistencyDiffs.length || adjudications.length ? `
     <div class="card" style="margin-bottom:14px">
-      <div class="card-title">三方一致差异与裁决<span class="sub">${consistencyDiffs.length} 条差异 · ${adjudications.length} 条留痕 · 冻结前逐条裁决</span></div>
+      <div class="card-title">冻结前待核验项与裁决<span class="sub">${consistencyDiffs.length} 项 · ${adjudications.length} 条留痕 · 指南与三方一致差异逐条裁决</span></div>
       <div class="tbl-wrap">
         <table>
           <thead><tr><th>差异</th><th>定位（精确到句子）</th><th>严重度</th><th>裁决</th><th>理由</th><th>裁决人</th><th>时间</th></tr></thead>
@@ -3359,16 +3360,17 @@ document.addEventListener('click', async (e) => {
             <span class="tiny muted">${esc(r.rationale)}</span></div>`).join('')}
         </div>` : '';
       const consistency = v.checks.find((c) => c.key === 'consistency');
-      const diffs = (consistency && consistency.details && consistency.details.diffs) || [];
+      const diffs = v.review_diffs || (consistency && consistency.details && consistency.details.diffs) || [];
       const diffsHtml = diffs.length ? `
         <div style="margin-top:6px">
-          <span class="pill amber">三方一致差异 ${diffs.length} 条</span>
-          <div class="tiny muted">冻结前必须逐条裁决；接受差异需填写理由，“返回修改”会阻断冻结。</div>
+          <span class="pill amber">冻结前待核验项 ${diffs.length} 条</span>
+          <div class="tiny muted">指南待核验与三方一致差异都必须逐条裁决；接受差异需填写理由，“返回修改”会阻断冻结。</div>
           ${diffs.map((d) => {
             const loc = d.location || {};
             let where = '';
             if (loc.section === 'rubric') {
               where = `评分项 ${esc(loc.item_id)}：${esc(loc.sentence)}`;
+              if (loc.guideline_ref) where += ` · 指南「${esc(loc.guideline_ref)}」`;
               if (loc.closest_instruction) {
                 where += ` · 最接近题干句「${esc(loc.closest_instruction.sentence)}」`;
               }

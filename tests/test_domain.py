@@ -99,6 +99,13 @@ def test_guideline_semantic_mismatch_is_pending_not_blocking():
     assert any("语义相关性低" in issue for issue in guideline["issues"])
     assert validation["guideline_similarity"]["HX.05"] < 0.03
     assert validation["can_freeze"] is True
+    diff = next(d for d in validation["review_diffs"] if d["type"] == "guideline_unverified")
+    assert diff["severity"] == "warn"
+    assert diff["location"]["item_id"] == "HX.05"
+    assert diff["location"]["reason"] == "low_relevance"
+    assert diff["location"]["guideline_text"]
+    assert diff["location"]["similarity"] < 0.03
+    assert diff["hint"]
 
 
 def test_three_way_consistency_flags_unpromised_and_orphan_slots():
@@ -198,6 +205,47 @@ def test_freeze_requires_per_diff_adjudication(seeded_path, tmp_path):
                     for d in diffs
                 ],
             )
+    finally:
+        conn.close()
+
+
+def test_freeze_requires_guideline_adjudication(seeded_path, tmp_path):
+    path = tmp_path / "guideline_adjudication.db"
+    shutil.copy(seeded_path, path)
+    conn = db.connect(path)
+    try:
+        payload = build_bundle_payload()
+        payload["station_id"] = "ST-GUIDE-ADJ-001"
+        payload["title"] = "指南待核验裁决测试站"
+        target = next(item for item in payload["rubric"] if item["item_id"] == "HX.05")
+        target["guideline_ref"] = "ESC-ACS-2023 §3.2"
+        validation = validate_bundle(payload)
+        assert validation["can_freeze"] is True
+        diffs = [d for d in validation["review_diffs"] if d["type"] == "guideline_unverified"]
+        assert len(diffs) == 1
+
+        with pytest.raises(ValueError, match="逐条裁决"):
+            freeze_bundle(conn, payload, actor="test", version="1.0")
+
+        bundle = freeze_bundle(
+            conn,
+            payload,
+            actor="test",
+            version="1.0",
+            adjudications=[
+                {
+                    "diff_id": diffs[0]["diff_id"],
+                    "decision": "accept",
+                    "note": "本地指南适用性已由临床教育专家核对",
+                }
+            ],
+        )
+        recorded = conn.execute(
+            "SELECT * FROM consistency_adjudications WHERE bundle_id = ? AND diff_type = 'guideline_unverified'",
+            (bundle["bundle_id"],),
+        ).fetchall()
+        assert len(recorded) == 1
+        assert recorded[0]["decision"] == "accept"
     finally:
         conn.close()
 

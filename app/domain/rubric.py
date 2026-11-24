@@ -227,16 +227,56 @@ def validate_bundle(payload: dict[str, Any]) -> dict[str, Any]:
     guideline_issues: list[str] = []
     guideline_pending: list[str] = []
     guideline_similarity: dict[str, float] = {}
+    guideline_diffs: list[dict[str, Any]] = []
     for item in rubric:
+        item_id = item.get("item_id")
         ref = _text(item.get("guideline_ref"))
+        anchor = item.get("anchor") or {}
+        location = {
+            "section": "rubric",
+            "item_id": item_id,
+            "sentence": _text(anchor.get("observable")),
+            "guideline_ref": ref,
+        }
         if ref and ref not in kb:
-            guideline_pending.append(f"{item.get('item_id')}: 指南条款未在知识库中命中，需人工核验「{ref}」")
+            message = f"{item_id}: 指南条款未在知识库中命中，需人工核验「{ref}」"
+            guideline_pending.append(message)
+            guideline_diffs.append(
+                {
+                    "diff_id": _diff_id("guideline_unverified", f"{item_id}:{ref}"),
+                    "type": "guideline_unverified",
+                    "severity": "warn",
+                    "message": message,
+                    "location": {
+                        **location,
+                        "reason": "not_in_kb",
+                        "guideline_text": None,
+                        "similarity": None,
+                    },
+                    "hint": "补充指南原文到知识库，或人工确认该条款适用并记录理由",
+                }
+            )
         elif ref:
-            score = guideline_relevance(item, str(kb[ref].get("text") or ""))
-            guideline_similarity[item.get("item_id")] = score
+            text = str(kb[ref].get("text") or "")
+            score = guideline_relevance(item, text)
+            guideline_similarity[item_id] = score
             if score < GUIDELINE_RELEVANCE_FLOOR:
-                guideline_pending.append(
-                    f"{item.get('item_id')}: 指南条款语义相关性低（{score:.2f}），需人工确认适用性「{ref}」"
+                message = f"{item_id}: 指南条款语义相关性低（{score:.2f}），需人工确认适用性「{ref}」"
+                guideline_pending.append(message)
+                guideline_diffs.append(
+                    {
+                        "diff_id": _diff_id("guideline_unverified", f"{item_id}:{ref}"),
+                        "type": "guideline_unverified",
+                        "severity": "warn",
+                        "message": message,
+                        "location": {
+                            **location,
+                            "reason": "low_relevance",
+                            "guideline_text": text,
+                            "similarity": score,
+                        },
+                        "hint": "人工核对行为锚与指南条款是否匹配；不匹配应更换引用或改写行为锚",
+                    }
                 )
     guideline_status = "fail" if guideline_issues else ("warn" if guideline_pending else "pass")
 
@@ -400,6 +440,7 @@ def validate_bundle(payload: dict[str, Any]) -> dict[str, Any]:
             "label": "指南一致性",
             "rule": "guideline_ref 必须能在知识库中检索到原文，且与行为锚语义相关",
             "status": guideline_status,
+            "details": {"pending": guideline_pending, "diffs": guideline_diffs},
             "issues": guideline_issues + guideline_pending,
         },
         {
@@ -422,6 +463,7 @@ def validate_bundle(payload: dict[str, Any]) -> dict[str, Any]:
         if check["status"] == "fail"
         for i in check["issues"]
     ]
+    review_diffs = diffs + guideline_diffs
     return {
         "checks": checks,
         "issues": issues,
@@ -429,6 +471,7 @@ def validate_bundle(payload: dict[str, Any]) -> dict[str, Any]:
         "can_freeze": not blocking,
         "guideline_similarity": guideline_similarity,
         "consistency_details": consistency_details,
+        "review_diffs": review_diffs,
         "counts": {
             "items": len(rubric),
             "critical": sum(1 for i in rubric if i.get("critical")),
@@ -436,6 +479,7 @@ def validate_bundle(payload: dict[str, Any]) -> dict[str, Any]:
             "unpromised_items": len(unpromised_items),
             "extra_slots_without_purpose": len(orphan_extra_slots),
             "consistency_diffs": len(diffs),
+            "review_diffs": len(review_diffs),
         },
     }
 
