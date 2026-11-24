@@ -101,6 +101,25 @@ def test_guideline_semantic_mismatch_is_pending_not_blocking():
     assert validation["can_freeze"] is True
 
 
+def test_three_way_consistency_flags_unpromised_and_orphan_slots():
+    payload = build_bundle_payload()
+    payload["instruction_item_refs"] = payload["instruction_item_refs"][:-1]
+    payload["extra_slots"][0].pop("purpose")
+    validation = validate_bundle(payload)
+    consistency = next(check for check in validation["checks"] if check["key"] == "consistency")
+    assert consistency["status"] == "warn"
+    assert consistency["details"]["unpromised_items"]
+    assert consistency["details"]["extra_slots_without_purpose"] == [1]
+    assert validation["can_freeze"] is True
+
+    broken = build_bundle_payload()
+    broken["extra_slots"][0]["linked_items"] = ["NO.SUCH"]
+    validation = validate_bundle(broken)
+    consistency = next(check for check in validation["checks"] if check["key"] == "consistency")
+    assert consistency["status"] == "fail"
+    assert validation["can_freeze"] is False
+
+
 def test_vague_anchor_blocks_freeze():
     payload = build_bundle_payload()
     bad = copy.deepcopy(payload)

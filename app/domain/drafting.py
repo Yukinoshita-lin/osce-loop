@@ -869,6 +869,7 @@ def generate_bundle_draft(
             "content": case["chief_complaint"],
             "phase": "opening",
             "disclosure": "active",
+            "purpose": "chief_complaint",
             "triggers": [],
             "entities": ["不舒服"],
         },
@@ -876,6 +877,7 @@ def generate_bundle_draft(
             "content": case["unrelated"],
             "phase": "information_gathering",
             "disclosure": "on_trust",
+            "purpose": "unrelated_concern",
             "triggers": [],
             "entities": ["额外诉求"],
         },
@@ -886,6 +888,7 @@ def generate_bundle_draft(
                 "content": case["extra_distractor"],
                 "phase": "closing",
                 "disclosure": "on_trust",
+                "purpose": "ambiguity",
                 "triggers": [],
                 "entities": ["时间压力"],
             }

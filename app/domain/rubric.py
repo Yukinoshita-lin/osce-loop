@@ -215,13 +215,44 @@ def validate_bundle(payload: dict[str, Any]) -> dict[str, Any]:
     missing_refs = [r for r in refs if r not in rubric_ids]
     if missing_refs:
         issues.append(f"考生指令引用了不存在的评分项: {', '.join(missing_refs)}")
+    unpromised_items = sorted(rubric_ids - set(refs))
+    extra_slots = [slot for slot in payload.get("extra_slots") or [] if isinstance(slot, dict)]
+    orphan_extra_slots = [
+        index
+        for index, slot in enumerate(extra_slots, start=1)
+        if not _text(slot.get("purpose"))
+    ]
+    broken_slot_links = [
+        f"附加信息槽 {index} 关联不存在的评分项 {linked}"
+        for index, slot in enumerate(extra_slots, start=1)
+        for linked in slot.get("linked_items") or []
+        if linked not in rubric_ids
+    ]
+    issues.extend(broken_slot_links)
+    consistency_pending: list[str] = []
+    if unpromised_items:
+        consistency_pending.append(
+            "以下评分项未被考生指令显式承诺：" + "、".join(unpromised_items)
+        )
+    if orphan_extra_slots:
+        consistency_pending.append(
+            "以下附加信息槽未标注 purpose（共病/无关诉求/模糊/红旗等）："
+            + "、".join(f"#{index}" for index in orphan_extra_slots)
+        )
     slot_issues = [i for i in issues if "缺少证据探针" in i or "weight" in i or "evidence_type" in i or "phase 非法" in i]
     feedback_issues = [i for i in issues if "替代话术" in i]
     consistency_status = (
         "fail"
-        if (missing_refs or required_issues or feedback_issues)
-        else ("warn" if slot_issues else "pass")
+        if (missing_refs or required_issues or feedback_issues or broken_slot_links)
+        else ("warn" if (slot_issues or consistency_pending) else "pass")
     )
+    consistency_details = {
+        "promised_items": sorted(set(refs)),
+        "unpromised_items": unpromised_items,
+        "extra_slots": len(extra_slots),
+        "extra_slots_without_purpose": orphan_extra_slots,
+        "broken_slot_links": broken_slot_links,
+    }
 
     def status_of(entries: list[str]) -> str:
         return "fail" if entries else "pass"
@@ -253,7 +284,13 @@ def validate_bundle(payload: dict[str, Any]) -> dict[str, Any]:
             "label": "三方一致",
             "rule": "题干承诺的考点 ⊆ 脚本可提供的信息 ⊆ rubric 评的内容",
             "status": consistency_status,
-            "issues": [i for i in issues if i not in observability_issues and i not in reachability_issues],
+            "details": consistency_details,
+            "issues": [
+                i
+                for i in issues
+                if i not in observability_issues and i not in reachability_issues
+            ]
+            + consistency_pending,
         },
     ]
     blocking = [
@@ -268,10 +305,13 @@ def validate_bundle(payload: dict[str, Any]) -> dict[str, Any]:
         "blocking": blocking,
         "can_freeze": not blocking,
         "guideline_similarity": guideline_similarity,
+        "consistency_details": consistency_details,
         "counts": {
             "items": len(rubric),
             "critical": sum(1 for i in rubric if i.get("critical")),
             "guideline_pending": len(guideline_pending),
+            "unpromised_items": len(unpromised_items),
+            "extra_slots_without_purpose": len(orphan_extra_slots),
         },
     }
 
