@@ -10,6 +10,7 @@ from .ab import ab_report
 from .bundle import list_bundles
 from .consent import consent_status
 from .fairness import fairness_report
+from .stats import quadratic_weighted_kappa
 from .sus import sus_summary
 
 GATES = [
@@ -197,8 +198,18 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
     ab = ab_report(conn)
     fairness = fairness_report(conn)
     chain = db.verify_audit_chain(conn)
+    rolling_rows = conn.execute(
+        "SELECT ai_score, gold_score FROM score_records "
+        "WHERE ai_score IS NOT NULL AND gold_score IS NOT NULL "
+        "ORDER BY created_at DESC, rowid DESC LIMIT 200"
+    ).fetchall()
+    rolling_qwk = quadratic_weighted_kappa(
+        [row["ai_score"] for row in rolling_rows],
+        [row["gold_score"] for row in rolling_rows],
+    )
     return {
         "qwk_ai": report.get("qwk_ai"),
+        "rolling_qwk": rolling_qwk,
         "evidence_rate": (report.get("evidence") or {}).get("rate"),
         "avg_review_seconds": (report.get("review") or {}).get("avg_seconds"),
         "edit_rate": (report.get("review") or {}).get("edit_rate"),
@@ -295,6 +306,24 @@ def evaluate_gates(conn, report: dict[str, Any], current_stage: str) -> dict[str
                 "level": "danger",
                 "title": "QWK 跌破自动降级线",
                 "detail": f"当前 QWK {qwk}，低于 0.70 − 0.05，应自动降级并暂停 AI 建议分。",
+            }
+        )
+    rolling_qwk = values.get("rolling_qwk")
+    if rolling_qwk is not None and rolling_qwk < 0.65:
+        alerts.append(
+            {
+                "level": "danger",
+                "title": "滚动 200 条 QWK 跌破降级线",
+                "detail": f"最近 200 条有金标准的记录 QWK {rolling_qwk}，低于 0.70 − 0.05，需立即降级。",
+            }
+        )
+    subgroup_gap = values.get("subgroup_gap")
+    if subgroup_gap is not None and subgroup_gap > 0.20:
+        alerts.append(
+            {
+                "level": "danger",
+                "title": "亚组分数差超过 0.20 SD",
+                "detail": f"当前最大亚组差 {subgroup_gap} SD；连续超标应自动降级并复核该组边缘案例。",
             }
         )
     if report.get("integrity_gap_rate", 0) > 0.02:

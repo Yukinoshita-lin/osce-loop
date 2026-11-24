@@ -58,3 +58,17 @@ def test_tampered_audit_chain_fails_replay_and_alerts(tmp_path):
     assert gates["metric_values"]["audit_replay"] == 0.0
     assert any("审计链" in alert["title"] for alert in gates["alerts"])
     conn.close()
+
+
+def test_rolling_qwk_and_subgroup_gap_alerts(tmp_path, monkeypatch):
+    conn = _conn(tmp_path)
+    monkeypatch.setattr("app.domain.gates.quadratic_weighted_kappa", lambda a, b: 0.5)
+    monkeypatch.setattr(
+        "app.domain.gates.fairness_report",
+        lambda conn, bundle_id=None: {"overall_gap_sd": 0.25},
+    )
+    gates = evaluate_gates(conn, _report(0.2, 40), "G0_offline")
+    titles = [alert["title"] for alert in gates["alerts"]]
+    assert any("滚动 200 条" in title for title in titles)
+    assert any("亚组分数差" in title for title in titles)
+    conn.close()
