@@ -1647,6 +1647,14 @@ async function viewBundle() {
 
     ${adjudicationCard}
 
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-title">冻结完整性核验<span class="sub">bundle_hash · 派生资产 · 评分版本戳 · 冻结审计锚点</span></div>
+      <div class="btn-row" style="align-items:center;gap:8px">
+        <button class="btn small" data-action="bundle-verify" data-bundle="${dataAttr(data.bundle_id)}">核验当前版本</button>
+        <span id="bundle-verify-result" class="tiny muted">只读重算，不修改冻结内容；核验动作写入审计。</span>
+      </div>
+    </div>
+
     <div class="grid c2" style="margin-bottom:14px">
       <div class="card">
         <div class="card-title">冻结标识<span class="sub">不可变</span></div>
@@ -3610,6 +3618,31 @@ document.addEventListener('click', async (e) => {
       state.bundleFocus = result.bundle.bundle_id;
       await viewBundle();
     } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'bundle-verify') {
+    const box = $('#bundle-verify-result');
+    try {
+      const result = await api(`/api/bundles/${encodeURIComponent(el.dataset.bundle)}/verify-integrity`, {
+        method: 'POST',
+        body: {},
+      });
+      const report = result.integrity;
+      const statusPill = report.status === 'pass'
+        ? '<span class="pill teal">通过</span>'
+        : report.status === 'warn'
+          ? '<span class="pill amber">待核验</span>'
+          : '<span class="pill red">失败</span>';
+      if (box) {
+        box.innerHTML = `${statusPill} ${report.checks.map((c) => `<span class="pill ${c.passed ? 'teal' : c.missing ? 'amber' : 'red'}" title="${dataAttr(c.label)}">${esc(c.key)}</span>`).join(' ')} <span class="mono">${esc((report.bundle_hash || '').slice(0, 16))}…</span>`;
+      }
+      toast(report.status === 'pass'
+        ? '站包完整性核验通过'
+        : `站包完整性核验：${report.status === 'warn' ? '缺少冻结审计锚点' : '发现不一致，请人工排查'}`, report.status === 'fail');
+    } catch (err) {
+      if (box) box.innerHTML = `<span class="pill red">核验失败</span> ${esc(err.message)}`;
       toast(err.message, true);
     }
     return;

@@ -294,6 +294,8 @@ def rbac_allowed(method: str, path: str, role: str) -> bool:
         "/api/schedule/policy",
     ):
         return role == "exam_manager"
+    if path.startswith("/api/bundles/") and path.endswith("/verify-integrity"):
+        return role in ("exam_manager", "auditor")
     if path.startswith("/api/bundles/"):
         return role == "exam_manager"
     if path == "/api/retention/purge":

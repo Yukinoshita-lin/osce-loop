@@ -78,6 +78,7 @@ from .domain.bundle import (
     list_overrides,
     list_station_bundles,
 )
+from .domain.bundle_integrity import verify_bundle_integrity
 from .domain.calibration import calibration_report, import_gold_scores, parse_gold_file
 from .domain.consent import consent_status, record_consent
 from .domain.cost import ai_cost_summary
@@ -1502,6 +1503,17 @@ class ConsistencyDecisionBody(BaseModel):
     diff_id: str = Field(min_length=1, max_length=40)
     decision: str = Field(pattern=r"^(accept|fix)$")
     note: str = Field(default="", max_length=300)
+
+
+@app.post("/api/bundles/{bundle_id}/verify-integrity")
+def verify_bundle_integrity_endpoint(bundle_id: str, request: Request, conn=Depends(get_conn)):
+    try:
+        result = verify_bundle_integrity(
+            conn, bundle_id, actor=request.state.user["display_name"]
+        )
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return {"ok": result["status"] != "fail", "integrity": result}
 
 
 class BundleFreezeBody(BaseModel):
