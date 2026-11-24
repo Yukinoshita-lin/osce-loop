@@ -230,6 +230,19 @@ CREATE TABLE IF NOT EXISTS feedback_surveys (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS asr_benchmarks (
+    benchmark_id TEXT PRIMARY KEY,
+    label TEXT,
+    reference_hash TEXT NOT NULL,
+    hypothesis_hash TEXT NOT NULL,
+    reference_chars INTEGER NOT NULL,
+    hypothesis_chars INTEGER NOT NULL,
+    terms TEXT,
+    metrics TEXT NOT NULL,
+    actor TEXT,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS ai_disclosure_acks (
     ack_id TEXT PRIMARY KEY,
     attempt_id TEXT NOT NULL,

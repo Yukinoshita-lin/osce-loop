@@ -2129,6 +2129,25 @@ function fairnessSectionHtml(fairness) {
     </div>`;
 }
 
+function asrQualityHtml(quality) {
+  const latest = quality && quality.latest;
+  if (!latest) {
+    return '<div class="tiny muted">尚未采集 ASR 词错率样本。用同一段参考文本与 ASR 输出计算，医学专名目标 ≤ 8%。</div>';
+  }
+  const m = latest.metrics || {};
+  const metricLabel = m.metric === 'medical_term_error_rate' ? '医学专名错误率' : 'Token 错误率';
+  const recent = (quality.recent || []).slice(1, 4).map((item) => `
+    <div class="version-row"><span class="k">${esc(item.label)}</span><span class="v">${pct(item.metrics.error_rate, 1)} ${fairPill(item.metrics.status)}</span></div>
+  `).join('');
+  return `
+    <div class="version-row"><span class="k">最近：${esc(latest.label)}</span><span class="v">${pct(m.error_rate, 1)} ${fairPill(m.status)}</span></div>
+    <div class="tiny muted">${metricLabel} · 阈值 ≤ ${pct(m.threshold, 0)} · 参考 ${m.reference_tokens} tokens · 编辑距离 ${m.edit_distance}</div>
+    ${m.medical_term_error_rate !== null && m.medical_term_error_rate !== undefined ? `<div class="tiny muted">医学专名召回 ${pct(m.medical_term_recall, 1)}${(m.missing_terms || []).length ? ` · 未识别：${esc(m.missing_terms.join('、'))}` : ''}</div>` : ''}
+    <div class="tiny muted">${esc(latest.actor || '系统')} · ${fmtTime(latest.created_at)} · 参考哈希 ${esc((latest.reference_hash || '').slice(0, 18))}…</div>
+    ${recent ? `<div class="sep"></div><div class="tiny muted">最近样本</div>${recent}` : ''}
+  `;
+}
+
 function selfCheckHtml(selfCheck) {
   if (!selfCheck) {
     return '<div class="tiny muted">尚未运行治理自检。自检会检查 QWK、证据缺口、亚组差异、版本戳与教师工时。</div>';
@@ -2649,6 +2668,22 @@ async function viewQuality() {
         <div class="btn-row" style="margin-bottom:6px"><button class="btn small" data-action="ops-ai-check">测试 AI 连通性</button></div>
         <div id="ai-check-result" class="tiny muted" style="margin-bottom:6px"></div>
         <div class="tiny muted">模型调用强制携带 model_version / prompt_version / rubric_version；缺任一项的记录视为无效。</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">ASR 医学专名质量<span class="sub">医学专名错误率 ≤ 8% · 只存哈希与指标</span></div>
+      ${asrQualityHtml(data.asr_quality || {})}
+      <div class="sep"></div>
+      <div class="grid c2" style="gap:10px">
+        <label class="field">样本标签<input id="asr-bench-label" class="input" maxlength="80" value="胸痛问诊样本"></label>
+        <label class="field">医学专名（逗号分隔）<input id="asr-bench-terms" class="input" placeholder="胸痛, 放射, 心电图"></label>
+      </div>
+      <label class="field" style="margin-top:8px">参考文本<textarea id="asr-bench-reference" class="input" rows="3" placeholder="粘贴人工校对文本"></textarea></label>
+      <label class="field" style="margin-top:8px">ASR 输出<textarea id="asr-bench-hypothesis" class="input" rows="3" placeholder="粘贴 ASR 转写"></textarea></label>
+      <div class="btn-row" style="margin-top:8px">
+        <button class="btn small primary" data-action="asr-benchmark">计算医学专名错误率</button>
+        <span class="tiny muted">参考与输出均不超过 4000 字符；原文不落库。</span>
       </div>
     </div>
 
@@ -3287,6 +3322,35 @@ document.addEventListener('click', async (e) => {
       toast(result.ok ? (result.mode === 'mock' ? '当前为 Mock 提供方' : 'AI 连通性自检通过') : 'AI 连通性自检失败', !result.ok);
     } catch (err) {
       if (box) box.innerHTML = `<span class="pill red">自检失败</span> ${esc(err.message)}`;
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'asr-benchmark') {
+    const reference = ($('#asr-bench-reference') || {}).value || '';
+    const hypothesis = ($('#asr-bench-hypothesis') || {}).value || '';
+    const terms = (($('#asr-bench-terms') || {}).value || '')
+      .split(/[,，\s]+/)
+      .map((term) => term.trim())
+      .filter(Boolean);
+    if (!reference.trim() || !hypothesis.trim()) {
+      toast('请填写参考文本与 ASR 输出', true);
+      return;
+    }
+    try {
+      const result = await api('/api/asr/benchmarks', {
+        method: 'POST',
+        body: {
+          label: (($('#asr-bench-label') || {}).value || 'ASR 样本').trim(),
+          reference,
+          hypothesis,
+          terms,
+          actor: state.reviewer || 'ASR 评测员',
+        },
+      });
+      toast(`ASR 错误率 ${pct(result.benchmark.metrics.error_rate, 1)} · ${result.benchmark.metrics.status === 'pass' ? '达标' : '未达标'}`, result.benchmark.metrics.status !== 'pass');
+      await viewQuality();
+    } catch (err) {
       toast(err.message, true);
     }
     return;

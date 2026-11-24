@@ -43,6 +43,12 @@ from .domain.accessibility import (
     survey_for_attempt,
 )
 from .domain.appeals import capture_snapshot
+from .domain.asr_benchmark import (
+    MAX_BENCHMARK_CHARS,
+    benchmark_summary,
+    list_benchmarks,
+    record_benchmark,
+)
 from .domain.audit_search import search_audit_events
 from .domain.auth import (
     SESSION_TTL_HOURS,
@@ -1754,6 +1760,7 @@ def quality(conn=Depends(get_conn)):
         "ai_provider": scoring_provider_info(),
         "asr_provider": build_asr_provider().info,
         "sus": sus_summary(conn),
+        "asr_quality": benchmark_summary(conn),
         "calibration": calibration_report(conn),
         "audit_anchors": db.list_audit_anchors(conn, limit=5),
         "versions": {
@@ -1816,6 +1823,35 @@ def quality_sus(body: SusBody, request: Request, conn=Depends(get_conn)):
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"ok": True, "response": record, "sus": sus_summary(conn)}
+
+
+class AsrBenchmarkBody(BaseModel):
+    label: str = Field(default="ASR 样本", max_length=80)
+    reference: str = Field(min_length=1, max_length=MAX_BENCHMARK_CHARS)
+    hypothesis: str = Field(min_length=1, max_length=MAX_BENCHMARK_CHARS)
+    terms: list[str] = Field(default_factory=list)
+    actor: str = Field(default="ASR 评测员", max_length=40)
+
+
+@app.post("/api/asr/benchmarks")
+def asr_benchmark(body: AsrBenchmarkBody, conn=Depends(get_conn)):
+    try:
+        record = record_benchmark(
+            conn,
+            label=body.label,
+            reference=body.reference,
+            hypothesis=body.hypothesis,
+            terms=body.terms,
+            actor=body.actor,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "benchmark": record, "quality": benchmark_summary(conn)}
+
+
+@app.get("/api/asr/benchmarks")
+def asr_benchmarks(limit: int = Query(20, ge=1, le=100), conn=Depends(get_conn)):
+    return {"benchmarks": list_benchmarks(conn, limit=limit), "quality": benchmark_summary(conn)}
 
 
 def _count_by(rows: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:

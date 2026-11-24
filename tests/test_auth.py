@@ -105,6 +105,10 @@ def test_rbac_write_matrix():
     assert rbac_allowed("POST", "/api/bundles/validate", "exam_manager") is True
     assert rbac_allowed("POST", "/api/bundles/freeze", "examiner") is False
     assert rbac_allowed("POST", "/api/bundles/freeze", "exam_manager") is True
+    assert rbac_allowed("GET", "/api/asr/benchmarks", "auditor") is True
+    assert rbac_allowed("GET", "/api/asr/benchmarks", "student") is False
+    assert rbac_allowed("POST", "/api/asr/benchmarks", "exam_manager") is True
+    assert rbac_allowed("POST", "/api/asr/benchmarks", "auditor") is False
     assert rbac_allowed("POST", "/api/auth/logout", "auditor") is True
 
 
