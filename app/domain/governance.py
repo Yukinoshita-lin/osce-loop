@@ -3,23 +3,139 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from .. import db
 from ..config import MODEL_VERSION, PROMPT_VERSION
 from .ab import ab_report
-from .bundle import apply_authority_reset
+from .bundle import apply_authority_reset, apply_item_downgrades, list_bundles
 from .fairness import fairness_report
 from .gates import evaluate_gates
-from .stats import quality_report
+from .stats import quality_report, quadratic_weighted_kappa
 
 STAGE_ORDER = ["G0_offline", "G1_practice", "G2_simulation", "G3_limited"]
+# 运行期降级按当前闸门 QWK 目标减 0.05；G1 没有 QWK 指标，沿用 G0 基线。
+QWK_STAGE_TARGET = {"G0_offline": 0.70, "G1_practice": 0.70, "G2_simulation": 0.75, "G3_limited": 0.80}
+INTEGRITY_GAP_LIMIT = 0.02
+SUBGROUP_GAP_LIMIT = 0.20
+SUBGROUP_WEEKS_REQUIRED = 2
+SUBGROUP_HISTORY_KEY = "safety_subgroup_history"
 
 
-def run_self_check(conn, *, actor: str = "系统", apply: bool = True) -> dict[str, Any]:
+def _week_key(moment: date | datetime) -> str:
+    year, week, _ = moment.isocalendar()
+    return f"{year}-W{week:02d}"
+
+
+def _week_start(key: str) -> date:
+    year, week = key.split("-W")
+    return date.fromisocalendar(int(year), int(week), 1)
+
+
+def _previous_week(key: str) -> str:
+    return _week_key(_week_start(key) - timedelta(days=7))
+
+
+def _load_subgroup_history(conn) -> dict[str, float]:
+    raw = db.get_state(conn, SUBGROUP_HISTORY_KEY)
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    history: dict[str, float] = {}
+    for key, value in data.items():
+        try:
+            history[str(key)] = float(value)
+        except (TypeError, ValueError):
+            continue
+    return history
+
+
+def _record_subgroup_observation(conn, week: str, gap: float) -> None:
+    history = _load_subgroup_history(conn)
+    history[week] = round(float(gap), 4)
+    ordered = sorted(history.items(), key=lambda item: _week_start(item[0]))[-8:]
+    db.set_state(conn, SUBGROUP_HISTORY_KEY, json.dumps(dict(ordered), ensure_ascii=False))
+
+
+def _subgroup_streak(history: dict[str, float], week: str, gap: float | None) -> list[str]:
+    """返回连续超阈值的周列表；当前周无数据时从最近一次观测起算。"""
+    observations = dict(history)
+    if gap is not None:
+        observations[week] = float(gap)
+    elif not observations:
+        return []
+    else:
+        week = max(observations, key=_week_start)
+    weeks: list[str] = []
+    cursor = week
+    while True:
+        value = observations.get(cursor)
+        if value is None or value <= SUBGROUP_GAP_LIMIT:
+            break
+        weeks.append(cursor)
+        cursor = _previous_week(cursor)
+    return list(reversed(weeks))
+
+
+def _rolling_qwk(conn, limit: int = 200) -> float | None:
+    rows = conn.execute(
+        "SELECT ai_score, gold_score FROM score_records "
+        "WHERE ai_score IS NOT NULL AND gold_score IS NOT NULL "
+        "ORDER BY created_at DESC, rowid DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    return quadratic_weighted_kappa(
+        [row["ai_score"] for row in rows],
+        [row["gold_score"] for row in rows],
+    )
+
+
+def _station_integrity(conn) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        "SELECT a.bundle_id, b.station_id, b.title, COUNT(*) AS attempts, "
+        "SUM(CASE WHEN a.integrity_gap = 1 THEN 1 ELSE 0 END) AS gap_attempts "
+        "FROM attempts a LEFT JOIN bundles b ON b.bundle_id = a.bundle_id "
+        "GROUP BY a.bundle_id ORDER BY a.bundle_id"
+    ).fetchall()
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        attempts = int(row["attempts"] or 0)
+        gaps = int(row["gap_attempts"] or 0)
+        rate = round(gaps / attempts, 4) if attempts else 0.0
+        result.append(
+            {
+                "bundle_id": row["bundle_id"],
+                "station_id": row["station_id"],
+                "title": row["title"],
+                "attempts": attempts,
+                "gap_attempts": gaps,
+                "rate": rate,
+                "breach": rate > INTEGRITY_GAP_LIMIT,
+            }
+        )
+    return result
+
+
+def run_self_check(
+    conn,
+    *,
+    actor: str = "系统",
+    apply: bool = True,
+    now: datetime | None = None,
+) -> dict[str, Any]:
     report = quality_report(conn)
     fairness = fairness_report(conn)
     ab = ab_report(conn)
+    stage = db.get_state(conn, "release_stage", "G0_offline") or "G0_offline"
+    qwk_target = QWK_STAGE_TARGET.get(stage, 0.70)
+    qwk_floor = round(qwk_target - 0.05, 2)
+    week = _week_key(now or datetime.now(timezone.utc).astimezone())
 
     records = conn.execute("SELECT * FROM score_records WHERE ai_score IS NOT NULL").fetchall()
     stamped = sum(
@@ -30,40 +146,57 @@ def run_self_check(conn, *, actor: str = "系统", apply: bool = True) -> dict[s
     version_complete = len(records) > 0 and stamped == len(records)
 
     checks: list[dict[str, Any]] = []
-    qwk = report.get("qwk_ai")
+    qwk = _rolling_qwk(conn)
     checks.append(
         {
             "key": "qwk",
-            "label": "滚动 QWK",
+            "label": f"滚动 200 条 QWK（{stage} 降级线 {qwk_floor}）",
             "value": qwk,
-            "threshold": 0.65,
-            "status": "pass" if (qwk is None or qwk >= 0.65) else "fail",
+            "threshold": qwk_floor,
+            "status": "pass" if (qwk is None or qwk >= qwk_floor) else "fail",
             "action": "自动把评分能力降为 extract，直到重新校准达标",
             "auto_apply": True,
         }
     )
-    integrity = report.get("integrity_gap_rate", 0)
+    stations = _station_integrity(conn)
+    breaches = [row for row in stations if row["breach"]]
+    integrity = max((row["rate"] for row in stations), default=0.0)
     checks.append(
         {
             "key": "integrity_gap",
-            "label": "证据链缺口率",
+            "label": "站级证据链缺口率（>2% 自动降级该站）",
             "value": integrity,
-            "threshold": 0.02,
-            "status": "pass" if integrity <= 0.02 else "fail",
-            "action": "相关场次全站人工复核；不因单场缺口全局降级",
-            "auto_apply": False,
+            "threshold": INTEGRITY_GAP_LIMIT,
+            "status": "fail" if breaches else "pass",
+            "action": "只降级缺口超限的考站，相关场次全站人工复核",
+            "auto_apply": True,
+            "stations": stations,
         }
     )
     subgroup = fairness.get("overall_gap_sd")
+    history = _load_subgroup_history(conn)
+    streak_weeks = _subgroup_streak(history, week, subgroup)
+    if apply and subgroup is not None:
+        _record_subgroup_observation(conn, week, subgroup)
+    subgroup_fail = len(streak_weeks) >= SUBGROUP_WEEKS_REQUIRED
+    if subgroup is None:
+        subgroup_status = "unmeasured"
+    elif subgroup_fail:
+        subgroup_status = "fail"
+    elif subgroup > SUBGROUP_GAP_LIMIT:
+        subgroup_status = "observing"
+    else:
+        subgroup_status = "pass"
     checks.append(
         {
             "key": "subgroup_gap",
-            "label": "亚组分数差",
+            "label": "亚组分数差（连续 2 周 >0.20 SD 自动降级）",
             "value": subgroup,
-            "threshold": 0.20,
-            "status": "unmeasured" if subgroup is None else ("pass" if subgroup <= 0.20 else "fail"),
-            "action": "自动降级相关能力并启动公平性纠正动作",
-            "auto_apply": True,
+            "threshold": SUBGROUP_GAP_LIMIT,
+            "status": subgroup_status,
+            "action": "自动下调相关能力并启动公平性纠正动作",
+            "auto_apply": subgroup_status == "fail",
+            "streak_weeks": streak_weeks,
         }
     )
     checks.append(
@@ -96,16 +229,64 @@ def run_self_check(conn, *, actor: str = "系统", apply: bool = True) -> dict[s
     )
 
     failing = [c for c in checks if c["status"] == "fail"]
-    auto_failing = [c for c in failing if c["auto_apply"]]
+    bundles = list_bundles(conn)
+    model_version = db.get_state(conn, "model_version", MODEL_VERSION)
+    prompt_version = db.get_state(conn, "prompt_version", PROMPT_VERSION)
     changes: list[dict[str, Any]] = []
-    if apply and auto_failing:
-        changes = apply_authority_reset(
-            conn,
-            reason="治理自检触发自动降级：" + "、".join(c["label"] for c in auto_failing),
-            actor=actor,
-            model_version=db.get_state(conn, "model_version", MODEL_VERSION),
-            prompt_version=db.get_state(conn, "prompt_version", PROMPT_VERSION),
-        )
+    if apply:
+        if any(c["key"] == "qwk" for c in failing if c["auto_apply"]):
+            changes.extend(
+                apply_authority_reset(
+                    conn,
+                    reason=f"治理自检：滚动 QWK {qwk} 低于 {qwk_floor}，暂停 AI 建议分",
+                    actor=actor,
+                    model_version=model_version,
+                    prompt_version=prompt_version,
+                    floor="extract",
+                )
+            )
+        for row in breaches:
+            bundle = next(
+                (entry for entry in bundles if entry["bundle_id"] == row["bundle_id"]), None
+            )
+            if not bundle:
+                continue
+            item_ids = [
+                item.get("item_id")
+                for item in bundle["payload"].get("rubric", [])
+                if item.get("item_id")
+            ]
+            changes.extend(
+                apply_item_downgrades(
+                    conn,
+                    bundle,
+                    item_ids,
+                    reason=f"站级 integrity_gap {row['rate']:.1%} > 2%，自动降级该站",
+                    actor=actor,
+                    model_version=model_version,
+                    prompt_version=prompt_version,
+                    floor="extract",
+                )
+            )
+        if subgroup_fail:
+            for bundle in bundles:
+                item_ids = [
+                    item.get("item_id")
+                    for item in bundle["payload"].get("rubric", [])
+                    if item.get("item_id")
+                ]
+                changes.extend(
+                    apply_item_downgrades(
+                        conn,
+                        bundle,
+                        item_ids,
+                        reason=f"亚组分数差连续 {len(streak_weeks)} 周 > 0.20 SD，自动降级",
+                        actor=actor,
+                        model_version=model_version,
+                        prompt_version=prompt_version,
+                        floor="extract",
+                    )
+                )
 
     trigger_summary = "、".join(c["label"] for c in failing) if failing else "全部通过"
     detail = {
@@ -114,10 +295,14 @@ def run_self_check(conn, *, actor: str = "系统", apply: bool = True) -> dict[s
         "metrics": {
             "qwk_ai": qwk,
             "qwk_human": report.get("qwk_human"),
+            "qwk_floor": qwk_floor,
             "integrity_gap_rate": integrity,
             "subgroup_gap_sd": subgroup,
+            "subgroup_streak_weeks": streak_weeks,
             "teacher_hours_reduction": ab.get("comparison", {}).get("teacher_hours_reduction"),
         },
+        "station_integrity": stations,
+        "week": week,
     }
     check_id = db.new_id("gcheck")
     conn.execute(
@@ -133,6 +318,25 @@ def run_self_check(conn, *, actor: str = "系统", apply: bool = True) -> dict[s
         ),
     )
     conn.commit()
+    db.append_audit(
+        conn,
+        actor=actor,
+        action="governance.self_check",
+        object_type="System",
+        object_id=check_id,
+        before=None,
+        after={
+            "trigger_summary": trigger_summary,
+            "applied": bool(changes),
+            "changes": len(changes),
+            "rolling_qwk": qwk,
+            "qwk_floor": qwk_floor,
+            "integrity_breaches": [row["bundle_id"] for row in breaches],
+            "subgroup_streak_weeks": streak_weeks,
+        },
+        model_version=model_version,
+        prompt_version=prompt_version,
+    )
     return {
         "check_id": check_id,
         "trigger_summary": trigger_summary,
@@ -140,6 +344,8 @@ def run_self_check(conn, *, actor: str = "系统", apply: bool = True) -> dict[s
         "applied_changes": changes,
         "applied": bool(changes),
         "detail": detail,
+        "week": week,
+        "subgroup_streak_weeks": streak_weeks,
     }
 
 

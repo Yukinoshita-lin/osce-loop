@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import json
 import shutil
+from datetime import datetime, timezone
 
 import pytest
 
@@ -559,9 +560,12 @@ def test_risk_escalation_is_upward_only(seeded_path, tmp_path):
 
 
 def test_governance_self_check_passes_core_metrics(conn):
+    conn.execute("UPDATE attempts SET integrity_gap = 0")
+    conn.commit()
     result = run_self_check(conn, actor="test", apply=True)
     checks = {c["key"]: c for c in result["checks"]}
     assert checks["qwk"]["status"] == "pass"
+    assert checks["integrity_gap"]["status"] == "pass"
     assert checks["subgroup_gap"]["status"] == "pass"
     assert checks["teacher_hours"]["status"] == "pass"
     assert checks["version_stamp"]["status"] == "pass"
@@ -586,6 +590,100 @@ def test_governance_auto_downgrade_on_low_qwk(seeded_path, tmp_path):
         "SELECT COUNT(*) AS n FROM audit_events WHERE action = 'authority.auto_downgrade'"
     ).fetchone()["n"]
     assert audit >= 1
+    conn.close()
+
+
+def _fresh_seed_conn(tmp_path, name: str):
+    conn = db.connect(tmp_path / name)
+    db.init_db(conn)
+    seed_if_empty(conn)
+    return conn
+
+
+def test_governance_integrity_downgrade_is_scoped(tmp_path):
+    conn = _fresh_seed_conn(tmp_path, "governance_integrity.db")
+    result = run_self_check(conn, actor="test", apply=True)
+    checks = {c["key"]: c for c in result["checks"]}
+    assert checks["integrity_gap"]["status"] == "fail"
+    assert result["applied_changes"]
+    reasons = [
+        row["reason"] for row in conn.execute("SELECT reason FROM authority_overrides").fetchall()
+    ]
+    assert any("integrity_gap" in reason for reason in reasons)
+    changed_bundles = {
+        row["bundle_id"]
+        for row in conn.execute("SELECT DISTINCT bundle_id FROM authority_overrides").fetchall()
+    }
+    breached = {
+        row["bundle_id"]
+        for row in checks["integrity_gap"]["stations"]
+        if row["breach"]
+    }
+    assert changed_bundles == breached
+    conn.close()
+
+
+def test_governance_uses_rolling_qwk_stage_floor(tmp_path, monkeypatch):
+    conn = _fresh_seed_conn(tmp_path, "governance_rolling_qwk.db")
+    conn.execute("UPDATE attempts SET integrity_gap = 0")
+    conn.commit()
+    monkeypatch.setattr("app.domain.governance.quadratic_weighted_kappa", lambda a, b: 0.66)
+    first = run_self_check(conn, actor="test", apply=True)
+    checks = {c["key"]: c for c in first["checks"]}
+    assert checks["qwk"]["status"] == "pass"
+    assert checks["qwk"]["threshold"] == 0.65
+    assert first["applied_changes"] == []
+
+    monkeypatch.setattr("app.domain.governance.quadratic_weighted_kappa", lambda a, b: 0.64)
+    second = run_self_check(conn, actor="test", apply=True)
+    checks = {c["key"]: c for c in second["checks"]}
+    assert checks["qwk"]["status"] == "fail"
+    assert second["applied_changes"]
+    conn.close()
+
+
+def test_governance_subgroup_requires_two_consecutive_weeks(tmp_path, monkeypatch):
+    conn = _fresh_seed_conn(tmp_path, "governance_subgroup_gap.db")
+    conn.execute("UPDATE attempts SET integrity_gap = 0")
+    conn.commit()
+    monkeypatch.setattr(
+        "app.domain.governance.fairness_report",
+        lambda conn, bundle_id=None: {"overall_gap_sd": 0.25},
+    )
+    first = run_self_check(
+        conn, actor="test", apply=True, now=datetime(2026, 11, 16, tzinfo=timezone.utc)
+    )
+    checks = {c["key"]: c for c in first["checks"]}
+    assert checks["subgroup_gap"]["status"] == "observing"
+    assert first["applied_changes"] == []
+
+    second = run_self_check(
+        conn, actor="test", apply=True, now=datetime(2026, 11, 23, tzinfo=timezone.utc)
+    )
+    checks = {c["key"]: c for c in second["checks"]}
+    assert checks["subgroup_gap"]["status"] == "fail"
+    assert second["applied_changes"]
+    reason = conn.execute("SELECT reason FROM authority_overrides LIMIT 1").fetchone()["reason"]
+    assert "亚组" in reason
+
+    third = run_self_check(
+        conn, actor="test", apply=True, now=datetime(2026, 11, 24, 8, tzinfo=timezone.utc)
+    )
+    assert third["applied_changes"] == []
+    conn.close()
+
+
+def test_authority_reset_can_be_scoped_to_bundle(tmp_path):
+    conn = _fresh_seed_conn(tmp_path, "governance_scope_reset.db")
+    changes = apply_authority_reset(
+        conn,
+        reason="范围外考站",
+        actor="test",
+        model_version="mock",
+        prompt_version="prompt",
+        bundle_ids={"bnd_not_exists"},
+    )
+    assert changes == []
     conn.close()
 
 

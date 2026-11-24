@@ -299,12 +299,18 @@ def apply_authority_reset(
     model_version: str,
     prompt_version: str,
     floor: str = "extract",
+    bundle_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """模型/提示词版本变化后，把 suggest/decide 自动降为 extract，禁止静默升级。"""
+    """模型/提示词版本变化后，把 suggest/decide 自动降为 extract，禁止静默升级。
+
+    `bundle_ids` 用于把运行期降级限定在触发条件的考站，避免全站误伤。
+    """
     bundles = list_bundles(conn)
     changed: list[dict[str, Any]] = []
     timestamp = db.now_iso()
     for bundle in bundles:
+        if bundle_ids is not None and bundle["bundle_id"] not in bundle_ids:
+            continue
         for item in bundle["payload"].get("rubric", []):
             current = effective_authority(
                 conn, bundle, item, "L1", "G1_practice"
@@ -361,6 +367,7 @@ def apply_item_downgrades(
     actor: str = "系统",
     model_version: str = "",
     prompt_version: str = "",
+    floor: str | None = None,
 ) -> list[dict[str, Any]]:
     """校准指标跌破阈值的评分项，AI 权限自动下调一档并记录审计。"""
     targets = {item_id for item_id in item_ids if item_id}
@@ -374,9 +381,9 @@ def apply_item_downgrades(
             continue
         override = get_override(conn, bundle["bundle_id"], item_id)
         current = (override or {}).get("authority") or item.get("ai_authority", "none")
-        target = AUTHORITY_DOWNGRADE.get(current)
-        if not target:
+        if floor and AUTHORITY_ORDER[current] <= AUTHORITY_ORDER.get(floor, -1):
             continue
+        target = AUTHORITY_DOWNGRADE.get(current)
         conn.execute(
             "INSERT INTO authority_overrides(bundle_id, item_id, authority, reason, updated_at) "
             "VALUES(?,?,?,?,?) ON CONFLICT(bundle_id, item_id) DO UPDATE SET "

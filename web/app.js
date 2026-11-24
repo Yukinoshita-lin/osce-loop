@@ -2043,6 +2043,7 @@ async function sendSpMessage(text) {
 function fairPill(status) {
   if (status === 'pass') return '<span class="pill teal">通过</span>';
   if (status === 'fail') return '<span class="pill red">超阈值</span>';
+  if (status === 'observing') return '<span class="pill amber">观察中</span>';
   return '<span class="pill muted">样本不足</span>';
 }
 
@@ -2129,6 +2130,8 @@ function selfCheckHtml(selfCheck) {
     <div class="attempt-strip" style="margin-bottom:6px"><span>最近 <b>${fmtTime(selfCheck.created_at)}</b></span><span>${esc(selfCheck.trigger_summary)}</span>${selfCheck.applied ? '<span class="pill red">已自动降级</span>' : '<span class="pill muted">未触发降级</span>'}</div>
     ${(selfCheck.checks || []).map((c) => `
       <div class="version-row"><span class="k">${esc(c.label)}</span><span class="v">${c.value === null ? '—' : (c.key === 'integrity_gap' ? pct(c.value, 1) : c.key === 'subgroup_gap' ? num(c.value, 3) + ' SD' : c.key === 'teacher_hours' ? pct(c.value, 1) : num(c.value, 3))} ${fairPill(c.status)}</span></div>
+      ${c.key === 'integrity_gap' && (c.stations || []).some((s) => s.breach) ? `<div class="tiny muted" style="margin:-2px 0 6px 0">超标考站：${(c.stations || []).filter((s) => s.breach).map((s) => `${esc(s.title || s.station_id || s.bundle_id)}（${s.gap_attempts}/${s.attempts}）`).join('、')}</div>` : ''}
+      ${c.key === 'subgroup_gap' && (c.streak_weeks || []).length ? `<div class="tiny muted" style="margin:-2px 0 6px 0">连续超标周：${esc((c.streak_weeks || []).join('、'))}</div>` : ''}
     `).join('')}
     ${(selfCheck.changes || []).length ? `<div class="violation">已降级 ${selfCheck.changes.length} 个评分项；需重新校准后回升。</div>` : ''}
   `;
@@ -3285,7 +3288,7 @@ document.addEventListener('click', async (e) => {
     try {
       const result = await api('/api/ops/maintenance', { method: 'POST', body: {} });
       const m = result.maintenance;
-      toast(`维护完成：清理会话 ${m.sessions_cleaned}，清理媒体 ${m.purged_attempts}${m.authority_downgrades ? `，降级 ${m.authority_downgrades} 个评分项` : ''}${m.anchor_id ? '，已写入审计锚点' : ''}`);
+      toast(`维护完成：清理会话 ${m.sessions_cleaned}，清理媒体 ${m.purged_attempts}${m.authority_downgrades ? `，项级降级 ${m.authority_downgrades}` : ''}${m.safety_check && m.safety_check.changes ? `，安全降级 ${m.safety_check.changes}` : ''}${m.anchor_id ? '，已写入审计锚点' : ''}`);
       await viewQuality();
     } catch (err) {
       toast(err.message, true);
