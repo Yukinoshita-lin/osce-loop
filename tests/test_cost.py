@@ -47,4 +47,33 @@ def test_cost_summary_is_empty_without_priced_calls(tmp_path):
     assert summary["total_usd"] == 0
     assert summary["per_attempt_usd"] is None
     assert summary["attempts_with_cost"] == 0
+    targets = {row["key"]: row for row in summary["targets"]}
+    assert targets["practice"]["status"] == "unmeasured"
+    assert targets["exam"]["status"] == "unmeasured"
+    conn.close()
+
+
+def test_cost_targets_split_practice_and_exam(tmp_path):
+    conn = db.connect(tmp_path / "cost_targets.db")
+    db.init_db(conn)
+    for attempt_id, risk in (("att_practice", "L1"), ("att_exam", "L2")):
+        conn.execute(
+            "INSERT INTO attempts(attempt_id, bundle_id, candidate_code, candidate_name, session_id, "
+            "risk_level, status, created_at) VALUES(?,?,?,?,?,?,?,?)",
+            (attempt_id, "bnd", "C001", "考生", "SES", risk, "scored", db.now_iso()),
+        )
+    conn.commit()
+    _insert_call(conn, "c1", "att_practice:HX.01", 1.0)
+    _insert_call(conn, "c2", "att_exam:HX.01", 10.0)
+
+    summary = ai_cost_summary(conn)
+    targets = {row["key"]: row for row in summary["targets"]}
+    assert targets["practice"]["attempts"] == 1
+    assert targets["practice"]["avg_usd"] == 1.0
+    assert targets["practice"]["avg_cny"] == round(1.0 * summary["cny_per_usd"], 2)
+    assert targets["practice"]["status"] == "pass"
+    assert targets["exam"]["attempts"] == 1
+    assert targets["exam"]["avg_usd"] == 10.0
+    assert targets["exam"]["status"] == "fail"
+    assert summary["per_attempt_cny"] == round(5.5 * summary["cny_per_usd"], 2)
     conn.close()

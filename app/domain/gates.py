@@ -9,6 +9,7 @@ from .. import db
 from .ab import ab_report
 from .bundle import list_bundles
 from .consent import consent_status
+from .cost import ai_cost_summary
 from .fairness import fairness_report
 from .sp_approval import persona_approval_status
 from .spqa import RED_TEAM_VERSION
@@ -403,6 +404,18 @@ def evaluate_gates(conn, report: dict[str, Any], current_stage: str) -> dict[str
                 "detail": "改判率偏高说明初评存在系统性偏差；建议检查行为锚、评分员校准与 AI 建议校准。",
             }
         )
+    for row in ai_cost_summary(conn).get("targets") or []:
+        if row["status"] == "fail":
+            alerts.append(
+                {
+                    "level": "warn",
+                    "title": (
+                        f"{row['label']}单站成本 ¥{row['avg_cny']:.2f} "
+                        f"超过目标 ¥{row['target_cny']:.0f}"
+                    ),
+                    "detail": "建议核对模型/ASR 单价、缓存命中率与提示词长度，优先压缩重复调用。",
+                }
+            )
     if values.get("sp_cert_issue") == "missing":
         alerts.append(
             {

@@ -118,3 +118,26 @@ def test_ops_metrics_within_targets_do_not_alert(tmp_path):
     assert not any("申诉率" in title for title in titles)
     assert not any("改判率" in title for title in titles)
     conn.close()
+
+
+def test_cost_over_target_alerts(tmp_path, monkeypatch):
+    conn = _conn(tmp_path)
+    monkeypatch.setattr(
+        "app.domain.gates.ai_cost_summary",
+        lambda conn: {
+            "targets": [
+                {
+                    "key": "exam",
+                    "label": "考试",
+                    "attempts": 3,
+                    "avg_cny": 72.0,
+                    "target_cny": 60.0,
+                    "status": "fail",
+                }
+            ]
+        },
+    )
+    gates = evaluate_gates(conn, _report(0.2, 40), "G0_offline")
+    titles = [alert["title"] for alert in gates["alerts"]]
+    assert any("考试单站成本 ¥72.00 超过目标 ¥60" in title for title in titles)
+    conn.close()

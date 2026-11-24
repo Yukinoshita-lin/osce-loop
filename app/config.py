@@ -48,6 +48,10 @@ AI_FALLBACK = os.getenv("OSCELOOP_AI_FALLBACK", "mock").strip().lower()
 AI_INPUT_PRICE_PER_1K = float(os.getenv("OSCELOOP_AI_INPUT_PRICE_PER_1K", "0"))
 AI_OUTPUT_PRICE_PER_1K = float(os.getenv("OSCELOOP_AI_OUTPUT_PRICE_PER_1K", "0"))
 ASR_PRICE_PER_MINUTE = float(os.getenv("OSCELOOP_ASR_PRICE_PER_MINUTE", "0"))
+# 运营验收：单站单次成本目标（人民币）。练习与考试分别核算，汇率可按部署配置。
+CNY_PER_USD = float(os.getenv("OSCELOOP_CNY_PER_USD", "7.2"))
+COST_TARGET_CNY_PRACTICE = float(os.getenv("OSCELOOP_COST_TARGET_CNY_PRACTICE", "15"))
+COST_TARGET_CNY_EXAM = float(os.getenv("OSCELOOP_COST_TARGET_CNY_EXAM", "60"))
 
 # ASR：默认关闭，需显式配置 OpenAI 兼容 /audio/transcriptions 服务。
 # 必须返回带说话人标签的分段转写，否则拒绝自动评分，避免角色错位。
