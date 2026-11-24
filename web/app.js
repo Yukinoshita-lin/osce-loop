@@ -2829,6 +2829,8 @@ async function viewQuality() {
   const appeals = report.appeals || {};
   const reviewShares = (report.review_share || {}).by_risk || [];
   const feedbackLatency = data.feedback_latency || {};
+  const readyPractice = (feedbackLatency.ready || {}).practice || {};
+  const readyExam = (feedbackLatency.ready || {}).exam || {};
   const gates = data.gates.gates;
   const stageLabels = {
     G0_offline: 'G0 离线副驾',
@@ -3075,6 +3077,8 @@ async function viewQuality() {
       <span>改判率 <span class="pill ${appeals.change_rate === null || appeals.change_rate === undefined ? 'muted' : appeals.change_rate > 0.2 ? 'red' : 'teal'}">${appeals.change_rate === null || appeals.change_rate === undefined ? '—' : pct(appeals.change_rate, 1)}</span> <span class="tiny muted">目标 &lt; 20%</span></span>
       ${reviewShares.filter((r) => r.target !== null).map((r) => `<span>${r.risk_level} 人工复核 <b>${pct(r.share, 0)}</b>（${r.reviewed}/${r.attempts}）<span class="pill ${r.share > r.target ? 'red' : 'teal'}">目标 ≤ ${pct(r.target, 0)}</span></span>`).join('')}
       <span>反馈确认时延 ${feedbackLatency.count ? `平均 <b>${num(feedbackLatency.avg_hours, 1)}</b> 小时 · 72h 内 <span class="pill ${feedbackLatency.status === 'pass' ? 'teal' : 'red'}">${pct(feedbackLatency.within_rate, 0)}</span>（${feedbackLatency.count} 份）` : '尚无学生确认记录'}</span>
+      <span>练习反馈生成 ${readyPractice.count ? `平均 <b>${num(readyPractice.avg, 1)}</b> 秒 · 60s 内 <span class="pill ${readyPractice.status === 'pass' ? 'teal' : 'red'}">${pct(readyPractice.within_rate, 0)}</span>（${readyPractice.count} 份）` : '尚无练习报告'}</span>
+      <span>考试反馈生成 ${readyExam.count ? `平均 <b>${num(readyExam.avg, 1)}</b> 小时 · 72h 内 <span class="pill ${readyExam.status === 'pass' ? 'teal' : 'red'}">${pct(readyExam.within_rate, 0)}</span>（${readyExam.count} 份）` : '尚无已发布成绩'}</span>
       ${appeals.missing_snapshot ? `<span class="tiny muted">${appeals.missing_snapshot} 场历史申诉缺少原始快照</span>` : ''}
     </div>
 
