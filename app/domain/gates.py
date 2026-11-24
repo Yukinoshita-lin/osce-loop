@@ -358,6 +358,51 @@ def evaluate_gates(conn, report: dict[str, Any], current_stage: str) -> dict[str
                 ),
             }
         )
+    review_share_rows = (report.get("review_share") or {}).get("by_risk") or []
+    for row in review_share_rows:
+        target = row.get("target")
+        if target is None:
+            continue
+        share = float(row.get("share") or 0)
+        level = row.get("risk_level")
+        if share >= 0.9:
+            alerts.append(
+                {
+                    "level": "danger",
+                    "title": f"{level} 人工复核占比 {share:.0%}，风险路由可能失效",
+                    "detail": (
+                        f"{row.get('reviewed', 0)}/{row.get('attempts', 0)} 场次进入人工复核，"
+                        "接近全人工；请检查路由阈值与自动通过条件，避免退化为全量人工。"
+                    ),
+                }
+            )
+        elif share > float(target):
+            alerts.append(
+                {
+                    "level": "warn",
+                    "title": f"{level} 人工复核占比 {share:.0%}，超过目标 {float(target):.0%}",
+                    "detail": "复核占比偏高会侵蚀 AI 提效收益；建议定位低置信项与路由命中原因。",
+                }
+            )
+    appeals = report.get("appeals") or {}
+    appeal_rate = appeals.get("appeal_rate")
+    if appeal_rate is not None and appeal_rate > float(appeals.get("target_appeal_rate") or 0.03):
+        alerts.append(
+            {
+                "level": "warn",
+                "title": f"申诉率 {appeal_rate:.1%} 超过目标 {float(appeals.get('target_appeal_rate') or 0.03):.0%}",
+                "detail": "申诉率偏高可能指向评分一致性或反馈质量问题；建议复盘申诉理由码与改判项。",
+            }
+        )
+    change_rate = appeals.get("change_rate")
+    if change_rate is not None and change_rate > float(appeals.get("target_change_rate") or 0.20):
+        alerts.append(
+            {
+                "level": "warn",
+                "title": f"改判率 {change_rate:.1%} 超过目标 {float(appeals.get('target_change_rate') or 0.20):.0%}",
+                "detail": "改判率偏高说明初评存在系统性偏差；建议检查行为锚、评分员校准与 AI 建议校准。",
+            }
+        )
     if values.get("sp_cert_issue") == "missing":
         alerts.append(
             {

@@ -1,4 +1,4 @@
-"""闸门告警：人工编辑率过低时的橡皮图章预警。"""
+"""闸门告警：人工编辑率、复核占比、申诉/改判率与加固校验。"""
 from __future__ import annotations
 
 from app import db
@@ -71,4 +71,50 @@ def test_rolling_qwk_and_subgroup_gap_alerts(tmp_path, monkeypatch):
     titles = [alert["title"] for alert in gates["alerts"]]
     assert any("滚动 200 条" in title for title in titles)
     assert any("亚组分数差" in title for title in titles)
+    conn.close()
+
+
+def test_review_share_and_appeal_alerts(tmp_path):
+    conn = _conn(tmp_path)
+    report = _report(0.2, 40)
+    report["review_share"] = {
+        "by_risk": [
+            {"risk_level": "L2", "attempts": 10, "reviewed": 4, "share": 0.4, "target": 0.35},
+            {"risk_level": "L3", "attempts": 10, "reviewed": 9, "share": 0.9, "target": 0.6},
+        ]
+    }
+    report["appeals"] = {
+        "appeal_rate": 0.05,
+        "change_rate": 0.25,
+        "target_appeal_rate": 0.03,
+        "target_change_rate": 0.20,
+    }
+    gates = evaluate_gates(conn, report, "G3_limited")
+    titles = [alert["title"] for alert in gates["alerts"]]
+    assert any("L2 人工复核占比" in title and "超过目标" in title for title in titles)
+    assert any("L3 人工复核占比" in title and "风险路由可能失效" in title for title in titles)
+    assert any("申诉率" in title for title in titles)
+    assert any("改判率" in title for title in titles)
+    conn.close()
+
+
+def test_ops_metrics_within_targets_do_not_alert(tmp_path):
+    conn = _conn(tmp_path)
+    report = _report(0.2, 40)
+    report["review_share"] = {
+        "by_risk": [
+            {"risk_level": "L2", "attempts": 10, "reviewed": 2, "share": 0.2, "target": 0.35},
+        ]
+    }
+    report["appeals"] = {
+        "appeal_rate": 0.01,
+        "change_rate": 0.1,
+        "target_appeal_rate": 0.03,
+        "target_change_rate": 0.20,
+    }
+    gates = evaluate_gates(conn, report, "G3_limited")
+    titles = [alert["title"] for alert in gates["alerts"]]
+    assert not any("人工复核占比" in title for title in titles)
+    assert not any("申诉率" in title for title in titles)
+    assert not any("改判率" in title for title in titles)
     conn.close()
