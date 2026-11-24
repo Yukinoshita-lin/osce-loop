@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from .bundle import get_bundle
+from .psychometrics import _pearson
 
 
 def item_quality_report(conn, bundle_id: str) -> list[dict[str, Any]]:
@@ -41,8 +42,12 @@ def item_quality_report(conn, bundle_id: str) -> list[dict[str, Any]]:
     for action in actions:
         actions_by_record.setdefault(action["record_id"], []).append(action["action"])
     records_by_item: dict[str, list[dict[str, Any]]] = {}
+    scores_by_attempt: dict[str, dict[str, int]] = {}
     for record in records:
         records_by_item.setdefault(record["item_id"], []).append(record)
+        score = record["final_score"] if record["final_score"] is not None else record["ai_score"]
+        if score is not None:
+            scores_by_attempt.setdefault(record["attempt_id"], {})[record["item_id"]] = int(score)
 
     rows: list[dict[str, Any]] = []
     for item in bundle["payload"].get("rubric", []):
@@ -69,8 +74,21 @@ def item_quality_report(conn, bundle_id: str) -> list[dict[str, Any]]:
             if confidence_values
             else None
         )
+        paired_item: list[float] = []
+        paired_rest: list[float] = []
+        for per_attempt in scores_by_attempt.values():
+            if item["item_id"] not in per_attempt:
+                continue
+            rest = [score for other, score in per_attempt.items() if other != item["item_id"]]
+            if len(rest) < 2:
+                continue
+            paired_item.append(float(per_attempt[item["item_id"]]))
+            paired_rest.append(float(sum(rest)))
+        discrimination = _pearson(paired_item, paired_rest)
         needs_review = (reviewed >= 3 and (edit_rate or 0) >= 0.3) or (
             len(gold_pairs) >= 3 and (exact_rate or 1) <= 0.6
+        ) or (
+            discrimination is not None and discrimination < 0.2 and len(item_records) >= 5
         )
         rows.append(
             {
@@ -85,6 +103,7 @@ def item_quality_report(conn, bundle_id: str) -> list[dict[str, Any]]:
                 "gold_records": len(gold_pairs),
                 "exact_match_rate": exact_rate,
                 "avg_confidence": avg_confidence,
+                "discrimination": discrimination,
                 "needs_review": needs_review,
             }
         )

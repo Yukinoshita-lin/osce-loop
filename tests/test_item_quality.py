@@ -38,6 +38,7 @@ def test_item_quality_covers_full_rubric(conn):
     assert all(row["exact_match_rate"] is None or 0 <= row["exact_match_rate"] <= 1 for row in rows)
     assert all(row["edit_rate"] is None or 0 <= row["edit_rate"] <= 1 for row in rows)
     assert all("needs_review" in row for row in rows)
+    assert all("discrimination" in row for row in rows)
 
 
 def test_item_edit_rate_matches_review_actions(conn):
@@ -51,6 +52,10 @@ def test_item_edit_rate_matches_review_actions(conn):
             row["gold_records"] >= 3
             and row["exact_match_rate"] is not None
             and row["exact_match_rate"] <= 0.6
+        ) or (
+            row["discrimination"] is not None
+            and row["discrimination"] < 0.2
+            and row["records"] >= 5
         )
         assert row["needs_review"] is expected
 

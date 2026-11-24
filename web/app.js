@@ -2241,6 +2241,7 @@ async function viewQuality() {
       <td class="num">${pct(item.edit_rate, 0)}</td>
       <td class="num">${item.gold_records ? pct(item.exact_match_rate, 0) : '—'}</td>
       <td class="num">${num(item.avg_confidence, 2)}</td>
+      <td class="num">${item.discrimination === null || item.discrimination === undefined ? '—' : `<span class="pill ${item.discrimination < 0.2 ? 'red' : item.discrimination >= 0.3 ? 'teal' : 'amber'}">${num(item.discrimination, 2)}</span>`}</td>
       <td>${item.needs_review ? '<span class="pill amber">建议改写</span>' : '<span class="pill teal">可判</span>'}</td>
     </tr>`).join('');
   const gateCards = gates.map((gate) => `
@@ -2353,11 +2354,11 @@ async function viewQuality() {
       <div class="card-title">项级可判性<span class="sub">${itemQuality ? `${esc(itemQuality.station_id)} · v${esc(itemQuality.version)}` : '暂无站包'} · 编辑率高或与金标准低一致优先改写</span></div>
       <div class="tbl-wrap">
         <table>
-          <thead><tr><th>评分项</th><th>关键</th><th class="num">评分记录</th><th class="num">已复核</th><th class="num">人工编辑率</th><th class="num">金标准一致率</th><th class="num">平均置信</th><th>判定</th></tr></thead>
-          <tbody>${itemRows || '<tr><td colspan="8" class="empty">暂无评分项</td></tr>'}</tbody>
+          <thead><tr><th>评分项</th><th>关键</th><th class="num">评分记录</th><th class="num">已复核</th><th class="num">人工编辑率</th><th class="num">金标准一致率</th><th class="num">平均置信</th><th class="num">区分度</th><th>判定</th></tr></thead>
+          <tbody>${itemRows || '<tr><td colspan="9" class="empty">暂无评分项</td></tr>'}</tbody>
         </table>
       </div>
-      <div class="tiny muted" style="margin-top:6px">判定规则：复核 ≥3 且编辑率 ≥30%，或金标准 ≥3 且一致率 ≤60%，标记为“建议改写”。</div>
+      <div class="tiny muted" style="margin-top:6px">判定规则：复核 ≥3 且编辑率 ≥30%，或金标准 ≥3 且一致率 ≤60%，或区分度 < 0.2 且记录 ≥5，标记为“建议改写”。</div>
       ${(report.asr && report.asr.records) ? `<div class="tiny" style="margin-top:4px">ASR 平均置信度 <b>${num(report.asr.avg_confidence, 3)}</b> · 低于阈值 ${num(report.asr.threshold, 2)} 的场次 <b>${report.asr.low_confidence_attempts}</b>（评分时已整站转人工）</div>` : ''}
     </div>
 
