@@ -116,6 +116,7 @@ from .domain.station_quality import station_quality_report
 from .domain.sus import submit_sus, sus_summary
 from .domain.transcript import parse_transcript
 from .domain.transparency import refresh_transparency_assets
+from .domain.users import create_user, list_users, update_user
 from .seed import apply_startup_governance, seed_if_empty
 
 
@@ -312,6 +313,67 @@ def healthz():
 @app.get("/api/ops/health")
 def ops_health(conn=Depends(get_conn)):
     return system_health(conn)
+
+
+class UserCreateBody(BaseModel):
+    username: str = Field(min_length=3, max_length=40)
+    display_name: str = Field(min_length=1, max_length=40)
+    password: str = Field(min_length=8, max_length=128)
+    role: str
+    candidate_code: str | None = None
+
+
+class UserUpdateBody(BaseModel):
+    display_name: str | None = Field(default=None, max_length=40)
+    role: str | None = None
+    active: bool | None = None
+    candidate_code: str | None = None
+    password: str | None = Field(default=None, min_length=8, max_length=128)
+
+
+@app.get("/api/users")
+def users_list(conn=Depends(get_conn)):
+    return {"users": list_users(conn)}
+
+
+@app.post("/api/users")
+def users_create(body: UserCreateBody, request: Request, conn=Depends(get_conn)):
+    try:
+        user = create_user(
+            conn,
+            username=body.username,
+            display_name=body.display_name,
+            password=body.password,
+            role=body.role,
+            candidate_code=body.candidate_code,
+            actor=request.state.user["display_name"],
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "user": user}
+
+
+@app.patch("/api/users/{user_id}")
+def users_update(
+    user_id: str,
+    body: UserUpdateBody,
+    request: Request,
+    conn=Depends(get_conn),
+):
+    try:
+        user = update_user(
+            conn,
+            user_id,
+            display_name=body.display_name,
+            role=body.role,
+            active=body.active,
+            candidate_code=body.candidate_code,
+            password=body.password,
+            actor=request.state.user["display_name"],
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "user": user}
 
 
 @app.post("/api/ops/backup")

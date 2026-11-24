@@ -1998,17 +1998,65 @@ function calibrationSectionHtml(cal) {
     </div>`;
 }
 
+const USER_ROLE_LABELS = {
+  admin: '系统管理员',
+  exam_manager: '考务管理者',
+  examiner: '考官/评分员',
+  auditor: '审计员',
+  student: '学生',
+};
+
+function usersSectionHtml(users) {
+  const roleOptions = (selected) => Object.entries(USER_ROLE_LABELS)
+    .map(([value, label]) => `<option value="${value}" ${value === selected ? 'selected' : ''}>${label}</option>`)
+    .join('');
+  const rows = users.map((user) => `
+    <tr>
+      <td><div style="font-weight:600">${esc(user.display_name)}</div><div class="mono tiny muted">${esc(user.username)}</div></td>
+      <td><select class="input" data-action="user-role" data-user="${esc(user.user_id)}">${roleOptions(user.role)}</select></td>
+      <td>${user.active ? '<span class="pill teal">启用</span>' : '<span class="pill muted">停用</span>'}</td>
+      <td class="mono tiny">${esc(user.candidate_code || '—')}</td>
+      <td><div class="btn-row">
+        <button class="btn small" data-action="user-toggle" data-user="${esc(user.user_id)}" data-active="${user.active ? 'false' : 'true'}">${user.active ? '停用' : '启用'}</button>
+        <button class="btn small" data-action="user-reset-password" data-user="${esc(user.user_id)}">重置密码</button>
+      </div></td>
+    </tr>`).join('');
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">用户管理<span class="sub">角色与启停 · 仅管理员</span></div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>姓名 / 用户名</th><th>角色</th><th>状态</th><th>考生编号</th><th>操作</th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="5" class="empty">暂无用户</td></tr>'}</tbody>
+        </table>
+      </div>
+      <div class="sep"></div>
+      <div class="card-title" style="margin-bottom:6px">创建用户</div>
+      <form id="user-create-form" class="grid c3">
+        <label class="field">用户名<input class="input" name="username" required minlength="3" maxlength="40"></label>
+        <label class="field">姓名<input class="input" name="display_name" required maxlength="40"></label>
+        <label class="field">角色<select class="input" name="role">${roleOptions('examiner')}</select></label>
+        <label class="field">初始密码<input class="input" type="password" name="password" required minlength="8" maxlength="128"></label>
+        <label class="field">考生编号（学生必填）<input class="input" name="candidate_code" maxlength="40"></label>
+        <div style="display:flex;align-items:flex-end"><button class="btn primary" type="submit">创建用户</button></div>
+      </form>
+    </div>`;
+}
+
 async function viewQuality() {
-  const [data, audit, retention, backupsData, stationData] = await Promise.all([
+  const canManageUsers = Boolean(state.user && state.user.role === 'admin');
+  const [data, audit, retention, backupsData, stationData, usersData] = await Promise.all([
     api('/api/quality'),
     api('/api/audit?limit=30'),
     api('/api/retention'),
     api('/api/ops/backups'),
     api('/api/quality/stations'),
+    canManageUsers ? api('/api/users') : Promise.resolve({ users: [] }),
   ]);
   const backups = backupsData.backups || [];
   const stationQuality = stationData.stations || [];
   const itemQuality = data.item_quality || null;
+  const users = usersData.users || [];
   const report = data.report;
   const gates = data.gates.gates;
   const stageLabels = {
@@ -2128,6 +2176,8 @@ async function viewQuality() {
       </div>
       <div class="tiny muted" style="margin-top:6px">判定规则：复核 ≥3 且编辑率 ≥30%，或金标准 ≥3 且一致率 ≤60%，标记为“建议改写”。</div>
     </div>
+
+    ${canManageUsers ? usersSectionHtml(users) : ''}
 
     <div class="gates" style="margin-bottom:16px">${gateCards}</div>
 
@@ -2297,6 +2347,32 @@ async function viewQuality() {
         toast(`检索到 ${result.total} 条，显示 ${result.events.length} 条`);
       } catch (err) {
         toast(err.message, true);
+      }
+    });
+  }
+  const userForm = $('#user-create-form');
+  if (userForm) {
+    userForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const form = new FormData(userForm);
+      const button = userForm.querySelector('button[type="submit"]');
+      button.disabled = true;
+      try {
+        const result = await api('/api/users', {
+          method: 'POST',
+          body: {
+            username: (form.get('username') || '').trim(),
+            display_name: (form.get('display_name') || '').trim(),
+            role: form.get('role'),
+            password: form.get('password'),
+            candidate_code: (form.get('candidate_code') || '').trim() || null,
+          },
+        });
+        toast(`已创建用户 ${result.user.username}（${result.user.role_label}）`);
+        await viewQuality();
+      } catch (err) {
+        toast(err.message, true);
+        button.disabled = false;
       }
     });
   }
@@ -2564,6 +2640,39 @@ document.addEventListener('click', async (e) => {
       const result = await api('/api/ops/backup', { method: 'POST', body: {} });
       toast(`已创建数据库备份：${result.backup.filename}`);
       await viewQuality();
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'user-toggle') {
+    const active = el.dataset.active === 'true';
+    if (!active && !confirm('停用后该用户所有会话立即失效。继续？')) return;
+    try {
+      const result = await api(`/api/users/${encodeURIComponent(el.dataset.user)}`, {
+        method: 'PATCH',
+        body: { active },
+      });
+      toast(`已${active ? '启用' : '停用'}用户 ${result.user.username}`);
+      await viewQuality();
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'user-reset-password') {
+    const password = prompt('新密码（至少 8 位）。重置后该用户所有会话立即失效：');
+    if (password === null) return;
+    if (password.length < 8) {
+      toast('密码至少 8 位', true);
+      return;
+    }
+    try {
+      const result = await api(`/api/users/${encodeURIComponent(el.dataset.user)}`, {
+        method: 'PATCH',
+        body: { password },
+      });
+      toast(`已重置 ${result.user.username} 的密码`);
     } catch (err) {
       toast(err.message, true);
     }
@@ -2980,9 +3089,23 @@ document.addEventListener('click', async (e) => {
   }
 });
 
-document.addEventListener('change', (e) => {
+document.addEventListener('change', async (e) => {
   if (e.target.dataset && e.target.dataset.action === 'reason') {
     state.reviewReason = e.target.value;
+    return;
+  }
+  if (e.target.dataset && e.target.dataset.action === 'user-role') {
+    const select = e.target;
+    try {
+      const result = await api(`/api/users/${encodeURIComponent(select.dataset.user)}`, {
+        method: 'PATCH',
+        body: { role: select.value },
+      });
+      toast(`已将 ${result.user.username} 调整为${result.user.role_label}`);
+    } catch (err) {
+      toast(err.message, true);
+    }
+    await viewQuality();
   }
 });
 
