@@ -132,7 +132,12 @@ from .domain.scheduling import (
 )
 from .domain.signoff_audit import audit_signoff_chain
 from .domain.slots import DialogueStateMachine, SPController
-from .domain.spqa import certification_for_bundle, certify_bundle, ensure_certification
+from .domain.spqa import (
+    certification_for_bundle,
+    certify_bundle,
+    ensure_certification,
+    sp_session_ready,
+)
 from .domain.stats import domain_scores, quality_report
 from .domain.station_quality import station_quality_report
 from .domain.station_review import list_station_reviews, record_station_review
@@ -2209,6 +2214,8 @@ class SpSessionBody(BaseModel):
 @app.post("/api/sp/sessions")
 def create_sp_session(body: SpSessionBody, conn=Depends(get_conn)):
     bundle = _resolve_bundle(conn, body.bundle_id)
+    if not sp_session_ready(conn, bundle)["ready"]:
+        raise HTTPException(409, "当前站包 SP 认证缺失、过期或未覆盖最新版本，请先完成红队认证")
     machine = DialogueStateMachine(bundle["payload"], bundle["derived"])
     controller = SPController(machine)
     state = machine.start()
@@ -2256,6 +2263,8 @@ def sp_message(session_id: str, body: SpMessageBody, conn=Depends(get_conn)):
         raise HTTPException(400, "该练习已生成反馈，请开始新会话")
     session = dict(row)
     bundle = _bundle_or_404(conn, session["bundle_id"])
+    if not sp_session_ready(conn, bundle)["ready"]:
+        raise HTTPException(409, "当前站包 SP 认证已失效，练习已暂停；请考务重新认证后再继续")
     machine = DialogueStateMachine(bundle["payload"], bundle["derived"])
     controller = SPController(machine)
     state = json.loads(session["state"])

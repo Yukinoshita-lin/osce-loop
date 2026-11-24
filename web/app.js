@@ -1728,8 +1728,12 @@ async function viewSP(bundleId = state.spBundleId || '') {
   state.spStations = stationData.stations || [];
   state.spConsent = consentData;
   if (!state.sp || state.sp.persona.bundle_id !== persona.bundle_id) {
-    state.sp = { persona, session: null };
-    await createSpSession();
+    state.sp = { persona, session: null, sessionError: null };
+    try {
+      await createSpSession();
+    } catch (err) {
+      state.sp.sessionError = err.message;
+    }
   } else {
     state.sp.persona = persona;
   }
@@ -1747,6 +1751,15 @@ async function createSpSession() {
 function renderSP() {
   const persona = state.sp.persona;
   const session = state.sp.session;
+  if (state.sp.sessionError) {
+    $('#view').innerHTML = `
+      <div class="view-head">
+        <div><h2>SP 演练</h2><p>AI 模拟患者只允许在已完成认证的站包上运行。</p></div>
+      </div>
+      <div class="alert danger"><b>SP 演练不可用</b><p>${esc(state.sp.sessionError)}</p></div>
+      <div class="btn-row"><button class="btn amber" data-action="sp-certify">运行红队认证</button></div>`;
+    return;
+  }
   const p = persona.persona || {};
   const dims = p.persona || {};
   const phaseOrder = persona.phases || [];

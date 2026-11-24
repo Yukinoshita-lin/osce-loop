@@ -8,7 +8,12 @@ import pytest
 from app import db
 from app.domain.bundle import freeze_bundle
 from app.domain.gates import evaluate_gates
-from app.domain.spqa import certification_for_bundle, certify_bundle, ensure_certification
+from app.domain.spqa import (
+    certification_for_bundle,
+    certify_bundle,
+    ensure_certification,
+    sp_session_ready,
+)
 from app.domain.stats import quality_report
 from app.seed import build_bundle_payload
 
@@ -58,6 +63,15 @@ def _expire(conn, cert_id: str) -> None:
     past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(timespec="seconds")
     conn.execute("UPDATE sp_certifications SET valid_until = ? WHERE cert_id = ?", (past, cert_id))
     conn.commit()
+
+
+def test_sp_session_requires_valid_certification(conn):
+    bundle = _freeze(conn)
+    assert sp_session_ready(conn, bundle)["ready"] is False
+    report = certify_bundle(conn, bundle, actor="test")
+    assert sp_session_ready(conn, bundle)["ready"] is True
+    _expire(conn, report["cert_id"])
+    assert sp_session_ready(conn, bundle)["ready"] is False
 
 
 def test_expired_certification_does_not_feed_g1_metrics(conn):

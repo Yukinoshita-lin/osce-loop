@@ -405,6 +405,12 @@ def certification_for_bundle(conn, bundle: dict[str, Any]) -> dict[str, Any] | N
     return cert
 
 
+def sp_session_ready(conn, bundle: dict[str, Any]) -> dict[str, Any]:
+    """AI SP 只允许在认证有效的站包上运行；返回认证详情供接口与界面复用。"""
+    cert = certification_for_bundle(conn, bundle)
+    return {"ready": bool(cert and cert.get("valid")), "certification": cert}
+
+
 def ensure_certification(conn) -> dict[str, Any] | None:
     bundles = list_bundles(conn)
     if not bundles:
