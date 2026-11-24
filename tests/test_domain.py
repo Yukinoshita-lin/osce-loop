@@ -9,7 +9,8 @@ from datetime import datetime, timezone
 import pytest
 
 from app import db
-from app.ai.base import Suggestion
+from app.ai.base import CapabilityGateway, Suggestion
+from app.ai.mock import MockScoringProvider
 from app.ai.pipeline import _assert_schema
 from app.domain.bundle import (
     apply_authority_reset,
@@ -473,6 +474,30 @@ def test_practice_report_has_three_part_feedback(bundle):
         assert unit["alternative"]
         assert "evidence" in unit
     assert report["disclaimer"]
+    assert report["ai_versions"]["model_version"] == "mock-score-1.0"
+    assert report["ai_versions"]["rubric_version"] == bundle["bundle_hash"]
+
+
+def test_practice_report_scores_through_gateway(conn, bundle):
+    messages = [
+        {"role": "candidate", "text": "疼多久了？有没有向肩膀放射？", "phase": "information_gathering", "at_ms": 6000},
+        {"role": "patient", "text": "两个多小时了，会窜到左边胳膊。", "phase": "information_gathering", "at_ms": 10000},
+        {"role": "candidate", "text": "我先给您听诊一下，然后做心电图。", "phase": "assessment", "at_ms": 16000},
+    ]
+    before = conn.execute(
+        "SELECT COUNT(*) AS n FROM ai_calls WHERE capability = 'score.suggest'"
+    ).fetchone()["n"]
+    gateway = CapabilityGateway(
+        conn, MockScoringProvider(), "mock-score-1.0", "score-prompt-1.0"
+    )
+    report = build_practice_report(bundle, messages, gateway=gateway)
+    after = conn.execute(
+        "SELECT COUNT(*) AS n FROM ai_calls WHERE capability = 'score.suggest'"
+    ).fetchone()["n"]
+    assert after - before == report["items_scored"]
+    assert report["ai_versions"]["model_version"] == "mock-score-1.0"
+    assert report["ai_versions"]["prompt_version"] == "score-prompt-1.0"
+    assert report["ai_versions"]["rubric_version"] == bundle["bundle_hash"]
 
 
 def test_gate_g1_uses_sp_certification(conn):

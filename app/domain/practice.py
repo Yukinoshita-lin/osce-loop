@@ -51,13 +51,18 @@ def _weighted_total(items: list[dict[str, Any]], scores: dict[str, int | None]) 
     return round(earned / total_weight * 100, 1)
 
 
-def build_practice_report(bundle: dict[str, Any], messages: list[dict[str, Any]]) -> dict[str, Any]:
+def build_practice_report(
+    bundle: dict[str, Any],
+    messages: list[dict[str, Any]],
+    *,
+    gateway=None,
+) -> dict[str, Any]:
     payload = bundle["payload"]
     items = payload.get("rubric", [])
     templates = {t["item_id"]: t for t in bundle["derived"].get("feedback_templates", [])}
     transcript = build_transcript(messages)
     candidates = [utt for utt in transcript if utt["speaker"] == "candidate"]
-    provider = MockScoringProvider()
+    provider = gateway or MockScoringProvider()
     scores: dict[str, int | None] = {}
     records: list[dict[str, Any]] = []
     duration_ms = max((u["end_ms"] for u in transcript), default=0)
@@ -66,15 +71,22 @@ def build_practice_report(bundle: dict[str, Any], messages: list[dict[str, Any]]
         if item.get("evidence_type") == "global":
             continue
         candidate_lines = [{**utt, "phase": item["phase"]} for utt in candidates]
-        suggestion = provider.score_item(
-            item=item,
-            transcript=candidate_lines,
-            attempt_meta={
+        score_kwargs = {
+            "item": item,
+            "transcript": candidate_lines,
+            "attempt_meta": {
                 "media_id": "practice",
                 "duration_ms": duration_ms,
                 "asr_confidence": 0.97,
             },
-        )
+        }
+        if gateway is None:
+            suggestion = provider.score_item(**score_kwargs)
+        else:
+            suggestion = gateway.score_item(
+                **score_kwargs,
+                subject_ref=f"practice:{bundle['bundle_id']}:{item['item_id']}",
+            )["output"]
         scores[item["item_id"]] = suggestion.score
         evidence = suggestion.evidence[0] if suggestion.evidence else None
         covered = bool(evidence and evidence.evidence_kind != "absence")
@@ -120,6 +132,11 @@ def build_practice_report(bundle: dict[str, Any], messages: list[dict[str, Any]]
         "bundle_id": bundle["bundle_id"],
         "station_title": payload.get("title"),
         "persona_version": bundle["bundle_hash"],
+        "ai_versions": {
+            "model_version": getattr(provider, "model_version", None),
+            "prompt_version": getattr(provider, "prompt_version", None),
+            "rubric_version": bundle["bundle_hash"],
+        },
         "total": total,
         "pass_line": float(payload.get("pass_line", 60)),
         "items_scored": len(records),

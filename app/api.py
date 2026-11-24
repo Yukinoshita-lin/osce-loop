@@ -2485,7 +2485,15 @@ def finish_sp_session(session_id: str, conn=Depends(get_conn)):
     candidate_turns = sum(1 for m in messages if m.get("role") == "candidate")
     if candidate_turns == 0:
         raise HTTPException(400, "至少完成一轮提问后才能生成反馈")
-    report = build_practice_report(bundle, messages)
+    provider_bundle = build_scoring_provider()
+    gateway = CapabilityGateway(
+        conn,
+        provider_bundle.primary,
+        provider_bundle.model_version,
+        provider_bundle.prompt_version,
+        fallback_provider=provider_bundle.fallback,
+    )
+    report = build_practice_report(bundle, messages, gateway=gateway)
     report["session_id"] = session_id
     report["created_at"] = db.now_iso()
     conn.execute(
@@ -2505,9 +2513,12 @@ def finish_sp_session(session_id: str, conn=Depends(get_conn)):
             "coverage": report["coverage"],
             "deductions": len(report["deductions"]),
             "uncovered": report["uncovered_count"],
+            "ai_versions": report.get("ai_versions"),
         },
-        model_version=db.get_state(conn, "sp_model_version", SP_MODEL_VERSION),
-        prompt_version=db.get_state(conn, "sp_prompt_version", SP_PROMPT_VERSION),
+        model_version=(report.get("ai_versions") or {}).get("model_version")
+        or db.get_state(conn, "sp_model_version", SP_MODEL_VERSION),
+        prompt_version=(report.get("ai_versions") or {}).get("prompt_version")
+        or db.get_state(conn, "sp_prompt_version", SP_PROMPT_VERSION),
     )
     return {"ok": True, "report": report}
 
