@@ -40,3 +40,21 @@ def test_low_edit_rate_with_small_sample_does_not_alert(tmp_path):
     gates = evaluate_gates(conn, _report(0.0, 5), "G0_offline")
     assert not any("橡皮图章" in alert["title"] for alert in gates["alerts"])
     conn.close()
+
+
+def test_tampered_audit_chain_fails_replay_and_alerts(tmp_path):
+    conn = _conn(tmp_path)
+    db.append_audit(
+        conn,
+        actor="测试",
+        action="test.event",
+        object_type="TestObject",
+        object_id="t1",
+        after={"value": 1},
+    )
+    conn.execute("UPDATE audit_events SET actor = 'tampered'")
+    conn.commit()
+    gates = evaluate_gates(conn, _report(0.2, 40), "G0_offline")
+    assert gates["metric_values"]["audit_replay"] == 0.0
+    assert any("审计链" in alert["title"] for alert in gates["alerts"])
+    conn.close()

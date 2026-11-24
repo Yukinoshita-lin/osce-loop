@@ -5,6 +5,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
+from .. import db
 from .ab import ab_report
 from .bundle import list_bundles
 from .consent import consent_status
@@ -195,6 +196,7 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
         sp_p0 = red_team.get("p0_incidents")
     ab = ab_report(conn)
     fairness = fairness_report(conn)
+    chain = db.verify_audit_chain(conn)
     return {
         "qwk_ai": report.get("qwk_ai"),
         "evidence_rate": (report.get("evidence") or {}).get("rate"),
@@ -202,7 +204,15 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
         "edit_rate": (report.get("review") or {}).get("edit_rate"),
         "critical_miss": critical_miss,
         "critical_streak": critical_streak,
-        "audit_replay": 1.0 if version_complete and report.get("counts", {}).get("records", 0) > 0 else None,
+        "audit_replay": (
+            0.0
+            if not chain.get("ok")
+            else (
+                1.0
+                if version_complete and report.get("counts", {}).get("records", 0) > 0
+                else None
+            )
+        ),
         "sp_fact_error": sp_fact_error,
         "persona_pass": sp_persona_pass,
         "p95_latency": sp_p95_latency,
@@ -269,6 +279,15 @@ def evaluate_gates(conn, report: dict[str, Any], current_stage: str) -> dict[str
         )
 
     alerts: list[dict[str, Any]] = []
+    chain = db.verify_audit_chain(conn)
+    if not chain.get("ok"):
+        alerts.append(
+            {
+                "level": "danger",
+                "title": "审计链校验失败",
+                "detail": f"{chain.get('message')}（断点 {chain.get('broken_at')}），G2 审计回放不得放行。",
+            }
+        )
     qwk = values.get("qwk_ai")
     if qwk is not None and qwk < 0.65:
         alerts.append(
