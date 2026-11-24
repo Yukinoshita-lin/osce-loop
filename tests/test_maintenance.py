@@ -38,3 +38,25 @@ def test_maintenance_cleans_sessions_and_writes_anchor(tmp_path):
     assert second["anchor_id"] is None
     assert second["sessions_cleaned"] == 0
     conn.close()
+
+
+def test_maintenance_applies_calibration_downgrades(tmp_path, monkeypatch):
+    conn = db.connect(tmp_path / "maintenance_downgrade.db")
+    db.init_db(conn)
+    seed_if_empty(conn)
+    monkeypatch.setattr(
+        "app.domain.maintenance.item_quality_report",
+        lambda conn, bundle_id: [
+            {"item_id": "OP.01", "needs_review": True},
+            {"item_id": "HX.01", "needs_review": False},
+        ],
+    )
+    result = run_maintenance(conn, actor="维护", anchor_threshold=1000)
+    assert result["authority_downgrades"] == 1
+    assert result["downgraded_items"][0]["item_id"] == "OP.01"
+    override = conn.execute(
+        "SELECT authority FROM authority_overrides WHERE item_id = 'OP.01'"
+    ).fetchone()
+    assert override is not None
+    assert override["authority"] == "extract"
+    conn.close()

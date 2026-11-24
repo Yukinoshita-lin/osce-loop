@@ -347,3 +347,54 @@ def list_overrides(conn) -> list[dict[str, Any]]:
         "SELECT * FROM authority_overrides ORDER BY updated_at DESC"
     ).fetchall()
     return db.rows_to_dicts(rows)
+
+
+AUTHORITY_DOWNGRADE = {"decide": "suggest", "suggest": "extract", "extract": "none"}
+
+
+def apply_item_downgrades(
+    conn,
+    bundle: dict[str, Any],
+    item_ids: list[str],
+    *,
+    reason: str,
+    actor: str = "系统",
+    model_version: str = "",
+    prompt_version: str = "",
+) -> list[dict[str, Any]]:
+    """校准指标跌破阈值的评分项，AI 权限自动下调一档并记录审计。"""
+    targets = {item_id for item_id in item_ids if item_id}
+    if not targets:
+        return []
+    changed: list[dict[str, Any]] = []
+    timestamp = db.now_iso()
+    for item in bundle["payload"].get("rubric", []):
+        item_id = item.get("item_id")
+        if item_id not in targets:
+            continue
+        override = get_override(conn, bundle["bundle_id"], item_id)
+        current = (override or {}).get("authority") or item.get("ai_authority", "none")
+        target = AUTHORITY_DOWNGRADE.get(current)
+        if not target:
+            continue
+        conn.execute(
+            "INSERT INTO authority_overrides(bundle_id, item_id, authority, reason, updated_at) "
+            "VALUES(?,?,?,?,?) ON CONFLICT(bundle_id, item_id) DO UPDATE SET "
+            "authority = excluded.authority, reason = excluded.reason, updated_at = excluded.updated_at",
+            (bundle["bundle_id"], item_id, target, reason, timestamp),
+        )
+        changed.append({"item_id": item_id, "from": current, "to": target})
+    if changed:
+        conn.commit()
+        db.append_audit(
+            conn,
+            actor=actor,
+            action="authority.calibration_downgrade",
+            object_type="StationBundle",
+            object_id=bundle["bundle_id"],
+            before=None,
+            after={"reason": reason, "changes": changed},
+            model_version=model_version or None,
+            prompt_version=prompt_version or None,
+        )
+    return changed

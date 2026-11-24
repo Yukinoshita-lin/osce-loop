@@ -4,7 +4,10 @@ from __future__ import annotations
 from typing import Any
 
 from .. import db
+from ..config import MODEL_VERSION, PROMPT_VERSION
 from .auth import cleanup_expired_sessions
+from .bundle import apply_item_downgrades, list_bundles
+from .item_quality import item_quality_report
 from .retention import purge_expired, refresh_retention
 
 
@@ -19,6 +22,25 @@ def run_maintenance(
     sessions_cleaned = cleanup_expired_sessions(conn)
     retention_updated = refresh_retention(conn)
     purge = purge_expired(conn, actor=actor, dry_run=False)
+
+    downgrades: list[dict[str, Any]] = []
+    bundles = list_bundles(conn)
+    if bundles:
+        latest = bundles[0]
+        flagged = [
+            row["item_id"]
+            for row in item_quality_report(conn, latest["bundle_id"])
+            if row.get("needs_review")
+        ]
+        downgrades = apply_item_downgrades(
+            conn,
+            latest,
+            flagged,
+            reason="item_quality_below_threshold",
+            actor=actor,
+            model_version=MODEL_VERSION,
+            prompt_version=PROMPT_VERSION,
+        )
 
     anchors = db.list_audit_anchors(conn, limit=1)
     last_count = int(anchors[0]["event_count"]) if anchors else 0
@@ -37,6 +59,8 @@ def run_maintenance(
         "events_since_anchor": events_since_anchor,
         "anchor_id": anchor["anchor_id"] if anchor else None,
         "anchor_event_count": anchor["event_count"] if anchor else None,
+        "authority_downgrades": len(downgrades),
+        "downgraded_items": downgrades,
     }
     db.append_audit(
         conn,

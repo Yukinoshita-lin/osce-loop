@@ -3285,7 +3285,7 @@ document.addEventListener('click', async (e) => {
     try {
       const result = await api('/api/ops/maintenance', { method: 'POST', body: {} });
       const m = result.maintenance;
-      toast(`维护完成：清理会话 ${m.sessions_cleaned}，清理媒体 ${m.purged_attempts}${m.anchor_id ? '，已写入审计锚点' : ''}`);
+      toast(`维护完成：清理会话 ${m.sessions_cleaned}，清理媒体 ${m.purged_attempts}${m.authority_downgrades ? `，降级 ${m.authority_downgrades} 个评分项` : ''}${m.anchor_id ? '，已写入审计锚点' : ''}`);
       await viewQuality();
     } catch (err) {
       toast(err.message, true);
