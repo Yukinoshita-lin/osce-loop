@@ -122,7 +122,13 @@ from .domain.stats import domain_scores, quality_report
 from .domain.station_quality import station_quality_report
 from .domain.sus import submit_sus, sus_summary
 from .domain.transcript import parse_transcript
-from .domain.transparency import attempt_ai_disclosure, public_transparency, refresh_transparency_assets
+from .domain.transparency import (
+    acknowledge_disclosure,
+    attempt_ai_disclosure,
+    disclosure_acknowledged,
+    public_transparency,
+    refresh_transparency_assets,
+)
 from .domain.users import create_user, list_users, update_user
 from .seed import apply_startup_governance, seed_if_empty
 
@@ -1400,10 +1406,14 @@ def feedback(attempt_id: str, request: Request, conn=Depends(get_conn)):
         conn.execute("SELECT 1 FROM transcripts WHERE attempt_id = ?", (attempt_id,)).fetchone()
         is not None
     )
+    disclosure = attempt_ai_disclosure(attempt, records, has_transcript=has_transcript)
+    acknowledgement = disclosure_acknowledged(conn, attempt_id, request.state.user["user_id"])
+    disclosure["acknowledged"] = bool(acknowledgement)
+    disclosure["acknowledged_at"] = acknowledgement["created_at"] if acknowledgement else None
     return {
         **summary,
         "status_note": "该场次尚未发布，以下为阶段性反馈" if attempt["status"] != "published" else "已发布",
-        "ai_disclosure": attempt_ai_disclosure(attempt, records, has_transcript=has_transcript),
+        "ai_disclosure": disclosure,
         "domains": domain_scores(bundle["payload"], final_scores),
         "deductions": deductions,
         "strengths": strengths,
@@ -1412,6 +1422,23 @@ def feedback(attempt_id: str, request: Request, conn=Depends(get_conn)):
         "history": candidate_history(conn, attempt_id),
         "feedback_rule": "每条扣分项必须包含：可回放证据 + 对应评分项档位 + 可直接背诵的替代话术。",
     }
+
+
+@app.post("/api/feedback/{attempt_id}/acknowledge")
+def feedback_acknowledge(attempt_id: str, request: Request, conn=Depends(get_conn)):
+    _ensure_not_stopped(conn)
+    user = request.state.user
+    if user["role"] != "student":
+        raise HTTPException(403, "仅学生需要确认 AI 参与说明")
+    attempt = _attempt_row(conn, attempt_id)
+    _ensure_attempt_access(user, attempt)
+    acknowledgement = acknowledge_disclosure(
+        conn,
+        attempt_id=attempt_id,
+        user_id=user["user_id"],
+        actor=user["display_name"],
+    )
+    return {"ok": True, "acknowledgement": acknowledgement}
 
 
 class FeedbackSurveyBody(BaseModel):

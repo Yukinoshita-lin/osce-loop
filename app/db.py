@@ -206,6 +206,15 @@ CREATE TABLE IF NOT EXISTS feedback_surveys (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS ai_disclosure_acks (
+    ack_id TEXT PRIMARY KEY,
+    attempt_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (attempt_id, user_id)
+);
+
 CREATE TABLE IF NOT EXISTS candidate_profiles (
     attempt_id TEXT PRIMARY KEY,
     gender TEXT,

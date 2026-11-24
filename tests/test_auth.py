@@ -96,6 +96,7 @@ def test_rbac_write_matrix():
     assert rbac_allowed("GET", "/api/attempts", "student") is True
     assert rbac_allowed("GET", "/api/attempts/att_1", "student") is False
     assert rbac_allowed("GET", "/api/feedback/att_1", "student") is True
+    assert rbac_allowed("POST", "/api/feedback/att_1/acknowledge", "student") is True
     assert rbac_allowed("GET", "/api/review/queue", "student") is False
     assert rbac_allowed("GET", "/api/overview", "student") is False
     assert rbac_allowed("GET", "/api/transparency", "student") is True

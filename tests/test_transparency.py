@@ -10,7 +10,13 @@ from app import db
 from app.domain.gates import evaluate_gates
 from app.domain.governance import publish_model_card
 from app.domain.stats import quality_report
-from app.domain.transparency import attempt_ai_disclosure, public_transparency, refresh_transparency_assets
+from app.domain.transparency import (
+    acknowledge_disclosure,
+    attempt_ai_disclosure,
+    disclosure_acknowledged,
+    public_transparency,
+    refresh_transparency_assets,
+)
 from app.seed import seed_if_empty
 
 
@@ -31,6 +37,28 @@ def conn(seeded_path, tmp_path):
     connection = db.connect(path)
     yield connection
     connection.close()
+
+
+def test_disclosure_acknowledgement_is_idempotent_and_audited(tmp_path):
+    conn = db.connect(tmp_path / "ack.db")
+    db.init_db(conn)
+    conn.execute(
+        "INSERT INTO attempts(attempt_id, bundle_id, candidate_code, candidate_name, session_id, "
+        "risk_level, status, created_at) VALUES(?,?,?,?,?,?,?,?)",
+        ("att_ack", "bnd", "C001", "考生", "SES", "L1", "published", db.now_iso()),
+    )
+    conn.commit()
+    first = acknowledge_disclosure(conn, attempt_id="att_ack", user_id="usr_student", actor="练习学生")
+    second = acknowledge_disclosure(conn, attempt_id="att_ack", user_id="usr_student", actor="练习学生")
+    assert first["ack_id"] == second["ack_id"]
+    assert disclosure_acknowledged(conn, "att_ack", "usr_student")["ack_id"] == first["ack_id"]
+    assert conn.execute(
+        "SELECT COUNT(*) AS n FROM ai_disclosure_acks WHERE attempt_id = 'att_ack'"
+    ).fetchone()["n"] == 1
+    assert conn.execute(
+        "SELECT COUNT(*) AS n FROM audit_events WHERE action = 'attempt.ai_disclosure_ack'"
+    ).fetchone()["n"] == 1
+    conn.close()
 
 
 def test_public_transparency_only_returns_published_assets(conn):

@@ -56,6 +56,49 @@ def attempt_ai_disclosure(
     }
 
 
+def disclosure_acknowledged(conn, attempt_id: str, user_id: str) -> dict[str, Any] | None:
+    row = conn.execute(
+        "SELECT * FROM ai_disclosure_acks WHERE attempt_id = ? AND user_id = ?",
+        (attempt_id, user_id),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def acknowledge_disclosure(
+    conn,
+    *,
+    attempt_id: str,
+    user_id: str,
+    actor: str,
+) -> dict[str, Any]:
+    existing = disclosure_acknowledged(conn, attempt_id, user_id)
+    if existing:
+        return existing
+    ack_id = db.new_id("ack")
+    timestamp = db.now_iso()
+    conn.execute(
+        "INSERT INTO ai_disclosure_acks(ack_id, attempt_id, user_id, actor, created_at) VALUES(?,?,?,?,?)",
+        (ack_id, attempt_id, user_id, actor, timestamp),
+    )
+    conn.commit()
+    db.append_audit(
+        conn,
+        actor=actor,
+        action="attempt.ai_disclosure_ack",
+        object_type="StationAttempt",
+        object_id=attempt_id,
+        before=None,
+        after={"ack_id": ack_id, "user_id": user_id},
+    )
+    return {
+        "ack_id": ack_id,
+        "attempt_id": attempt_id,
+        "user_id": user_id,
+        "actor": actor,
+        "created_at": timestamp,
+    }
+
+
 def public_transparency(conn) -> dict[str, Any]:
     """考生/校内可查的公开摘要：只返回已公开的模型卡与最新公开数据表。"""
     cards = []

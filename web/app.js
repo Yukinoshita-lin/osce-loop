@@ -1533,6 +1533,13 @@ async function renderFeedback(attemptId) {
         <span>${data.ai_disclosure.human_confirmed ? '<span class="pill teal">已人工确认</span>' : '<span class="pill amber">待人工签字</span>'}${data.ai_disclosure.human_reviewers.length ? ` ${esc(data.ai_disclosure.human_reviewers.join('、'))}` : ''}</span>
       </div>
       <div class="small">${esc(data.ai_disclosure.statement)}</div>
+      <div class="btn-row" style="margin-top:8px">
+        ${data.ai_disclosure.acknowledged
+          ? `<span class="pill teal">已阅读确认</span><span class="tiny muted">${fmtTime(data.ai_disclosure.acknowledged_at)}</span>`
+          : (state.user && state.user.role === 'student'
+            ? `<button class="btn small primary" data-action="ack-disclosure" data-attempt="${dataAttr(data.attempt_id)}">我已阅读并知晓</button>`
+            : '<span class="tiny muted">学生登录后可确认已阅读。</span>')}
+      </div>
     </div>` : ''}
 
     ${history.previous ? `<div class="card" style="margin-bottom:16px">
@@ -2607,6 +2614,19 @@ document.addEventListener('click', async (e) => {
   const action = el.dataset.action;
   if (action === 'download-sample') {
     downloadSampleTranscript();
+    return;
+  }
+  if (action === 'ack-disclosure') {
+    try {
+      await api(`/api/feedback/${encodeURIComponent(el.dataset.attempt)}/acknowledge`, {
+        method: 'POST',
+        body: {},
+      });
+      toast('已记录 AI 参与说明阅读确认');
+      await renderFeedback(el.dataset.attempt);
+    } catch (err) {
+      toast(err.message, true);
+    }
     return;
   }
   if (action === 'open-feedback') {
