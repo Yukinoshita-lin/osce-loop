@@ -2215,6 +2215,15 @@ async function viewQuality() {
         <div id="audit-chain-result" class="tiny muted" style="margin-bottom:8px">尚未校验。校验会逐条重算 prev_hash 与事件哈希。</div>
         <div id="ops-health-result" class="tiny muted" style="margin-bottom:8px"></div>
         <div class="audit-list">${auditRows || '<div class="empty">暂无审计</div>'}</div>
+        <div class="sep"></div>
+        <div class="card-title" style="margin-bottom:6px">审计检索<span class="sub">动作前缀 / 操作者 / 对象</span></div>
+        <form id="audit-search-form" class="btn-row" style="flex-wrap:wrap;align-items:center;margin-bottom:8px">
+          <input class="input" name="action" placeholder="动作前缀，如 feedback." style="max-width:200px">
+          <input class="input" name="actor" placeholder="操作者" style="max-width:140px">
+          <input class="input" name="object_id" placeholder="对象 ID" style="max-width:180px">
+          <button class="btn small" type="submit">检索</button>
+        </form>
+        <div id="audit-search-result" class="audit-list" style="max-height:260px"></div>
       </div>
     </div>
   `;
@@ -2259,6 +2268,32 @@ async function viewQuality() {
         });
         toast(`SUS 已提交：${num(result.response.score, 1)} 分 · 样本均值 ${num(result.sus.average, 1)}`);
         await viewQuality();
+      } catch (err) {
+        toast(err.message, true);
+      }
+    });
+  }
+  const auditSearchForm = $('#audit-search-form');
+  if (auditSearchForm) {
+    auditSearchForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const box = $('#audit-search-result');
+      const params = new URLSearchParams();
+      ['action', 'actor', 'object_id'].forEach((key) => {
+        const value = (auditSearchForm.querySelector(`[name="${key}"]`).value || '').trim();
+        if (value) params.set(key, value);
+      });
+      try {
+        const result = await api(`/api/audit/search?${params.toString()}`);
+        box.innerHTML = result.events.length
+          ? result.events.map((ev) => `
+            <div class="audit-row">
+              <div class="act">${esc(ev.action)}</div>
+              <div class="obj">${esc(ev.actor)} · ${esc(ev.object_id)}</div>
+              <div class="time">${fmtTime(ev.created_at)}</div>
+            </div>`).join('')
+          : '<div class="empty">没有匹配的审计事件</div>';
+        toast(`检索到 ${result.total} 条，显示 ${result.events.length} 条`);
       } catch (err) {
         toast(err.message, true);
       }

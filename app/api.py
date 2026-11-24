@@ -41,6 +41,7 @@ from .domain.accessibility import (
     submit_feedback_survey,
     survey_for_attempt,
 )
+from .domain.audit_search import search_audit_events
 from .domain.auth import (
     SESSION_TTL_HOURS,
     authenticate,
@@ -1763,6 +1764,29 @@ def governance(conn=Depends(get_conn)):
 def audit(conn=Depends(get_conn), limit: int = Query(100, ge=1, le=500)):
     return db.rows_to_dicts(
         conn.execute("SELECT * FROM audit_events ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+    )
+
+
+@app.get("/api/audit/search")
+def audit_search(
+    action: str = "",
+    actor: str = "",
+    object_id: str = "",
+    since: str = "",
+    until: str = "",
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    conn=Depends(get_conn),
+):
+    return search_audit_events(
+        conn,
+        action=action.strip(),
+        actor=actor.strip(),
+        object_id=object_id.strip(),
+        since=since.strip(),
+        until=until.strip(),
+        offset=offset,
+        limit=limit,
     )
 
 
