@@ -8,7 +8,7 @@ from app.ai.base import CapabilityGateway
 from app.ai.mock import MockScoringProvider
 from app.config import MODEL_VERSION, PROMPT_VERSION
 from app.domain.bundle import list_bundles
-from app.domain.execution import get_run, start_run
+from app.domain.execution import advance_run, get_run, start_run
 from app.domain.ingest import create_ingested_attempt
 from app.domain.scheduling import ensure_schedule_inputs, generate_schedule
 from app.seed import seed_if_empty
@@ -100,6 +100,9 @@ def test_ingest_links_attempt_to_run_slot(conn):
     linked = next(s for s in refreshed["slots"] if s["slot_key"] == slot["slot_key"])
     assert linked["attempt"]["attempt_id"] == attempt_id
     assert refreshed["counts"]["ingested"] == 1
+    assert refreshed["integrity"]["ingested"] == 1
+    assert refreshed["integrity"]["missing"] == refreshed["counts"]["total"] - 1
+    assert 0 < refreshed["integrity"]["coverage"] <= 1
 
     event = conn.execute(
         "SELECT * FROM exam_events WHERE run_id = ? AND event_type = 'slot_ingested'",
@@ -125,3 +128,19 @@ def test_unknown_slot_is_rejected(conn):
     slot = run["slots"][0]
     with pytest.raises(ValueError, match="不存在"):
         _ingest(conn, run, slot, slot_key="missing__9")
+
+
+def test_completion_records_integrity_gap(conn):
+    run = start_run(conn, actor="考务测试")
+    slot = run["slots"][0]
+    _ingest(conn, run, slot)
+    advance_run(conn, run["run_id"], actor="考务测试")
+    completed = advance_run(conn, run["run_id"], actor="考务测试")
+    assert completed["status"] == "completed"
+    assert completed["integrity"]["missing"] >= 1
+    event = conn.execute(
+        "SELECT * FROM exam_events WHERE run_id = ? AND event_type = 'run_integrity_gap'",
+        (run["run_id"],),
+    ).fetchone()
+    assert event is not None
+    assert str(completed["integrity"]["missing"]) in event["message"]

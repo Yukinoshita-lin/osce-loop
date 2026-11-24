@@ -227,6 +227,18 @@ def get_run(conn, run_id: str) -> dict[str, Any]:
         "stopped": sum(1 for s in slots if s["status"] == "stopped"),
     }
     max_round = max((s["round"] for s in slots), default=1)
+    ingested = counts["ingested"]
+    integrity = {
+        "ingested": ingested,
+        "missing": max(0, len(slots) - ingested),
+        "coverage": round(ingested / len(slots), 3) if slots else 0.0,
+        "completed_without_attempt": sum(
+            1 for slot in slots if slot["status"] == "completed" and not slot.get("attempt_id")
+        ),
+        "media_gap": sum(
+            1 for slot in slots if slot.get("attempt") and slot["attempt"]["integrity_gap"]
+        ),
+    }
     return {
         **run,
         "hints_enabled": bool(run["hints_enabled"]),
@@ -234,6 +246,7 @@ def get_run(conn, run_id: str) -> dict[str, Any]:
         "slots": slots,
         "events": events,
         "counts": counts,
+        "integrity": integrity,
     }
 
 
@@ -263,6 +276,18 @@ def advance_run(conn, run_id: str, *, actor: str = "考务") -> dict[str, Any]:
             "UPDATE exam_runs SET status = 'completed', ended_at = ? WHERE run_id = ?",
             (timestamp, run_id),
         )
+        missing = conn.execute(
+            "SELECT COUNT(*) AS n FROM exam_run_slots WHERE run_id = ? AND attempt_id IS NULL",
+            (run_id,),
+        ).fetchone()["n"]
+        if missing:
+            _event(
+                conn,
+                run_id,
+                "run_integrity_gap",
+                f"考试结束：{missing} 个槽位未关联场次，归档前需补齐或标记异常",
+                severity="warn",
+            )
         _event(conn, run_id, "run_completed", "全部轮次完成，考试执行结束", severity="info")
     else:
         next_round = current + 1

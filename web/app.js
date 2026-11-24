@@ -1184,6 +1184,10 @@ function executionHtml(run, emergencyStop) {
       </div>
     </div>
     ${emergencyStop ? '<div class="alert danger"><b>全局终止开关已激活</b><p>评分、SP 对话与成绩发布等写操作已被阻断；请确认现场安全后解除。</p></div>' : ''}
+    ${run.integrity && run.integrity.missing > 0 ? `<div class="alert ${completed ? 'danger' : ''}">
+      <b>场次录入覆盖 ${pct(run.integrity.coverage, 0)}</b>
+      <p>${run.integrity.missing} 个槽位尚未关联场次${completed ? '，归档前需补齐或标记异常。' : '；可在槽位卡片中直接录入。'}</p>
+    </div>` : ''}
     <div class="grid c4" style="margin-bottom:16px">
       <div class="kpi blue"><div class="k">当前轮次</div><div class="v">${run.current_round}<small>/ ${run.max_round}</small></div><div class="d">${current.length} 个并行考站</div></div>
       <div class="kpi teal"><div class="k">已完成</div><div class="v">${counts.completed || 0}</div><div class="d">已录入 ${counts.ingested || 0} · 总槽位 ${counts.total}</div></div>
