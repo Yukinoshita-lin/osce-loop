@@ -2362,6 +2362,12 @@ async function viewQuality() {
   const stationReviewOptions = psychometrics
     .map((p) => `<option value="${dataAttr(p.station_id)}">${esc(p.station_id)} · ${esc(p.title)}</option>`)
     .join('');
+  const hintImpact = data.hint_impact || {};
+  const hintRows = (hintImpact.groups || []).map((g) => `
+    <div class="version-row">
+      <span class="k">${esc(g.label)}</span>
+      <span class="v">${g.attempts} 场 · 均分 ${num(g.mean_total, 1)} · SD ${num(g.sd_total, 1)} · 通过率 ${g.pass_rate === null ? '—' : pct(g.pass_rate, 0)}</span>
+    </div>`).join('');
   const coverageRows = (coverage.domains || []).map((d) => {
     const statusLabel = { ok: ['达标', 'teal'], overrepresented: ['过度重复', 'amber'], single_station: ['单站覆盖', 'muted'] }[d.status] || [d.status, 'muted'];
     return `<tr>
@@ -2504,6 +2510,16 @@ async function viewQuality() {
       </form>` : '<div class="tiny muted">暂无考站可处置</div>'}
       <div class="audit-list" style="margin-top:6px">${reviewRows || '<div class="empty">暂无处置记录</div>'}</div>
       <div class="tiny muted" style="margin-top:6px">α ≥ 0.7 视为可接受；项级区分度 < 0.2 或全员满分/零分提示评分表或 SP 可能有问题，需人工裁定。</div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">提示影响分析<span class="sub">开启 vs 关闭事实层提示 · 事后线索</span></div>
+      <div class="attempt-strip" style="margin-bottom:6px">
+        ${hintImpact.status === 'ok' ? '<span class="pill teal">两组均有样本</span>' : '<span class="pill amber">样本不足</span>'}
+        ${hintImpact.delta_mean === null || hintImpact.delta_mean === undefined ? '' : `<span>开启组均分差 <b>${hintImpact.delta_mean > 0 ? '+' : ''}${num(hintImpact.delta_mean, 2)}</b></span>`}
+      </div>
+      ${hintRows || '<div class="tiny muted">暂无同时包含开启与关闭提示的执行场次。</div>'}
+      <div class="tiny muted" style="margin-top:6px">${esc(hintImpact.note || '')}</div>
     </div>
 
     <div class="card" style="margin-bottom:16px">

@@ -97,6 +97,7 @@ from .domain.governance import (
 )
 from .domain.health import system_health
 from .domain.history import candidate_history
+from .domain.hint_impact import hint_impact
 from .domain.execution import (
     advance_run,
     get_run,
@@ -1684,6 +1685,7 @@ def quality(conn=Depends(get_conn)):
         "item_quality": item_quality,
         "psychometrics": station_psychometrics(conn),
         "station_reviews": list_station_reviews(conn, limit=20),
+        "hint_impact": hint_impact(conn),
         "coverage": blueprint_coverage(conn),
         "feedback_latency": feedback_ack_latency(conn),
         "ai_calls": {
