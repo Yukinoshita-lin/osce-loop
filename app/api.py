@@ -96,6 +96,7 @@ from .domain.practice import build_practice_report
 from .domain.retention import purge_expired, refresh_retention, retention_overview
 from .domain.risk import RISK_ORDER, escalate_risk
 from .domain.rubric import AUTHORITY_LABELS, PHASE_LABELS, cap_authority, derive_assets, validate_bundle
+from .domain.run_export import build_run_package
 from .domain.scheduling import (
     ensure_schedule_inputs,
     generate_schedule,
@@ -1550,6 +1551,16 @@ def start_execution(body: RunStartBody, conn=Depends(get_conn)):
 def get_execution(run_id: str, conn=Depends(get_conn)):
     try:
         return {"run": get_run(conn, run_id)}
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@app.get("/api/execution/{run_id}/export")
+def execution_export(run_id: str, request: Request, conn=Depends(get_conn)):
+    try:
+        return build_run_package(
+            conn, run_id, exported_by=request.state.user["display_name"]
+        )
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
 

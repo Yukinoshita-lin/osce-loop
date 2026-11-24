@@ -1177,6 +1177,7 @@ function executionHtml(run, emergencyStop) {
       </div>
       <div class="btn-row">
         ${execPill(run.status)}
+        <button class="btn small" data-action="exec-export">导出归档包</button>
         ${!completed ? `<button class="btn small" data-action="exec-hints" data-enabled="${run.hints_enabled ? 'false' : 'true'}">${run.hints_enabled ? '关闭事实层提示' : '开启事实层提示'}</button>` : ''}
         ${!completed ? `<button class="btn small primary" data-action="exec-advance">${run.current_round >= run.max_round ? '结束考试' : '推进到下一轮'}</button>` : ''}
         ${!completed ? '<button class="btn small danger" data-action="exec-stop">终止考试</button>' : ''}
@@ -2657,6 +2658,24 @@ document.addEventListener('click', async (e) => {
       });
       toast(enabled ? '事实层提示已开启' : '事实层提示已关闭，操作已留痕');
       await viewExecution();
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'exec-export') {
+    try {
+      const data = await api(`/api/execution/${encodeURIComponent(state.executionRunId)}/export`);
+      const blob = new Blob([JSON.stringify(data.package, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${state.executionRunId}-archive.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast(`执行归档包已导出：${data.package_hash.slice(0, 18)}…`);
     } catch (err) {
       toast(err.message, true);
     }
