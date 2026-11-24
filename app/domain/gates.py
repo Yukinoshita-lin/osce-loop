@@ -60,6 +60,7 @@ GATES = [
         "criteria": [
             ("qwk_ai", "AI-人 QWK", "≥ 0.80", 0.80, "ge"),
             ("critical_miss", "关键项漏判", "= 0", 0, "eq"),
+            ("critical_streak", "连续零关键项漏判", "≥ 3 场", 3, "ge"),
             ("switch_drill", "终止开关演练", "通过", 1.0, "ge"),
             ("appeal_drill", "申诉演练", "≥ 2 次", 2, "ge"),
             ("ethics", "伦理与合规批准", "通过", 1.0, "ge"),
@@ -84,7 +85,9 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
     critical_miss = 0
     version_stamped = 0
     ai_records = 0
+    records_by_attempt: dict[str, list[dict[str, Any]]] = {}
     for rec in records:
+        records_by_attempt.setdefault(rec["attempt_id"], []).append(rec)
         if rec["ai_score"] is None:
             continue
         ai_records += 1
@@ -93,6 +96,26 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
         item = item_map.get((attempt_bundle.get(rec["attempt_id"]), rec["item_id"]))
         if item and item.get("critical") and rec["ai_score"] == 0 and (rec["gold_score"] or 0) > 0:
             critical_miss += 1
+
+    critical_streak = 0
+    for attempt in sorted(attempts, key=lambda entry: entry["created_at"], reverse=True):
+        payload = bundle_payloads.get(attempt["bundle_id"]) or {}
+        critical_ids = {
+            item["item_id"] for item in payload.get("rubric", []) if item.get("critical")
+        }
+        reviewed = [
+            record
+            for record in records_by_attempt.get(attempt["attempt_id"], [])
+            if record["item_id"] in critical_ids and record["gold_score"] is not None
+        ]
+        if not reviewed:
+            continue
+        missed = any(
+            record["ai_score"] == 0 and (record["gold_score"] or 0) > 0 for record in reviewed
+        )
+        if missed:
+            break
+        critical_streak += 1
 
     public_card_count = conn.execute(
         "SELECT COUNT(*) AS n FROM model_cards WHERE is_public = 1"
@@ -178,6 +201,7 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
         "avg_review_seconds": (report.get("review") or {}).get("avg_seconds"),
         "edit_rate": (report.get("review") or {}).get("edit_rate"),
         "critical_miss": critical_miss,
+        "critical_streak": critical_streak,
         "audit_replay": 1.0 if version_complete and report.get("counts", {}).get("records", 0) > 0 else None,
         "sp_fact_error": sp_fact_error,
         "persona_pass": sp_persona_pass,

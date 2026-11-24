@@ -2412,6 +2412,7 @@ async function viewQuality() {
             else if (c.key === 'evidence_rate' || c.key === 'edit_rate' || c.key === 'teacher_hours' || c.key === 'sp_fact_error' || c.key === 'persona_pass') value = pct(c.value, c.value < 0.1 ? 1 : 0);
             else if (c.key === 'sus') value = num(c.value, 1);
             else if (c.key === 'critical_miss') value = num(c.value, 0);
+            else if (c.key === 'critical_streak') value = `${num(c.value, 0)} 场`;
             else if (c.key === 'avg_review_seconds') value = num(c.value, 2) + 's';
             else if (c.key === 'p95_latency') value = num(c.value * 1000, 0) + ' ms';
             else value = num(c.value, 2);
