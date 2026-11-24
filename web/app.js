@@ -53,6 +53,7 @@ const state = {
   bundleCurrent: null,
   bundlePayload: null,
   bundleFocus: null,
+  ingestSlot: null,
 };
 
 /* ---------- utils ---------- */
@@ -770,8 +771,12 @@ async function viewIngest() {
     $('#view').innerHTML = '<div class="empty">尚无冻结站包，无法录入</div>';
     return;
   }
+  const linked = state.ingestSlot;
+  const preferred = linked
+    ? stations.find((s) => s.title.includes(linked.station_name) || linked.station_name.includes(s.title))
+    : null;
   const stationOptions = stations
-    .map((s) => `<option value="${dataAttr(s.bundle_id)}">${esc(s.station_id)} · ${esc(s.title)} · v${esc(s.version)}</option>`)
+    .map((s) => `<option value="${dataAttr(s.bundle_id)}" ${preferred && preferred.bundle_id === s.bundle_id ? 'selected' : ''}>${esc(s.station_id)} · ${esc(s.title)} · v${esc(s.version)}</option>`)
     .join('');
   $('#view').innerHTML = `
     <div class="view-head">
@@ -804,15 +809,18 @@ async function viewIngest() {
       <div class="card">
         <div class="card-title">上传与评分<span class="sub">录入后自动进入复核队列</span></div>
         <form id="ingest-form">
+          ${linked ? `<div class="alert" style="margin-bottom:10px"><b>关联执行槽位</b><p>第 ${esc(linked.round)} 轮 · ${esc(linked.candidate_name)} · ${esc(linked.station_name)}；录入成功后自动回写执行台。</p></div>` : ''}
+          <input type="hidden" name="run_id" value="${dataAttr(linked ? linked.run_id : '')}">
+          <input type="hidden" name="slot_key" value="${dataAttr(linked ? linked.slot_key : '')}">
           <label class="field">考站
             <select class="input" name="bundle_id" required>${stationOptions}</select>
           </label>
           <div class="grid c2" style="margin-top:10px">
             <label class="field">考生编号
-              <input class="input" name="candidate_code" value="C2026-UPLOAD" maxlength="40">
+              <input class="input" name="candidate_code" value="${dataAttr(linked ? linked.candidate_code : 'C2026-UPLOAD')}" maxlength="40">
             </label>
             <label class="field">考生姓名
-              <input class="input" name="candidate_name" value="演示考生" maxlength="40">
+              <input class="input" name="candidate_name" value="${dataAttr(linked ? linked.candidate_name : '演示考生')}" maxlength="40">
             </label>
           </div>
           <div class="grid c2" style="margin-top:10px">
@@ -868,7 +876,12 @@ async function viewIngest() {
     try {
       const data = await apiForm('/api/attempts/ingest', new FormData(form));
       renderIngestResult(data);
-      toast(`已录入 ${data.attempt.candidate_code}，待复核 ${data.attempt.pending} 项`);
+      if (data.linked_slot) {
+        toast(`已录入 ${data.attempt.candidate_code} 并回写执行槽位，待复核 ${data.attempt.pending} 项`);
+        state.ingestSlot = null;
+      } else {
+        toast(`已录入 ${data.attempt.candidate_code}，待复核 ${data.attempt.pending} 项`);
+      }
     } catch (err) {
       toast(err.message, true);
     } finally {
@@ -886,6 +899,11 @@ function renderIngestResult(data) {
   if (!box) return;
   box.innerHTML = `
     <div class="sep"></div>
+    ${data.linked_slot ? `<div class="attempt-strip" style="margin-bottom:8px">
+      <span class="pill teal">已回写执行槽位</span>
+      <span>${esc(data.linked_slot.slot_key)}</span>
+      <a class="btn small" href="#/execution">返回执行台</a>
+    </div>` : ''}
     <div class="card-title">录入结果<span class="sub">${esc(a.status)}</span></div>
     <div class="attempt-strip" style="margin-bottom:8px">
       <span>${esc(a.candidate_code)} · ${esc(a.candidate_name)}</span>
@@ -1118,7 +1136,18 @@ function executionHtml(run, emergencyStop) {
       <div class="tiny muted">${esc(slot.room)} · ${esc(slot.sp)} · ${esc(slot.examiner)} · ${slot.start_min}–${slot.end_min}′</div>
       ${run.hints_enabled ? `<ul class="tiny muted" style="margin:6px 0 0;padding-left:16px">${(slot.hints || []).map((h) => `<li>${esc(h)}</li>`).join('')}</ul>` : '<div class="tiny muted" style="margin-top:5px">事实层提示已关闭</div>'}
       ${slot.note ? `<div class="violation">${esc(slot.note)}</div>` : ''}
-      ${['waiting', 'in_progress'].includes(slot.status) && !completed ? `
+      ${slot.attempt ? `<div class="attempt-strip" style="margin-top:6px">
+        <span class="pill teal">已录入场次</span>
+        <span>待复核 ${slot.attempt.pending}</span>
+        <button class="btn small" data-action="open-feedback" data-attempt="${dataAttr(slot.attempt.attempt_id)}">查看反馈</button>
+      </div>` : ''}
+      ${['waiting', 'in_progress'].includes(slot.status) && !completed && !slot.attempt ? `
+        <div class="btn-row" style="margin-top:7px">
+          <button class="btn small primary" data-action="exec-ingest" data-run="${dataAttr(run.run_id)}" data-slot-key="${dataAttr(slot.slot_key)}" data-code="${dataAttr(slot.candidate_id)}" data-name="${dataAttr(slot.candidate_name)}" data-station="${dataAttr(slot.station_name)}" data-round="${slot.round}">录入场次</button>
+          <button class="btn small" data-action="exec-slot" data-slot-key="${dataAttr(slot.slot_key)}" data-slot-action="complete">完成</button>
+          <button class="btn small amber" data-action="exec-slot" data-slot-key="${dataAttr(slot.slot_key)}" data-slot-action="anomaly">异常</button>
+          <button class="btn small danger" data-action="exec-slot" data-slot-key="${dataAttr(slot.slot_key)}" data-slot-action="terminate">终止该站</button>
+        </div>` : !slot.attempt ? `
         <div class="btn-row" style="margin-top:7px">
           <button class="btn small" data-action="exec-slot" data-slot-key="${dataAttr(slot.slot_key)}" data-slot-action="complete">完成</button>
           <button class="btn small amber" data-action="exec-slot" data-slot-key="${dataAttr(slot.slot_key)}" data-slot-action="anomaly">异常</button>
@@ -1157,7 +1186,7 @@ function executionHtml(run, emergencyStop) {
     ${emergencyStop ? '<div class="alert danger"><b>全局终止开关已激活</b><p>评分、SP 对话与成绩发布等写操作已被阻断；请确认现场安全后解除。</p></div>' : ''}
     <div class="grid c4" style="margin-bottom:16px">
       <div class="kpi blue"><div class="k">当前轮次</div><div class="v">${run.current_round}<small>/ ${run.max_round}</small></div><div class="d">${current.length} 个并行考站</div></div>
-      <div class="kpi teal"><div class="k">已完成</div><div class="v">${counts.completed || 0}</div><div class="d">总槽位 ${counts.total}</div></div>
+      <div class="kpi teal"><div class="k">已完成</div><div class="v">${counts.completed || 0}</div><div class="d">已录入 ${counts.ingested || 0} · 总槽位 ${counts.total}</div></div>
       <div class="kpi amber"><div class="k">异常</div><div class="v">${counts.anomaly || 0}</div><div class="d">需现场处置</div></div>
       <div class="kpi red"><div class="k">已终止</div><div class="v">${counts.terminated || 0}</div><div class="d">保留终止理由与事件</div></div>
     </div>
@@ -2627,6 +2656,18 @@ document.addEventListener('click', async (e) => {
     } catch (err) {
       toast(err.message, true);
     }
+    return;
+  }
+  if (action === 'exec-ingest') {
+    state.ingestSlot = {
+      run_id: el.dataset.run,
+      slot_key: el.dataset.slotKey,
+      candidate_code: el.dataset.code,
+      candidate_name: el.dataset.name,
+      station_name: el.dataset.station,
+      round: el.dataset.round,
+    };
+    location.hash = '#/ingest';
     return;
   }
   if (action === 'exec-slot') {

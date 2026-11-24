@@ -171,6 +171,41 @@ def get_run(conn, run_id: str) -> dict[str, Any]:
         except (TypeError, ValueError):
             data["hints"] = []
         slots.append(data)
+
+    attempt_rows = {
+        attempt["attempt_id"]: dict(attempt)
+        for attempt in conn.execute(
+            "SELECT * FROM attempts WHERE run_id = ?", (run_id,)
+        ).fetchall()
+    }
+    attempt_ids = [slot["attempt_id"] for slot in slots if slot.get("attempt_id")]
+    pending_by_attempt: dict[str, int] = {}
+    if attempt_ids:
+        placeholders = ",".join("?" * len(attempt_ids))
+        pending_by_attempt = {
+            pending["attempt_id"]: pending["n"]
+            for pending in conn.execute(
+                "SELECT attempt_id, COUNT(*) AS n FROM score_records "
+                f"WHERE attempt_id IN ({placeholders}) "
+                "AND status IN ('pending_review','manual_pending') GROUP BY attempt_id",
+                tuple(attempt_ids),
+            ).fetchall()
+        }
+    for slot in slots:
+        attempt = attempt_rows.get(slot.get("attempt_id") or "")
+        slot["attempt"] = (
+            {
+                "attempt_id": attempt["attempt_id"],
+                "candidate_code": attempt["candidate_code"],
+                "candidate_name": attempt["candidate_name"],
+                "status": attempt["status"],
+                "pending": pending_by_attempt.get(attempt["attempt_id"], 0),
+                "media_url": attempt["media_url"],
+                "integrity_gap": bool(attempt["integrity_gap"]),
+            }
+            if attempt
+            else None
+        )
     events = []
     for event in conn.execute(
         "SELECT * FROM exam_events WHERE run_id = ? ORDER BY rowid DESC LIMIT 120", (run_id,)
@@ -183,6 +218,7 @@ def get_run(conn, run_id: str) -> dict[str, Any]:
         events.append(data)
     counts = {
         "total": len(slots),
+        "ingested": sum(1 for s in slots if s.get("attempt_id")),
         "in_progress": sum(1 for s in slots if s["status"] == "in_progress"),
         "completed": sum(1 for s in slots if s["status"] == "completed"),
         "waiting": sum(1 for s in slots if s["status"] == "waiting"),
@@ -302,6 +338,53 @@ def slot_action(
         after={"status": status, "note": note},
     )
     return get_run(conn, run_id)
+
+
+def slot_for_ingest(conn, run_id: str, slot_key: str) -> dict[str, Any]:
+    """校验槽位可录入：存在、未录入、未终止。"""
+    row = conn.execute(
+        "SELECT * FROM exam_run_slots WHERE run_id = ? AND slot_key = ?", (run_id, slot_key)
+    ).fetchone()
+    if not row:
+        raise ValueError("执行槽位不存在")
+    slot = dict(row)
+    if slot.get("attempt_id"):
+        raise ValueError("该槽位已录入场次，不能重复录入")
+    if slot["status"] in ("terminated", "stopped"):
+        raise ValueError("该槽位已终止，不能录入场次")
+    return slot
+
+
+def link_attempt_to_slot(
+    conn, *, run_id: str, slot_key: str, attempt_id: str, actor: str = "考务"
+) -> None:
+    """录入完成后回写槽位状态与场次关联，并写入事件与审计。"""
+    slot = slot_for_ingest(conn, run_id, slot_key)
+    timestamp = db.now_iso()
+    conn.execute(
+        "UPDATE exam_run_slots SET status = 'completed', attempt_id = ?, note = ?, updated_at = ? "
+        "WHERE run_id = ? AND slot_key = ?",
+        (attempt_id, "已录入场次", timestamp, run_id, slot_key),
+    )
+    _event(
+        conn,
+        run_id,
+        "slot_ingested",
+        f"{slot['candidate_name']} · {slot['station_name']} 已录入场次",
+        severity="info",
+        slot_key=slot_key,
+        payload={"attempt_id": attempt_id, "actor": actor},
+    )
+    conn.commit()
+    db.append_audit(
+        conn,
+        actor=actor,
+        action="exam.slot_ingest",
+        object_type="ExamRunSlot",
+        object_id=f"{run_id}:{slot_key}",
+        before={"status": slot["status"]},
+        after={"status": "completed", "attempt_id": attempt_id},
+    )
 
 
 def toggle_hints(conn, run_id: str, *, enabled: bool, actor: str = "考务") -> dict[str, Any]:

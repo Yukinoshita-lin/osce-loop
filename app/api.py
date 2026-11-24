@@ -465,6 +465,8 @@ def _attempt_summary(conn, attempt: dict[str, Any]) -> dict[str, Any]:
         "signed_off_by": attempt.get("signed_off_by"),
         "signed_off_at": attempt.get("signed_off_at"),
         "published_at": attempt.get("published_at"),
+        "run_id": attempt.get("run_id"),
+        "slot_key": attempt.get("slot_key"),
     }
 
 
@@ -632,6 +634,8 @@ def _cleanup_media(media: dict[str, Any] | None) -> None:
 @app.post("/api/attempts/ingest")
 async def ingest_attempt(
     bundle_id: str = Form(""),
+    run_id: str = Form(""),
+    slot_key: str = Form(""),
     candidate_code: str = Form(""),
     candidate_name: str = Form(""),
     risk_level: str = Form("L2"),
@@ -724,28 +728,40 @@ async def ingest_attempt(
         provider_bundle.prompt_version,
         fallback_provider=provider_bundle.fallback,
     )
-    attempt_id = create_ingested_attempt(
-        conn,
-        gateway,
-        bundle=bundle,
-        transcript=parsed["utterances"],
-        candidate_code=code,
-        candidate_name=name,
-        risk_level=risk_level,
-        release_stage=_stage(conn),
-        media_id=(media or {}).get("media_id") or "upload_no_media",
-        media_url=(media or {}).get("media_url"),
-        media_filename=(media or {}).get("filename"),
-        media_sha256=(media or {}).get("sha256"),
-        media_size_bytes=(media or {}).get("size_bytes") or 0,
-        transcript_source=parsed.get("source", "upload"),
-        asr_model=(asr_meta or {}).get("model_version"),
-        actor=actor,
-    )
+    try:
+        attempt_id = create_ingested_attempt(
+            conn,
+            gateway,
+            bundle=bundle,
+            transcript=parsed["utterances"],
+            candidate_code=code,
+            candidate_name=name,
+            risk_level=risk_level,
+            release_stage=_stage(conn),
+            media_id=(media or {}).get("media_id") or "upload_no_media",
+            media_url=(media or {}).get("media_url"),
+            media_filename=(media or {}).get("filename"),
+            media_sha256=(media or {}).get("sha256"),
+            media_size_bytes=(media or {}).get("size_bytes") or 0,
+            transcript_source=parsed.get("source", "upload"),
+            asr_model=(asr_meta or {}).get("model_version"),
+            actor=actor,
+            run_id=run_id.strip() or None,
+            slot_key=slot_key.strip() or None,
+        )
+    except ValueError as exc:
+        _cleanup_media(media)
+        raise HTTPException(400, str(exc)) from exc
     attempt = _attempt_summary(conn, _attempt_row(conn, attempt_id))
     return {
         "ok": True,
         "attempt": attempt,
+        "linked_slot": {
+            "run_id": run_id.strip(),
+            "slot_key": slot_key.strip(),
+        }
+        if run_id.strip() and slot_key.strip()
+        else None,
         "transcript": {
             "format": parsed["format"],
             "utterances": len(parsed["utterances"]),

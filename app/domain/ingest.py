@@ -8,6 +8,7 @@ from typing import Any
 from .. import db
 from ..ai.base import CapabilityGateway
 from ..ai.pipeline import run_scoring
+from .execution import link_attempt_to_slot, slot_for_ingest
 from .integrity import transcript_digest
 from .retention import retention_plan
 
@@ -30,9 +31,15 @@ def create_ingested_attempt(
     transcript_source: str = "upload",
     asr_model: str | None = None,
     actor: str = "考务录入",
+    run_id: str | None = None,
+    slot_key: str | None = None,
 ) -> str:
     if not transcript:
         raise ValueError("转写为空，无法创建场次")
+    if bool(run_id) != bool(slot_key):
+        raise ValueError("run_id 与 slot_key 必须同时提供")
+    if run_id and slot_key:
+        slot_for_ingest(conn, run_id, slot_key)
     attempt_id = db.new_id("att")
     created_at = db.now_iso()
     plan = retention_plan(risk_level, created_at)
@@ -46,8 +53,8 @@ def create_ingested_attempt(
     conn.execute(
         "INSERT INTO attempts(attempt_id, bundle_id, candidate_code, candidate_name, session_id, risk_level, "
         "media_id, media_url, media_filename, media_sha256, media_size_bytes, retention_class, retain_until, "
-        "duration_ms, integrity_gap, integrity_note, appeal, asr_confidence, status, ab_group, created_at) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "duration_ms, integrity_gap, integrity_note, appeal, asr_confidence, status, ab_group, run_id, slot_key, created_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             attempt_id,
             bundle["bundle_id"],
@@ -69,6 +76,8 @@ def create_ingested_attempt(
             asr_confidence,
             "scored",
             "ai_assisted",
+            run_id,
+            slot_key,
             created_at,
         ),
     )
@@ -114,8 +123,14 @@ def create_ingested_attempt(
             "transcript_source": transcript_source,
             "asr_model": asr_model,
             "integrity_gap": bool(integrity_gap),
+            "run_id": run_id,
+            "slot_key": slot_key,
         },
         model_version=gateway.model_version,
         prompt_version=gateway.prompt_version,
     )
+    if run_id and slot_key:
+        link_attempt_to_slot(
+            conn, run_id=run_id, slot_key=slot_key, attempt_id=attempt_id, actor=actor
+        )
     return attempt_id

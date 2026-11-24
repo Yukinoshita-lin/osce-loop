@@ -408,6 +408,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         "retain_until": "TEXT",
         "media_purged_at": "TEXT",
         "media_purged_by": "TEXT",
+        "run_id": "TEXT",
+        "slot_key": "TEXT",
     }
     for column, ddl in additions.items():
         if column not in existing:
@@ -463,6 +465,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
     }
     if "sha256" not in transcript_columns:
         conn.execute("ALTER TABLE transcripts ADD COLUMN sha256 TEXT")
+
+    slot_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(exam_run_slots)").fetchall()
+    }
+    if "attempt_id" not in slot_columns:
+        conn.execute("ALTER TABLE exam_run_slots ADD COLUMN attempt_id TEXT")
 
 
 def rows_to_dicts(rows: Iterable[sqlite3.Row]) -> list[dict[str, Any]]:
