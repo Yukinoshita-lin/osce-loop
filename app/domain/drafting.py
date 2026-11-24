@@ -768,6 +768,65 @@ def _difficulty_report(
     }
 
 
+def _quality_context(historical: list[dict[str, Any]]) -> dict[str, Any]:
+    """把上次质量报告转成命题提示：低区分度项、地板/天花板站。"""
+    low_items: list[dict[str, Any]] = []
+    weak_stations: list[dict[str, Any]] = []
+    for row in historical:
+        if (row.get("scored_attempts") or 0) < 5:
+            continue
+        flags = row.get("flags") or []
+        if "ceiling" in flags or "floor" in flags:
+            weak_stations.append(
+                {
+                    "station_id": row.get("station_id"),
+                    "title": row.get("title"),
+                    "flags": [flag for flag in flags if flag in ("ceiling", "floor")],
+                    "mean_total": row.get("mean_total"),
+                }
+            )
+        for item in row.get("items") or []:
+            discrimination = item.get("discrimination")
+            if discrimination is not None and discrimination < 0.2:
+                low_items.append(
+                    {
+                        "station_id": row.get("station_id"),
+                        "item_id": item.get("item_id"),
+                        "title": item.get("title"),
+                        "discrimination": discrimination,
+                    }
+                )
+    advisories: list[str] = []
+    if low_items:
+        sample = "、".join(
+            f"{entry['station_id']}/{entry['item_id']}" for entry in low_items[:3]
+        )
+        advisories.append(
+            f"既往站包有 {len(low_items)} 个低区分度项（如 {sample}），"
+            "草案应避免同类模糊锚，并增加干扰信息或鉴别性症状。"
+        )
+    if weak_stations:
+        sample = "、".join(str(entry["station_id"]) for entry in weak_stations[:3])
+        advisories.append(
+            f"{len(weak_stations)} 个站出现地板/天花板效应（如 {sample}），"
+            "起草时需调整难度或关键项配额。"
+        )
+    if not advisories:
+        qualified = [row for row in historical if (row.get("scored_attempts") or 0) >= 5]
+        if qualified:
+            advisories.append(
+                "既往质量报告未发现低区分度项或地板/天花板效应，可按常规难度起草；仍需 S2 复核。"
+            )
+        else:
+            advisories.append("暂无足够历史场次形成质量提示；难度预判仅作启发式参考。")
+    return {
+        "low_discrimination_items": low_items[:10],
+        "weak_stations": weak_stations[:10],
+        "advisories": advisories,
+        "note": "质量提示来自各站最新冻结版本的心理测量；样本不足 5 场的站不纳入。",
+    }
+
+
 def generate_bundle_draft(
     conn,
     *,
@@ -863,12 +922,14 @@ def generate_bundle_draft(
 
     validation = validate_bundle(payload)
     quota = _quota_check(payload, case)
+    historical = station_psychometrics(conn)
     difficulty_report = _difficulty_report(
         payload,
         requested=difficulty,
         quota=quota,
-        historical=station_psychometrics(conn),
+        historical=historical,
     )
+    quality_context = _quality_context(historical)
     coverage = blueprint_coverage(conn)
     domain_row = next(
         (row for row in coverage["domains"] if row["domain"] == case["primary_domain"]), None
@@ -889,6 +950,7 @@ def generate_bundle_draft(
         "validation": validation,
         "quota": quota,
         "difficulty": difficulty_report,
+        "quality_context": quality_context,
         "blueprint": blueprint,
         "similarity": similarity,
         "similarity_threshold": 0.75,

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from app import db
 from app.domain.bundle import freeze_bundle
-from app.domain.drafting import case_topics, generate_bundle_draft
+from app.domain.drafting import _quality_context, case_topics, generate_bundle_draft
 from app.domain.rubric import validate_bundle
 
 
@@ -31,6 +31,7 @@ def test_draft_passes_freeze_checks_and_has_quotas(tmp_path):
         assert len(draft["rubric"]) == 10
         assert draft["instruction_item_refs"] == [item["item_id"] for item in draft["rubric"]]
         assert result["disclosure"]["level"] == "L0_draft"
+        assert result["quality_context"]["advisories"]
         assert result["versions"]["model_version"].startswith("mock-draft")
         quota_keys = {check["key"] for check in result["quota"]["checks"]}
         assert quota_keys == {"comorbidity", "unrelated_concern", "ambiguity"}
@@ -108,3 +109,51 @@ def test_draft_flags_similar_bundle_from_other_station(tmp_path):
     assert "ST-OTHER-999" in matches
     assert matches["ST-OTHER-999"]["similarity"] >= 0.99
     conn.close()
+
+
+def test_quality_context_flags_low_discrimination_and_weak_stations():
+    historical = [
+        {
+            "station_id": "ST-A",
+            "title": "既往站",
+            "scored_attempts": 12,
+            "mean_total": 88.0,
+            "flags": ["ceiling", "low_discrimination"],
+            "items": [
+                {"item_id": "HX.01", "title": "宽泛提问", "discrimination": 0.12},
+                {"item_id": "HX.02", "title": "有效提问", "discrimination": 0.46},
+            ],
+        },
+        {
+            "station_id": "ST-B",
+            "title": "样本不足",
+            "scored_attempts": 2,
+            "flags": ["ceiling"],
+            "items": [{"item_id": "X", "title": "X", "discrimination": 0.05}],
+        },
+    ]
+    context = _quality_context(historical)
+    assert [entry["item_id"] for entry in context["low_discrimination_items"]] == ["HX.01"]
+    assert context["weak_stations"][0]["station_id"] == "ST-A"
+    assert len(context["weak_stations"]) == 1
+    assert any("低区分度项" in text for text in context["advisories"])
+    assert any("地板/天花板" in text for text in context["advisories"])
+
+
+def test_quality_context_without_history_is_explicit():
+    context = _quality_context([])
+    assert context["low_discrimination_items"] == []
+    assert context["weak_stations"] == []
+    assert "暂无足够历史场次" in context["advisories"][0]
+
+    healthy = [
+        {
+            "station_id": "ST-H",
+            "title": "健康站",
+            "scored_attempts": 20,
+            "flags": [],
+            "items": [{"item_id": "HX.01", "title": "提问", "discrimination": 0.42}],
+        }
+    ]
+    healthy_context = _quality_context(healthy)
+    assert "未发现低区分度项" in healthy_context["advisories"][0]

@@ -2820,6 +2820,7 @@ document.addEventListener('click', async (e) => {
           <div style="margin-top:4px"><span class="pill ${d.aligned ? 'teal' : 'amber'}">难度 ${esc(d.requested)} → ${esc(d.estimated)}</span>
             预计通过率 ${pct(d.expected_pass_rate, 0)}（${esc(d.range)}）${d.historical.stations ? ` · 历史 ${d.historical.stations} 站均值 ${d.historical.avg_pass_rate === null ? '—' : pct(d.historical.avg_pass_rate, 0)}` : ' · 暂无历史场次'}</div>
           <div style="margin-top:4px"><span class="pill">蓝图</span> ${esc(bp.label)} · ${esc(bp.status)}${bp.uncovered.length ? ` · 未覆盖域 ${bp.uncovered.map((u) => esc(u.label)).join('、')}` : ''}</div>
+          <div style="margin-top:4px"><span class="pill">历史质量</span> ${(result.quality_context.advisories || []).map(esc).join('；')}</div>
           <div style="margin-top:4px">${similarHtml}</div>
           <div class="tiny muted" style="margin-top:4px">${esc(result.disclosure.text)}</div>`;
       }
