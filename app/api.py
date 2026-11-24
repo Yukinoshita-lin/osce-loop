@@ -130,6 +130,7 @@ from .domain.scheduling import (
     latest_schedule,
     schedule_inputs,
 )
+from .domain.signoff_audit import audit_signoff_chain
 from .domain.slots import DialogueStateMachine, SPController
 from .domain.spqa import certification_for_bundle, certify_bundle, ensure_certification
 from .domain.stats import domain_scores, quality_report
@@ -386,6 +387,12 @@ def ops_request_logs(
 ):
     """API 全量请求日志：近期明细 + 多日汇总，用于故障排查与容量评估。"""
     return {"summary": request_log_summary(days=days), "recent": recent_requests(limit=limit)}
+
+
+@app.get("/api/ops/signoff-audit")
+def ops_signoff_audit(sample_size: int = Query(20, ge=1, le=200), conn=Depends(get_conn)):
+    """抽查最近签字/发布场次，核对人工签字链与关键项确认。"""
+    return audit_signoff_chain(conn, sample_size=sample_size)
 
 
 class UserCreateBody(BaseModel):
