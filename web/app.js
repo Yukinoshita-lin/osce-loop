@@ -1572,6 +1572,18 @@ async function renderFeedback(attemptId) {
       </div>
     </div>` : ''}
 
+    ${data.tone ? `<div class="card" style="margin-bottom:16px">
+      <div class="card-title">语气检查<span class="sub">内部粗筛 · 最终由审核人确认</span></div>
+      <div class="attempt-strip" style="margin-bottom:6px">
+        <span>${data.tone.level === 'ok' ? '<span class="pill teal">通过粗筛</span>' : '<span class="pill amber">需人工复核</span>'}</span>
+        ${data.tone.failing ? '<span class="pill">不及格反馈</span>' : ''}
+        ${data.tone.harsh_terms.length ? `<span>打击性表述 <b>${data.tone.harsh_terms.map(esc).join('、')}</b></span>` : ''}
+        ${data.tone.encouragement_terms.length ? `<span>鼓励性表述 ${data.tone.encouragement_terms.length} 处</span>` : '<span>未检出鼓励性表述</span>'}
+      </div>
+      ${(data.tone.suggestions || []).map((s) => `<div class="tiny" style="color:var(--amber)">${esc(s)}</div>`).join('')}
+      <div class="tiny muted" style="margin-top:4px">${esc(data.tone.note)}</div>
+    </div>` : ''}
+
     ${history.previous ? `<div class="card" style="margin-bottom:16px">
       <div class="card-title">纵向趋势<span class="sub">同站上次 vs 本次 · 仅用于形成性反馈</span></div>
       <div class="attempt-strip" style="margin-bottom:6px">

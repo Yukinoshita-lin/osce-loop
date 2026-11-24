@@ -138,6 +138,7 @@ from .domain.station_quality import station_quality_report
 from .domain.station_review import list_station_reviews, record_station_review
 from .domain.sus import submit_sus, sus_summary
 from .domain.trace import score_trace
+from .domain.tone import analyze_feedback_tone
 from .domain.transcript import parse_transcript
 from .domain.transparency import (
     acknowledge_disclosure,
@@ -1541,6 +1542,15 @@ def feedback(attempt_id: str, request: Request, conn=Depends(get_conn)):
             for field in ("behavior", "alternative")
         ]
     )
+    tone = analyze_feedback_tone(
+        texts=[
+            unit.get(field, "")
+            for unit in deductions + strengths
+            for field in ("behavior", "alternative")
+        ],
+        final_total=summary.get("final_total"),
+        pass_line=float(bundle["payload"].get("pass_line", 60)),
+    )
     has_transcript = (
         conn.execute("SELECT 1 FROM transcripts WHERE attempt_id = ?", (attempt_id,)).fetchone()
         is not None
@@ -1558,6 +1568,7 @@ def feedback(attempt_id: str, request: Request, conn=Depends(get_conn)):
         "strengths": strengths,
         "feedback_quality": summarize_feedback(deductions),
         "readability": readability,
+        "tone": tone if request.state.user["role"] != "student" else None,
         "survey": survey_for_attempt(conn, attempt_id),
         "history": candidate_history(conn, attempt_id),
         "cross_station_profile": candidate_cross_station_profile(conn, attempt_id),
