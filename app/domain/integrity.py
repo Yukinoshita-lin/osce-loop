@@ -5,6 +5,11 @@ import hashlib
 import json
 from typing import Any
 
+from .. import db
+
+MIN_SUPPLEMENT_CHARS = 10
+MAX_SUPPLEMENT_CHARS = 500
+
 
 def transcript_digest(utterances: list[dict[str, Any]]) -> str:
     canonical = json.dumps(utterances, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -53,6 +58,58 @@ def transcript_integrity(stored: str | None, utterances: list[dict[str, Any]] | 
     if not stored:
         return "unrecorded"
     return "ok" if stored == transcript_digest(utterances) else "mismatch"
+
+
+def integrity_supplement_missing(attempt: dict[str, Any]) -> bool:
+    """证据链缺口的场次必须补现场记录后才能签字。"""
+    return bool(attempt.get("integrity_gap")) and not str(
+        attempt.get("integrity_supplement") or ""
+    ).strip()
+
+
+def record_integrity_supplement(
+    conn,
+    attempt_id: str,
+    *,
+    note: str,
+    actor: str,
+) -> dict[str, Any]:
+    row = conn.execute(
+        "SELECT attempt_id, integrity_gap, integrity_supplement FROM attempts "
+        "WHERE attempt_id = ?",
+        (attempt_id,),
+    ).fetchone()
+    if not row:
+        raise ValueError("场次不存在")
+    if not row["integrity_gap"]:
+        raise ValueError("该场次未标记证据链缺口，无需补充现场记录")
+    note = (note or "").strip()
+    if len(note) < MIN_SUPPLEMENT_CHARS:
+        raise ValueError(f"现场补充记录不少于 {MIN_SUPPLEMENT_CHARS} 字")
+    if len(note) > MAX_SUPPLEMENT_CHARS:
+        raise ValueError(f"现场补充记录不能超过 {MAX_SUPPLEMENT_CHARS} 字")
+    timestamp = db.now_iso()
+    conn.execute(
+        "UPDATE attempts SET integrity_supplement = ?, integrity_supplement_by = ?, "
+        "integrity_supplement_at = ? WHERE attempt_id = ?",
+        (note, actor, timestamp, attempt_id),
+    )
+    conn.commit()
+    db.append_audit(
+        conn,
+        actor=actor,
+        action="attempt.integrity_supplement",
+        object_type="StationAttempt",
+        object_id=attempt_id,
+        before={"integrity_supplement": row["integrity_supplement"]},
+        after={"integrity_supplement": note, "chars": len(note)},
+    )
+    return {
+        "attempt_id": attempt_id,
+        "note": note,
+        "actor": actor,
+        "created_at": timestamp,
+    }
 
 
 def backfill_transcript_hashes(conn) -> int:

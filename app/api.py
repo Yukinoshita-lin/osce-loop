@@ -127,7 +127,13 @@ from .domain.execution import (
     toggle_station_hints,
 )
 from .domain.ingest import create_ingested_attempt
-from .domain.integrity import backfill_transcript_hashes, transcript_integrity, verify_evidence
+from .domain.integrity import (
+    backfill_transcript_hashes,
+    integrity_supplement_missing,
+    record_integrity_supplement,
+    transcript_integrity,
+    verify_evidence,
+)
 from .domain.item_quality import item_quality_report
 from .domain.latency import feedback_ack_latency
 from .domain.maintenance import run_maintenance
@@ -672,6 +678,9 @@ def _attempt_summary(conn, attempt: dict[str, Any]) -> dict[str, Any]:
         "near_cutoff": bool(attempt.get("near_cutoff")),
         "integrity_gap": bool(attempt.get("integrity_gap")),
         "integrity_note": attempt.get("integrity_note"),
+        "integrity_supplement": attempt.get("integrity_supplement"),
+        "integrity_supplement_by": attempt.get("integrity_supplement_by"),
+        "integrity_supplement_at": attempt.get("integrity_supplement_at"),
         "anomalies": json.loads(attempt.get("anomalies") or "[]"),
         "appeal": bool(attempt.get("appeal")),
         "feedback_note": attempt.get("feedback_note"),
@@ -1173,6 +1182,8 @@ def signoff_attempt(attempt_id: str, body: SignoffBody, conn=Depends(get_conn)):
     attempt = _attempt_row(conn, attempt_id)
     if attempt["status"] == "published":
         raise HTTPException(400, "该场次已发布")
+    if integrity_supplement_missing(dict(attempt)):
+        raise HTTPException(400, "证据链缺口场次签字前必须补充现场记录")
     pending = conn.execute(
         "SELECT COUNT(*) AS n FROM score_records WHERE attempt_id = ? AND status IN ('pending_review','manual_pending')",
         (attempt_id,),
@@ -1219,6 +1230,27 @@ def signoff_attempt(attempt_id: str, body: SignoffBody, conn=Depends(get_conn)):
         },
     )
     return {"ok": True, "attempt": _attempt_summary(conn, _attempt_row(conn, attempt_id))}
+
+
+class IntegritySupplementBody(BaseModel):
+    note: str = Field(min_length=10, max_length=500)
+
+
+@app.post("/api/attempts/{attempt_id}/integrity-supplement")
+def add_integrity_supplement(
+    attempt_id: str, body: IntegritySupplementBody, request: Request, conn=Depends(get_conn)
+):
+    _ensure_not_stopped(conn)
+    try:
+        supplement = record_integrity_supplement(
+            conn,
+            attempt_id,
+            note=body.note,
+            actor=request.state.user["display_name"],
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "supplement": supplement}
 
 
 class PublishBody(BaseModel):

@@ -123,6 +123,9 @@ def build_attempt_package(conn, attempt_id: str, *, exported_by: str) -> dict[st
             "retain_until": attempt.get("retain_until"),
             "integrity_gap": bool(attempt.get("integrity_gap")),
             "integrity_note": attempt.get("integrity_note"),
+            "integrity_supplement": attempt.get("integrity_supplement"),
+            "integrity_supplement_by": attempt.get("integrity_supplement_by"),
+            "integrity_supplement_at": attempt.get("integrity_supplement_at"),
             "evidence": evidence_summary,
         },
     }

@@ -593,6 +593,11 @@ function renderWorkbench(data) {
         </div>
         ${ev && ev.evidence_kind === 'absence' ? '<div class="tiny muted" style="margin-top:6px">阴性判定使用阶段窗口作为缺席证据，播放窗口为节选，仍需人工确认边界。</div>' : ''}
         ${ev && ev.evidence_kind === 'note' ? '<div class="tiny muted" style="margin-top:6px">笔记证据：播放窗口为记录时刻附近，原文以考生笔记为准。</div>' : ''}
+        ${attempt.integrity_gap ? `<div class="sep"></div>
+          <div class="tiny" style="color:var(--amber)">证据链缺口：${esc(attempt.integrity_note || '未记录原因')}</div>
+          ${attempt.integrity_supplement
+            ? `<div class="tiny" style="margin-top:4px">现场补充记录：${esc(attempt.integrity_supplement)} · ${esc(attempt.integrity_supplement_by || '—')} ${fmtTime(attempt.integrity_supplement_at)}</div>`
+            : `<div class="btn-row" style="margin-top:6px;gap:6px"><input id="integrity-supplement-input" class="input" maxlength="500" placeholder="补充现场记录（不少于 10 字），签字前必填" style="flex:1"><button class="btn small" data-action="integrity-supplement" data-attempt="${dataAttr(attempt.attempt_id)}">保存补充记录</button></div>`}` : ''}
       </section>
       <section class="card" id="ai-panel">
         ${aiPanelHtml(data, !state.reviewPlayed && data.evidence.length > 0)}
@@ -3593,6 +3598,25 @@ document.addEventListener('click', async (e) => {
       toast('已加载成绩追溯');
     } catch (err) {
       if (box) box.innerHTML = `<span class="pill red">追溯失败</span> ${esc(err.message)}`;
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'integrity-supplement') {
+    const input = $('#integrity-supplement-input');
+    const note = (input?.value || '').trim();
+    if (note.length < 10) {
+      toast('现场补充记录不少于 10 字', true);
+      return;
+    }
+    try {
+      await api(`/api/attempts/${encodeURIComponent(el.dataset.attempt)}/integrity-supplement`, {
+        method: 'POST',
+        body: { note },
+      });
+      toast('已保存现场补充记录');
+      if (state.currentReview) await loadReview(state.currentReview.record_id);
+    } catch (err) {
       toast(err.message, true);
     }
     return;

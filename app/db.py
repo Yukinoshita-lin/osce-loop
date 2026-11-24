@@ -56,6 +56,9 @@ CREATE TABLE IF NOT EXISTS attempts (
     duration_ms INTEGER NOT NULL DEFAULT 0,
     integrity_gap INTEGER NOT NULL DEFAULT 0,
     integrity_note TEXT,
+    integrity_supplement TEXT,
+    integrity_supplement_by TEXT,
+    integrity_supplement_at TEXT,
     anomalies TEXT,
     appeal INTEGER NOT NULL DEFAULT 0,
     appeal_snapshot TEXT,
@@ -576,6 +579,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
         "appeal_snapshot": "TEXT",
         "anomalies": "TEXT",
         "feedback_note": "TEXT",
+        "integrity_supplement": "TEXT",
+        "integrity_supplement_by": "TEXT",
+        "integrity_supplement_at": "TEXT",
     }
     for column, ddl in additions.items():
         if column not in existing:

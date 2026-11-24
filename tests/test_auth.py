@@ -84,6 +84,8 @@ def test_rbac_write_matrix():
     assert rbac_allowed("POST", "/api/attempts/att_1/ingest", "exam_manager") is True
     assert rbac_allowed("POST", "/api/attempts/att_1/ingest", "examiner") is False
     assert rbac_allowed("POST", "/api/attempts/att_1/signoff", "exam_manager") is True
+    assert rbac_allowed("POST", "/api/attempts/att_1/integrity-supplement", "exam_manager") is True
+    assert rbac_allowed("POST", "/api/attempts/att_1/integrity-supplement", "examiner") is False
     assert rbac_allowed("POST", "/api/attempts/att_1/publish", "examiner") is False
     assert rbac_allowed("POST", "/api/schedule/generate", "exam_manager") is True
     assert rbac_allowed("POST", "/api/schedule/generate", "examiner") is False
