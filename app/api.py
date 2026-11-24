@@ -90,6 +90,7 @@ from .domain.execution import (
 from .domain.ingest import create_ingested_attempt
 from .domain.integrity import backfill_transcript_hashes, transcript_integrity, verify_evidence
 from .domain.item_quality import item_quality_report
+from .domain.maintenance import run_maintenance
 from .domain.media import backfill_media_hashes
 from .domain.practice import build_practice_report
 from .domain.retention import purge_expired, refresh_retention, retention_overview
@@ -318,6 +319,15 @@ def ops_backup(request: Request, conn=Depends(get_conn)):
 @app.get("/api/ops/backups")
 def ops_backups():
     return {"backups": list_backups(limit=10)}
+
+
+@app.post("/api/ops/maintenance")
+def ops_maintenance(request: Request, conn=Depends(get_conn)):
+    _ensure_not_stopped(conn)
+    return {
+        "ok": True,
+        "maintenance": run_maintenance(conn, actor=request.state.user["display_name"]),
+    }
 
 UPLOAD_DIR = MEDIA_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
