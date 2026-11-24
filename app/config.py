@@ -22,6 +22,9 @@ REQUEST_LOG_DIR = Path(
 # AI 输出三元版本戳：任何一个变化都必须重新校准权限（见方案 6.3）
 MODEL_VERSION = os.getenv("OSCELOOP_MODEL_VERSION", "mock-score-1.0")
 PROMPT_VERSION = os.getenv("OSCELOOP_PROMPT_VERSION", "score-prompt-1.0")
+# S1 命题辅助只产出 L0 草案，使用独立的版本戳，避免与评分模型混淆。
+DRAFT_MODEL_VERSION = os.getenv("OSCELOOP_DRAFT_MODEL_VERSION", "mock-draft-1.0")
+DRAFT_PROMPT_VERSION = os.getenv("OSCELOOP_DRAFT_PROMPT_VERSION", "draft-prompt-1.0")
 SP_MODEL_VERSION = os.getenv("OSCELOOP_SP_MODEL_VERSION", "mock-sp-1.0")
 SP_PROMPT_VERSION = os.getenv("OSCELOOP_SP_PROMPT_VERSION", "sp-prompt-1.0")
 # SP 认证有效期：按季度更新红队用例并复测；过期后 G1 的 SP 指标按未采集处理。

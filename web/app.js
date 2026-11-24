@@ -55,6 +55,7 @@ const state = {
   bundleCurrent: null,
   bundlePayload: null,
   bundleFocus: null,
+  bundleDraft: null,
   ingestSlot: null,
 };
 
@@ -1255,8 +1256,13 @@ async function viewBundle() {
   const data = await api(`/api/bundles/${encodeURIComponent(
     (list.find((b) => b.bundle_id === state.bundleFocus) || list[0]).bundle_id,
   )}`);
+  const draftMeta = await api('/api/bundles/draft/topics').catch(() => ({ topics: [] }));
   state.bundleCurrent = data;
   state.bundlePayload = null;
+  state.bundleDraft = null;
+  const draftTopicOptions = (draftMeta.topics || [])
+    .map((t) => `<option value="${dataAttr(t.key)}">${esc(t.label)} · ${esc(t.station_id)}</option>`)
+    .join('');
   const [major, minor] = String(data.version || '1.0').split('.');
   const nextVersion = `${major || 1}.${(Number(minor) || 0) + 1}`;
   const checks = data.validation.checks.map((c) => `
@@ -1296,6 +1302,22 @@ async function viewBundle() {
         <p>评分表不是流程的终点产物，而是贯穿全链路的契约。冻结瞬间派生信息槽、证据探针、检查点与反馈模板，共享同一 bundle_version。</p>
       </div>
       <div><span class="pill teal">${esc(data.status)}</span> <span class="pill">v${esc(data.version)}</span></div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-title">S1 命题辅助<span class="sub">L0 草案 · 必须经专家改写后才能冻结</span></div>
+      <div class="btn-row" style="flex-wrap:wrap;gap:8px;align-items:center">
+        <select id="draft-topic" class="input" style="max-width:200px" aria-label="病例主题">${draftTopicOptions}</select>
+        <select id="draft-difficulty" class="input" style="max-width:110px" aria-label="目标难度">
+          <option value="easy">易</option>
+          <option value="medium" selected>中</option>
+          <option value="hard">难</option>
+        </select>
+        <input id="draft-duration" class="input" type="number" min="5" max="30" value="8" style="max-width:90px" aria-label="建议时长">
+        <button class="btn small" data-action="bundle-draft">生成 L0 草案</button>
+        <button class="btn small primary" data-action="bundle-draft-load" disabled>载入为提案</button>
+      </div>
+      <div id="bundle-draft-result" class="tiny muted" style="margin-top:8px">草案只用于把空白页变成可修改的初稿；生成后会同时给出四项强制检查、配额、难度预判与跨站相似度。</div>
     </div>
 
     <div class="card" style="margin-bottom:14px">
@@ -2719,6 +2741,75 @@ document.addEventListener('click', async (e) => {
     toast(`已导出站包模板：${bundle.station_id}`);
     return;
   }
+  if (action === 'bundle-draft') {
+    const box = $('#bundle-draft-result');
+    const topic = $('#draft-topic')?.value;
+    if (!topic) {
+      toast('请选择病例主题', true);
+      return;
+    }
+    const difficulty = $('#draft-difficulty')?.value || 'medium';
+    const duration = Number($('#draft-duration')?.value) || undefined;
+    el.disabled = true;
+    try {
+      const result = await api('/api/bundles/draft', {
+        method: 'POST',
+        body: { topic, difficulty, duration_min: duration },
+      });
+      state.bundleDraft = result.draft;
+      const v = result.validation;
+      const checkHtml = v.checks.map((c) => `
+        <span class="pill ${c.status === 'pass' ? 'teal' : c.status === 'warn' ? 'amber' : 'red'}">${esc(c.label)}</span>`).join(' ');
+      const quotaHtml = result.quota.checks.map((c) => `
+        <span class="pill ${c.found ? 'teal' : 'red'}">${esc(c.label)}</span>`).join(' ');
+      const d = result.difficulty;
+      const similar = result.similarity || [];
+      const similarHtml = similar.length
+        ? `<span class="pill amber">相似站包</span> ${similar.map((s) => `${esc(s.station_id)} v${esc(s.version)}（${pct(s.similarity, 0)}）`).join('；')}`
+        : '<span class="pill teal">未发现高相似站包</span>';
+      const bp = result.blueprint;
+      if (box) {
+        box.className = 'tiny';
+        box.innerHTML = `
+          <div>${v.can_freeze ? '<span class="pill teal">可进入 S2 改写</span>' : '<span class="pill red">存在阻断项</span>'}
+            ${v.counts.items} 个评分项 · 关键项 ${v.counts.critical} · ${result.draft.duration_min} 分钟 · ${esc(result.draft.station_id)}</div>
+          <div style="margin-top:4px">${checkHtml}</div>
+          <div style="margin-top:4px"><span class="pill ${result.quota.passed ? 'teal' : 'red'}">强制配额</span> ${quotaHtml}</div>
+          <div style="margin-top:4px"><span class="pill ${d.aligned ? 'teal' : 'amber'}">难度 ${esc(d.requested)} → ${esc(d.estimated)}</span>
+            预计通过率 ${pct(d.expected_pass_rate, 0)}（${esc(d.range)}）${d.historical.stations ? ` · 历史 ${d.historical.stations} 站均值 ${d.historical.avg_pass_rate === null ? '—' : pct(d.historical.avg_pass_rate, 0)}` : ' · 暂无历史场次'}</div>
+          <div style="margin-top:4px"><span class="pill">蓝图</span> ${esc(bp.label)} · ${esc(bp.status)}${bp.uncovered.length ? ` · 未覆盖域 ${bp.uncovered.map((u) => esc(u.label)).join('、')}` : ''}</div>
+          <div style="margin-top:4px">${similarHtml}</div>
+          <div class="tiny muted" style="margin-top:4px">${esc(result.disclosure.text)}</div>`;
+      }
+      const load = $('[data-action="bundle-draft-load"]');
+      if (load) load.disabled = false;
+      toast(`已生成 L0 草案：${result.draft.title}`);
+    } catch (err) {
+      if (box) box.innerHTML = `<span class="pill red">生成失败</span> ${esc(err.message)}`;
+      toast(err.message, true);
+    } finally {
+      el.disabled = false;
+    }
+    return;
+  }
+  if (action === 'bundle-draft-load') {
+    if (!state.bundleDraft) {
+      toast('请先生成 L0 草案', true);
+      return;
+    }
+    state.bundlePayload = state.bundleDraft;
+    const versionInput = $('#bundle-version');
+    if (versionInput) versionInput.value = '1.0';
+    const reasonInput = $('#bundle-reason');
+    if (reasonInput) reasonInput.value = '新建站包（来自 S1 L0 草案）';
+    const box = $('#bundle-proposal-result');
+    if (box) {
+      box.className = 'tiny';
+      box.innerHTML = '<span class="pill purple">已载入 L0 草案</span> 请先“校验提案”，确认四项检查后再签字冻结；冻结前必须完成专家改写。';
+    }
+    toast('草案已载入为提案');
+    return;
+  }
   if (action === 'bundle-validate') {
     const box = $('#bundle-proposal-result');
     if (!state.bundlePayload) {
@@ -2762,7 +2853,7 @@ document.addEventListener('click', async (e) => {
       box.className = 'tiny';
       box.innerHTML = `
         <div>${v.can_freeze ? '<span class="pill teal">可冻结</span>' : '<span class="pill red">存在阻断项</span>'}
-          ${counts.items || 0} 个评分项 · 派生 ${counts.slots || 0} 个信息槽 / ${counts.probes || 0} 个探针</div>
+          ${(v.counts || {}).items || counts.items || 0} 个评分项 · 派生 ${counts.slots || 0} 个信息槽 / ${counts.probes || 0} 个探针</div>
         ${checksHtml}
         ${similarHtml}
         ${changesHtml}
@@ -2791,7 +2882,7 @@ document.addEventListener('click', async (e) => {
           payload: state.bundlePayload,
           version,
           reason,
-          supersedes: state.bundleCurrent ? state.bundleCurrent.bundle_id : null,
+          supersedes: state.bundleCurrent && state.bundlePayload.station_id === state.bundleCurrent.station_id ? state.bundleCurrent.bundle_id : null,
         },
       });
       toast(result.created

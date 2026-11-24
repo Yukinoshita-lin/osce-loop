@@ -71,6 +71,12 @@ from .domain.bundle import (
 from .domain.calibration import calibration_report, import_gold_scores, parse_gold_file
 from .domain.cost import ai_cost_summary
 from .domain.coverage import blueprint_coverage
+from .domain.drafting import (
+    DRAFT_DISCLOSURE,
+    DRAFT_LEVEL,
+    case_topics,
+    generate_bundle_draft,
+)
 from .domain.export import build_attempt_package
 from .domain.fairness import fairness_report
 from .domain.feedback import ensure_feedback_units, summarize_feedback
@@ -1277,6 +1283,33 @@ def bundles(conn=Depends(get_conn)):
 @app.get("/api/bundles/stations")
 def bundle_stations(conn=Depends(get_conn)):
     return {"stations": list_station_bundles(conn)}
+
+
+@app.get("/api/bundles/draft/topics")
+def bundle_draft_topics():
+    """S1 命题辅助支持的病例主题；草案固定为 L0，不可直接进入考试。"""
+    return {"topics": case_topics(), "level": DRAFT_LEVEL, "disclosure": DRAFT_DISCLOSURE}
+
+
+class BundleDraftBody(BaseModel):
+    topic: str
+    difficulty: str = Field(default="medium", pattern=r"^(easy|medium|hard)$")
+    duration_min: int | None = Field(default=None, ge=5, le=30)
+
+
+@app.post("/api/bundles/draft")
+def bundle_draft(body: BundleDraftBody, request: Request, conn=Depends(get_conn)):
+    _ensure_not_stopped(conn)
+    try:
+        return generate_bundle_draft(
+            conn,
+            topic=body.topic,
+            difficulty=body.difficulty,
+            duration_min=body.duration_min,
+            actor=request.state.user["display_name"],
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @app.get("/api/bundles/{bundle_id}")
