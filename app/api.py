@@ -106,6 +106,7 @@ from .domain.media import backfill_media_hashes
 from .domain.practice import build_practice_report
 from .domain.psychometrics import station_psychometrics
 from .domain.retention import purge_expired, refresh_retention, retention_overview
+from .domain.readability import analyze_feedback_readability
 from .domain.review import apply_review
 from .domain.risk import RISK_ORDER, escalate_risk
 from .domain.rubric import AUTHORITY_LABELS, PHASE_LABELS, cap_authority, derive_assets, validate_bundle
@@ -1402,6 +1403,13 @@ def feedback(attempt_id: str, request: Request, conn=Depends(get_conn)):
         else:
             deductions.append(unit)
     ensure_feedback_units(deductions + strengths, items)
+    readability = analyze_feedback_readability(
+        [
+            unit.get(field, "")
+            for unit in deductions + strengths
+            for field in ("behavior", "alternative")
+        ]
+    )
     has_transcript = (
         conn.execute("SELECT 1 FROM transcripts WHERE attempt_id = ?", (attempt_id,)).fetchone()
         is not None
@@ -1418,6 +1426,7 @@ def feedback(attempt_id: str, request: Request, conn=Depends(get_conn)):
         "deductions": deductions,
         "strengths": strengths,
         "feedback_quality": summarize_feedback(deductions),
+        "readability": readability,
         "survey": survey_for_attempt(conn, attempt_id),
         "history": candidate_history(conn, attempt_id),
         "feedback_rule": "每条扣分项必须包含：可回放证据 + 对应评分项档位 + 可直接背诵的替代话术。",

@@ -1583,6 +1583,13 @@ async function renderFeedback(attemptId) {
           <span class="pill">时间戳 ${data.feedback_quality.with_timestamp}</span>
           ${data.feedback_quality.repaired ? `<span class="pill amber">兜底修复 ${data.feedback_quality.repaired}</span>` : ''}
         </div>` : ''}
+        ${data.readability && data.readability.level !== 'unmeasured' ? `<div class="attempt-strip" style="margin-top:8px">
+          <span>可读性 <span class="pill ${data.readability.level === 'easy' ? 'teal' : data.readability.level === 'hard' ? 'red' : 'amber'}">${esc(data.readability.level_label)}</span></span>
+          <span>平均句长 <b>${num(data.readability.avg_sentence_chars, 1)}</b> 字</span>
+          <span>术语密度 <b>${num(data.readability.term_density, 2)}</b>/100 字</span>
+        </div>
+        ${data.readability.note ? `<div class="tiny muted" style="margin-top:4px">${esc(data.readability.note)}</div>` : ''}
+        ${(data.readability.suggestions || []).length ? `<div class="tiny" style="color:var(--amber);margin-top:2px">${data.readability.suggestions.map(esc).join('；')}</div>` : ''}` : ''}
         <div class="sep"></div>
         <div class="small dim">第三段是最容易被忽略、也最有价值的部分——它把评分表从“审判工具”变成“教学工具”。</div>
         <div class="sep"></div>
