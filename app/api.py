@@ -118,8 +118,10 @@ from .domain.history import candidate_history
 from .domain.hint_impact import hint_impact
 from .domain.execution import (
     advance_run,
+    append_live_segment,
     get_run,
     latest_run,
+    live_facts,
     slot_action,
     start_run,
     stop_run,
@@ -2348,6 +2350,47 @@ def start_execution(body: RunStartBody, conn=Depends(get_conn)):
 def get_execution(run_id: str, conn=Depends(get_conn)):
     try:
         return {"run": get_run(conn, run_id)}
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+class LiveSegmentBody(BaseModel):
+    speaker: str = Field(pattern=r"^(candidate|patient)$")
+    text: str = Field(min_length=1, max_length=500)
+    start_ms: int | None = Field(default=None, ge=0)
+    end_ms: int | None = Field(default=None, ge=0)
+    asr_confidence: float | None = Field(default=None, ge=0, le=1)
+    actor: str = Field(default="考务", max_length=40)
+
+
+@app.post("/api/execution/{run_id}/slots/{slot_key}/segments")
+def execution_live_segment(
+    run_id: str,
+    slot_key: str,
+    body: LiveSegmentBody,
+    conn=Depends(get_conn),
+):
+    _ensure_not_stopped(conn)
+    try:
+        return append_live_segment(
+            conn,
+            run_id,
+            slot_key,
+            speaker=body.speaker,
+            text=body.text,
+            start_ms=body.start_ms,
+            end_ms=body.end_ms,
+            asr_confidence=body.asr_confidence,
+            actor=body.actor,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/execution/{run_id}/slots/{slot_key}/facts")
+def execution_slot_facts(run_id: str, slot_key: str, conn=Depends(get_conn)):
+    try:
+        return live_facts(conn, run_id, slot_key)
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
 

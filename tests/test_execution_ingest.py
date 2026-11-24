@@ -8,7 +8,7 @@ from app.ai.base import CapabilityGateway
 from app.ai.mock import MockScoringProvider
 from app.config import MODEL_VERSION, PROMPT_VERSION
 from app.domain.bundle import list_bundles
-from app.domain.execution import advance_run, get_run, start_run
+from app.domain.execution import append_live_segment, advance_run, get_run, start_run
 from app.domain.ingest import create_ingested_attempt
 from app.domain.scheduling import ensure_schedule_inputs, generate_schedule
 from app.seed import seed_if_empty
@@ -150,3 +150,42 @@ def test_completion_records_integrity_gap(conn):
     ).fetchone()
     assert event is not None
     assert str(completed["integrity"]["missing"]) in event["message"]
+
+
+def test_live_segments_update_evidence_facts(conn):
+    run = start_run(conn, actor="考务测试")
+    slot = next(s for s in run["slots"] if s["station_name"] == "急性胸痛")
+    first = append_live_segment(
+        conn,
+        run["run_id"],
+        slot["slot_key"],
+        speaker="candidate",
+        text="我是急诊科医生，请问您怎么称呼？",
+    )
+    assert first["facts"]["segment_count"] == 1
+    first_facts = first["facts"]["facts"]
+    assert first_facts["utterances"] == 1
+    assert any("尚无证据" in fact for fact in first_facts["facts"])
+
+    second = append_live_segment(
+        conn,
+        run["run_id"],
+        slot["slot_key"],
+        speaker="candidate",
+        text="胸痛多久了？有没有向肩膀或下巴放射？",
+    )
+    second_facts = second["facts"]["facts"]
+    assert second["facts"]["segment_count"] == 2
+    assert second_facts["missing"] < first_facts["missing"]
+    assert second_facts["covered"] > first_facts["covered"]
+
+    refreshed = get_run(conn, run["run_id"])
+    linked = next(s for s in refreshed["slots"] if s["slot_key"] == slot["slot_key"])
+    assert linked["live_segment_count"] == 2
+    assert linked["evidence_facts"]["utterances"] == 2
+    assert linked["evidence_facts"]["missing"] == second_facts["missing"]
+    event = conn.execute(
+        "SELECT COUNT(*) AS n FROM exam_events WHERE run_id = ? AND event_type = 'live_segment'",
+        (run["run_id"],),
+    ).fetchone()
+    assert event["n"] == 2

@@ -1519,6 +1519,7 @@ function executionHtml(run, emergencyStop) {
       ${['waiting', 'in_progress'].includes(slot.status) && !completed && !slot.attempt ? `
         <div class="btn-row" style="margin-top:7px">
           <button class="btn small primary" data-action="exec-ingest" data-run="${dataAttr(run.run_id)}" data-slot-key="${dataAttr(slot.slot_key)}" data-code="${dataAttr(slot.candidate_id)}" data-name="${dataAttr(slot.candidate_name)}" data-station="${dataAttr(slot.station_name)}" data-round="${slot.round}">录入场次</button>
+          <button class="btn small" data-action="exec-live-segment" data-slot-key="${dataAttr(slot.slot_key)}">回传转写</button>
           <button class="btn small" data-action="exec-slot" data-slot-key="${dataAttr(slot.slot_key)}" data-slot-action="complete">完成</button>
           <button class="btn small amber" data-action="exec-slot" data-slot-key="${dataAttr(slot.slot_key)}" data-slot-action="anomaly">异常</button>
           <button class="btn small danger" data-action="exec-slot" data-slot-key="${dataAttr(slot.slot_key)}" data-slot-action="terminate">终止该站</button>
@@ -4499,6 +4500,23 @@ document.addEventListener('click', async (e) => {
       round: el.dataset.round,
     };
     location.hash = '#/ingest';
+    return;
+  }
+  if (action === 'exec-live-segment') {
+    const text = (prompt('实时转写片段（外部 ASR 回传）：') || '').trim();
+    if (!text) return;
+    const isCandidate = confirm('确定为考生发言？取消则记为患者发言');
+    try {
+      const result = await api(`/api/execution/${encodeURIComponent(state.executionRunId)}/slots/${encodeURIComponent(el.dataset.slotKey)}/segments`, {
+        method: 'POST',
+        body: { speaker: isCandidate ? 'candidate' : 'patient', text, actor: state.reviewer || '考务' },
+      });
+      const summary = (result.facts || {}).facts || {};
+      toast(`转写片段已回传；尚无证据 ${summary.missing === undefined ? '—' : summary.missing} 项`);
+      await viewExecution();
+    } catch (err) {
+      toast(err.message, true);
+    }
     return;
   }
   if (action === 'exec-slot') {

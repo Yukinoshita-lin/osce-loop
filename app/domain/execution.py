@@ -209,6 +209,143 @@ def _evidence_facts(payload: dict[str, Any], transcript: list[dict[str, Any]]) -
     }
 
 
+def _live_segments(conn, run_id: str, slot_key: str) -> list[dict[str, Any]]:
+    return [
+        dict(row)
+        for row in conn.execute(
+            "SELECT speaker, start_ms, end_ms, text, asr_confidence "
+            "FROM exam_run_live_segments WHERE run_id = ? AND slot_key = ? "
+            "ORDER BY start_ms, rowid",
+            (run_id, slot_key),
+        ).fetchall()
+    ]
+
+
+def _bundle_payload_for_station(
+    conn, station_id: str, station_name: str | None = None
+) -> dict[str, Any] | None:
+    row = conn.execute(
+        "SELECT payload FROM bundles WHERE station_id = ? "
+        "ORDER BY frozen_at DESC, rowid DESC LIMIT 1",
+        (station_id,),
+    ).fetchone()
+    if not row and station_name:
+        row = conn.execute(
+            "SELECT payload FROM bundles WHERE title LIKE ? "
+            "ORDER BY frozen_at DESC, rowid DESC LIMIT 1",
+            (f"%{station_name}%",),
+        ).fetchone()
+    if not row:
+        return None
+    try:
+        payload = json.loads(row["payload"])
+    except (TypeError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def live_facts(conn, run_id: str, slot_key: str) -> dict[str, Any] | None:
+    run = conn.execute("SELECT * FROM exam_runs WHERE run_id = ?", (run_id,)).fetchone()
+    if not run:
+        raise ValueError("考试执行不存在")
+    slot = conn.execute(
+        "SELECT * FROM exam_run_slots WHERE run_id = ? AND slot_key = ?", (run_id, slot_key)
+    ).fetchone()
+    if not slot:
+        raise ValueError("考站槽位不存在")
+    payload = _bundle_payload_for_station(conn, slot["station_id"], slot["station_name"])
+    segments = _live_segments(conn, run_id, slot_key)
+    facts = _evidence_facts(payload, segments) if payload else None
+    return {
+        "slot_key": slot_key,
+        "segment_count": len(segments),
+        "facts": facts,
+    }
+
+
+def append_live_segment(
+    conn,
+    run_id: str,
+    slot_key: str,
+    *,
+    speaker: str,
+    text: str,
+    start_ms: int | None = None,
+    end_ms: int | None = None,
+    asr_confidence: float | None = None,
+    actor: str = "考务",
+) -> dict[str, Any]:
+    """接收外部 ASR 回传的实时转写片段，并立即返回事实层证据覆盖。"""
+    run = conn.execute("SELECT * FROM exam_runs WHERE run_id = ?", (run_id,)).fetchone()
+    if not run:
+        raise ValueError("考试执行不存在")
+    if run["status"] not in ACTIVE_RUN_STATUSES:
+        raise ValueError("考试执行未在进行中")
+    slot = conn.execute(
+        "SELECT * FROM exam_run_slots WHERE run_id = ? AND slot_key = ?", (run_id, slot_key)
+    ).fetchone()
+    if not slot:
+        raise ValueError("考站槽位不存在")
+    speaker = (speaker or "").strip()
+    if speaker not in ("candidate", "patient"):
+        raise ValueError("说话人必须是 candidate 或 patient")
+    text = (text or "").strip()
+    if not text:
+        raise ValueError("转写文本不能为空")
+    if len(text) > 500:
+        raise ValueError("单条转写文本不能超过 500 字")
+    if asr_confidence is not None:
+        confidence = float(asr_confidence)
+        if confidence < 0 or confidence > 1:
+            raise ValueError("ASR 置信度必须在 0–1 之间")
+    else:
+        confidence = None
+    last = conn.execute(
+        "SELECT MAX(end_ms) AS last_end FROM exam_run_live_segments WHERE run_id = ? AND slot_key = ?",
+        (run_id, slot_key),
+    ).fetchone()
+    start = int(start_ms) if start_ms is not None else int((last["last_end"] or 0) + 500)
+    end = (
+        int(end_ms)
+        if end_ms is not None
+        else start + max(1000, min(15000, len(text) * 180))
+    )
+    if start < 0 or end <= start:
+        raise ValueError("时间戳必须满足 0 ≤ start_ms < end_ms")
+    segment_id = db.new_id("lseg")
+    timestamp = db.now_iso()
+    conn.execute(
+        "INSERT INTO exam_run_live_segments(segment_id, run_id, slot_key, speaker, start_ms, "
+        "end_ms, text, asr_confidence, created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+        (segment_id, run_id, slot_key, speaker, start, end, text, confidence, timestamp),
+    )
+    role_label = "考生" if speaker == "candidate" else "患者"
+    _event(
+        conn,
+        run_id,
+        "live_segment",
+        f"{slot['candidate_name']} · {slot['station_name']} 收到{role_label}转写片段",
+        payload={"slot_key": slot_key, "speaker": speaker, "segment_id": segment_id},
+    )
+    conn.commit()
+    facts = live_facts(conn, run_id, slot_key)
+    return {
+        "ok": True,
+        "segment": {
+            "segment_id": segment_id,
+            "slot_key": slot_key,
+            "speaker": speaker,
+            "start_ms": start,
+            "end_ms": end,
+            "text": text,
+            "asr_confidence": confidence,
+            "actor": actor,
+            "created_at": timestamp,
+        },
+        "facts": facts,
+    }
+
+
 def get_run(conn, run_id: str) -> dict[str, Any]:
     row = conn.execute("SELECT * FROM exam_runs WHERE run_id = ?", (run_id,)).fetchone()
     if not row:
@@ -279,6 +416,26 @@ def get_run(conn, run_id: str) -> dict[str, Any]:
                 tuple(attempt_ids),
             ).fetchall()
         }
+    station_payloads: dict[str, dict[str, Any]] = {}
+    title_payloads: list[tuple[str, dict[str, Any]]] = []
+    for row in conn.execute(
+        "SELECT station_id, title, payload FROM bundles ORDER BY frozen_at DESC, rowid DESC"
+    ).fetchall():
+        try:
+            parsed = json.loads(row["payload"])
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        station_payloads.setdefault(row["station_id"], parsed)
+        title_payloads.append((row["title"] or "", parsed))
+    live_by_slot: dict[str, list[dict[str, Any]]] = {}
+    for row in conn.execute(
+        "SELECT slot_key, speaker, start_ms, end_ms, text, asr_confidence "
+        "FROM exam_run_live_segments WHERE run_id = ? ORDER BY start_ms, rowid",
+        (run_id,),
+    ).fetchall():
+        live_by_slot.setdefault(row["slot_key"], []).append(dict(row))
     for slot in slots:
         attempt = attempt_rows.get(slot.get("attempt_id") or "")
         slot["attempt"] = (
@@ -300,6 +457,19 @@ def get_run(conn, run_id: str) -> dict[str, Any]:
             if payload and attempt
             else None
         )
+        live_segments = live_by_slot.get(slot["slot_key"], [])
+        slot["live_segment_count"] = len(live_segments)
+        if slot["evidence_facts"] is None and live_segments:
+            station_payload = station_payloads.get(slot["station_id"])
+            if station_payload is None:
+                station_name = slot.get("station_name") or ""
+                if station_name:
+                    station_payload = next(
+                        (payload for title, payload in title_payloads if station_name in title),
+                        None,
+                    )
+            if station_payload:
+                slot["evidence_facts"] = _evidence_facts(station_payload, live_segments)
     events = []
     for event in conn.execute(
         "SELECT * FROM exam_events WHERE run_id = ? ORDER BY rowid DESC LIMIT 120", (run_id,)

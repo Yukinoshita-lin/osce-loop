@@ -496,6 +496,20 @@ CREATE TABLE IF NOT EXISTS exam_events (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS exam_run_live_segments (
+    segment_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    slot_key TEXT NOT NULL,
+    speaker TEXT NOT NULL,
+    start_ms INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    asr_confidence REAL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_exam_live_slot ON exam_run_live_segments(run_id, slot_key, start_ms);
+
 CREATE TABLE IF NOT EXISTS users (
     user_id TEXT PRIMARY KEY,
     username TEXT NOT NULL UNIQUE,
