@@ -139,6 +139,7 @@ from .domain.rewrite import PRINCIPLE as REWRITE_PRINCIPLE, suggest_anchor_rewri
 from .domain.risk import RISK_ORDER, escalate_risk
 from .domain.rubric import AUTHORITY_LABELS, PHASE_LABELS, cap_authority, derive_assets, validate_bundle
 from .domain.run_export import build_run_package
+from .domain.schedule_approval import record_special_needs_approval, special_needs_status
 from .domain.scheduling import (
     ensure_schedule_inputs,
     generate_schedule,
@@ -1996,12 +1997,16 @@ def gen_schedule(body: ScheduleBody, conn=Depends(get_conn)):
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    return {"ok": True, "schedule": schedule}
+    return {"ok": True, "schedule": schedule, "special_needs": special_needs_status(conn, schedule)}
 
 
 @app.get("/api/schedule/latest")
 def get_latest_schedule(conn=Depends(get_conn)):
-    return {"schedule": latest_schedule(conn)}
+    schedule = latest_schedule(conn)
+    return {
+        "schedule": schedule,
+        "special_needs": special_needs_status(conn, schedule) if schedule else None,
+    }
 
 
 class ScheduleConflictBody(BaseModel):
@@ -2029,7 +2034,37 @@ def repair_schedule_conflicts(
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    return {"ok": True, "schedule": schedule, "report": schedule["repair_report"]}
+    return {
+        "ok": True,
+        "schedule": schedule,
+        "report": schedule["repair_report"],
+        "special_needs": special_needs_status(conn, schedule),
+    }
+
+
+class SpecialNeedsBody(BaseModel):
+    schedule_id: str | None = None
+    candidate_id: str = Field(min_length=1, max_length=40)
+    decision: str = Field(pattern=r"^(approved|rejected)$")
+    note: str = Field(default="", max_length=300)
+
+
+@app.post("/api/schedule/special-needs")
+def approve_special_needs(
+    body: SpecialNeedsBody, request: Request, conn=Depends(get_conn)
+):
+    try:
+        status = record_special_needs_approval(
+            conn,
+            candidate_id=body.candidate_id,
+            decision=body.decision,
+            note=body.note,
+            actor=request.state.user["display_name"],
+            schedule_id=body.schedule_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "special_needs": status}
 
 
 @app.get("/api/execution/latest")

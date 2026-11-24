@@ -373,6 +373,16 @@ CREATE TABLE IF NOT EXISTS exam_schedules (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS schedule_special_needs_approvals (
+    approval_id TEXT PRIMARY KEY,
+    schedule_id TEXT NOT NULL,
+    candidate_id TEXT NOT NULL,
+    decision TEXT NOT NULL,
+    note TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS exam_runs (
     run_id TEXT PRIMARY KEY,
     schedule_id TEXT,

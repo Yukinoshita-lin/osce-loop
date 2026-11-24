@@ -990,6 +990,7 @@ async function viewSchedule() {
     api('/api/schedule/latest'),
   ]);
   let schedule = latest.schedule;
+  let specialNeeds = latest.special_needs;
   const scheduleCandidates = inputs.candidates
     .map((c) => `<option value="${dataAttr(c.candidate_id)}">${esc(c.name)} · ${esc(c.candidate_id)}</option>`)
     .join('');
@@ -1044,7 +1045,9 @@ async function viewSchedule() {
       <div id="repair-result" class="tiny muted" style="margin-top:8px">选择冲突后执行修复；优先改派到本轮空闲考站，无空闲时两人对调。修复结果作为新排考表保存，原表不覆盖。</div>
     </div>
     <div id="schedule-body">${schedule ? scheduleHtml(schedule) : '<div class="empty">尚未生成排考表。点击“生成排考表”开始。</div>'}</div>
+    <div id="special-needs-card" style="margin-top:16px">${schedule && specialNeeds ? specialNeedsHtml(schedule, specialNeeds) : ''}</div>
   `;
+  const specialCard = $('#special-needs-card');
   $('#schedule-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const form = e.target;
@@ -1060,7 +1063,9 @@ async function viewSchedule() {
     try {
       const data = await api('/api/schedule/generate', { method: 'POST', body });
       schedule = data.schedule;
+      specialNeeds = data.special_needs;
       $('#schedule-body').innerHTML = scheduleHtml(data.schedule);
+      if (specialCard) specialCard.innerHTML = specialNeedsHtml(schedule, specialNeeds);
       const repairRound = $('#repair-round');
       if (repairRound) repairRound.innerHTML = roundOptions(schedule.rounds);
       const repairButton = $('#repair-submit');
@@ -1109,7 +1114,9 @@ async function viewSchedule() {
           body: { schedule_id: schedule.schedule_id, conflicts: [conflict] },
         });
         schedule = data.schedule;
+        specialNeeds = data.special_needs;
         $('#schedule-body').innerHTML = scheduleHtml(data.schedule);
+        if (specialCard) specialCard.innerHTML = specialNeedsHtml(schedule, specialNeeds);
         const report = data.report;
         const changeText = report.changes
           .map((c) => `${c.candidate_id} 第 ${c.round} 轮 ${c.from_station_id} → ${c.to_station_id}${c.swapped_with ? `（与 ${c.swapped_with} 对调）` : '（改派空闲考站）'}`)
@@ -1134,6 +1141,68 @@ async function viewSchedule() {
       }
     });
   }
+  if (specialCard) {
+    specialCard.addEventListener('click', async (e) => {
+      const button = e.target.closest('[data-special-action]');
+      if (!button || !schedule) return;
+      const decision = button.dataset.specialAction === 'approve' ? 'approved' : 'rejected';
+      const row = button.closest('[data-special-needs-row]');
+      const note = (row?.querySelector('[data-special-needs-note]')?.value || '').trim();
+      if (decision === 'rejected' && !note) {
+        toast('驳回特殊需求必须填写理由', true);
+        return;
+      }
+      button.disabled = true;
+      try {
+        const data = await api('/api/schedule/special-needs', {
+          method: 'POST',
+          body: {
+            schedule_id: schedule.schedule_id,
+            candidate_id: button.dataset.candidate,
+            decision,
+            note,
+          },
+        });
+        specialNeeds = data.special_needs;
+        specialCard.innerHTML = specialNeedsHtml(schedule, specialNeeds);
+        toast(decision === 'approved' ? '已批准特殊需求' : '已驳回特殊需求');
+      } catch (err) {
+        toast(err.message, true);
+      } finally {
+        button.disabled = false;
+      }
+    });
+  }
+}
+
+function specialNeedsHtml(schedule, data) {
+  if (!schedule || !data || !(data.items || []).length) return '';
+  const rows = data.items.map((item) => {
+    const needs = [
+      item.extra_time_min ? `<span class="pill amber">延长 ${item.extra_time_min}′</span>` : '',
+      item.quiet_room ? '<span class="pill blue">安静候考</span>' : '',
+    ].join(' ');
+    const status = item.status === 'approved'
+      ? '<span class="pill teal">已批准</span>'
+      : item.status === 'rejected'
+        ? '<span class="pill red">已驳回</span>'
+        : '<span class="pill muted">待审批</span>';
+    const detail = item.status === 'pending'
+      ? `<input class="input tiny" data-special-needs-note placeholder="审批备注（驳回必填）" style="max-width:200px">
+         <button class="link-btn" data-special-action="approve" data-candidate="${esc(item.candidate_id)}">批准</button>
+         <span class="muted"> · </span>
+         <button class="link-btn" data-special-action="reject" data-candidate="${esc(item.candidate_id)}">驳回</button>`
+      : `<span class="tiny muted">${esc((item.approval && item.approval.note) || '—')} · ${esc((item.approval && item.approval.actor) || '—')} ${fmtTime(item.approval && item.approval.created_at)}</span>`;
+    return `<div class="version-row" data-special-needs-row="${esc(item.candidate_id)}">
+      <span class="k">${esc(item.candidate_id)} · ${esc(item.name)}</span>
+      <span class="v">${needs} ${status} ${detail}</span>
+    </div>`;
+  }).join('');
+  return `<div class="card">
+    <div class="card-title">特殊需求审批<span class="sub">${data.approved} 已批准 · ${data.rejected} 已驳回 · ${data.pending.length} 待审批</span></div>
+    ${rows}
+    <div class="tiny muted" style="margin-top:6px">延长时长与安静候考区会影响公平性，必须由考务逐人确认；审批记录写入审计链。</div>
+  </div>`;
 }
 
 function scheduleHtml(schedule) {
