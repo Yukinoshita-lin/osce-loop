@@ -47,6 +47,7 @@ def test_health_reports_ok_for_seeded_database(conn, tmp_path):
         "database",
         "audit_chain",
         "audit_anchors",
+        "signoff_chain",
         "media_dir",
     ]
     assert all(c["ok"] for c in result["checks"])
@@ -71,6 +72,21 @@ def test_health_degrades_when_audit_chain_is_tampered(conn, tmp_path):
     chain = next(c for c in result["checks"] if c["key"] == "audit_chain")
     assert chain["ok"] is False
     assert "不一致" in chain["detail"] or "失败" in chain["detail"]
+
+
+def test_health_degrades_when_published_attempt_lacks_signoff(conn, tmp_path):
+    conn.execute("UPDATE attempts SET signed_off_by = NULL WHERE status = 'published'")
+    conn.commit()
+    result = system_health(
+        conn,
+        media_dir=_media_dir(tmp_path),
+        anchor_path=tmp_path / "anchors.jsonl",
+        env={"OSCELOOP_AI_PROVIDER": "mock"},
+    )
+    assert result["status"] == "degraded"
+    check = next(c for c in result["checks"] if c["key"] == "signoff_chain")
+    assert check["ok"] is False
+    assert "签字" in check["detail"]
 
 
 def test_health_degrades_when_media_dir_missing(conn, tmp_path):

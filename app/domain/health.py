@@ -47,6 +47,13 @@ def system_health(
     )
     media = _media_check(Path(media_dir or MEDIA_DIR))
     ai = scoring_provider_info(env)
+    signoff_issues = 0
+    if db_ok:
+        signoff_issues = conn.execute(
+            "SELECT COUNT(*) AS n FROM attempts WHERE "
+            "(status IN ('signed_off','published') AND (signed_off_by IS NULL OR signed_off_by = '' OR signed_off_at IS NULL)) "
+            "OR (status = 'published' AND (published_at IS NULL OR signed_off_at > published_at))"
+        ).fetchone()["n"]
 
     checks = [
         {
@@ -66,6 +73,16 @@ def system_health(
             "label": "外部审计锚点",
             "ok": bool(anchors.get("ok")),
             "detail": anchors.get("message", ""),
+        },
+        {
+            "key": "signoff_chain",
+            "label": "人工签字链",
+            "ok": db_ok and signoff_issues == 0,
+            "detail": (
+                "全部已发布场次均有人工签字且时间早于发布"
+                if db_ok and signoff_issues == 0
+                else ("数据库不可用" if not db_ok else f"{signoff_issues} 个场次签字缺失或时间顺序异常")
+            ),
         },
         {
             "key": "media_dir",
