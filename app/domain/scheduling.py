@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import random
+from collections import deque
 from statistics import mean
 from typing import Any
 
@@ -370,3 +371,474 @@ def latest_schedule(conn) -> dict[str, Any] | None:
         "SELECT schedule FROM exam_schedules ORDER BY rowid DESC LIMIT 1"
     ).fetchone()
     return json.loads(row["schedule"]) if row else None
+
+
+CONFLICT_TYPES = ("candidate_round", "station_round")
+
+
+def _round_map(schedule: dict[str, Any]) -> dict[int, dict[str, Any]]:
+    return {row["round"]: row for row in schedule.get("rounds_detail") or []}
+
+
+def _candidate_map(schedule: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {c["candidate_id"]: c for c in schedule.get("candidates") or []}
+
+
+def _normalize_conflicts(
+    schedule: dict[str, Any], conflicts: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    rounds = int(schedule.get("rounds") or 0)
+    round_rows = _round_map(schedule)
+    candidate_ids = set(_candidate_map(schedule))
+    normalized: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+    for raw in conflicts or []:
+        ctype = str(raw.get("type") or "")
+        try:
+            round_no = int(raw.get("round") or 0)
+        except (TypeError, ValueError):
+            raise ValueError("轮次必须是整数") from None
+        if ctype not in CONFLICT_TYPES:
+            raise ValueError("冲突类型必须是 candidate_round 或 station_round")
+        if round_no < 1 or round_no > rounds:
+            raise ValueError(f"第 {round_no} 轮不存在（共 {rounds} 轮）")
+        if ctype == "candidate_round":
+            candidate_id = str(raw.get("candidate_id") or "")
+            if candidate_id not in candidate_ids:
+                raise ValueError(f"考生 {candidate_id} 不在排考表中")
+            key = (ctype, candidate_id, round_no)
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append({"type": ctype, "candidate_id": candidate_id, "round": round_no})
+        else:
+            station_id = str(raw.get("station_id") or "")
+            if not any(
+                slot["station_id"] == station_id for slot in round_rows[round_no]["slots"]
+            ):
+                raise ValueError(f"考站 {station_id} 在第 {round_no} 轮没有安排")
+            key = (ctype, station_id, round_no)
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append({"type": ctype, "station_id": station_id, "round": round_no})
+    if not normalized:
+        raise ValueError("至少提供一条冲突")
+    return normalized
+
+
+def _resource_labels(station_index: int) -> tuple[str, str, str]:
+    return (f"R{station_index + 1:02d}", f"SP{station_index + 1:02d}", f"E{station_index + 1:02d}")
+
+
+def _candidate_entry(candidate: dict[str, Any], round_no: int) -> dict[str, Any]:
+    for entry in candidate.get("stations") or []:
+        if entry.get("round") == round_no:
+            return entry
+    raise ValueError(f"考生 {candidate['candidate_id']} 在第 {round_no} 轮没有安排")
+
+
+def _apply_station(
+    *,
+    candidate: dict[str, Any],
+    station: dict[str, Any],
+    station_index: int,
+    candidate_entry: dict[str, Any],
+    slot: dict[str, Any] | None,
+) -> None:
+    duration = station["duration_min"] + int(candidate.get("extra_time_min") or 0)
+    candidate_entry.update(
+        {
+            "station_id": station["station_id"],
+            "station_name": station["name"],
+            "difficulty": station["difficulty"],
+            "duration_min": duration,
+        }
+    )
+    if slot is not None:
+        room, sp, examiner = _resource_labels(station_index)
+        slot.update(
+            {
+                "station_id": station["station_id"],
+                "station_name": station["name"],
+                "difficulty": station["difficulty"],
+                "duration_min": duration,
+                "room": room,
+                "sp": sp,
+                "examiner": examiner,
+            }
+        )
+
+
+def _recompute_schedule(schedule: dict[str, Any]) -> None:
+    """换站后重算考生难度合计、轮次时间、资源占用与质量指标。"""
+    round_rows = sorted(schedule.get("rounds_detail") or [], key=lambda row: row["round"])
+    candidates = schedule.get("candidates") or []
+    rounds = len(round_rows)
+    for candidate in candidates:
+        total = sum(float(s.get("difficulty") or 0) for s in candidate.get("stations") or [])
+        late = sum(
+            float(s.get("difficulty") or 0)
+            for s in candidate.get("stations") or []
+            if int(s.get("round") or 0) >= rounds - 1
+        )
+        candidate["total_difficulty"] = round(total, 2)
+        candidate["late_difficulty"] = round(late, 2)
+
+    buffer_min = int(schedule.get("buffer_min") or 0)
+    cursor = 0
+    room_minutes: dict[str, int] = {}
+    sp_minutes: dict[str, int] = {}
+    examiner_minutes: dict[str, int] = {}
+    usage: dict[str, int] = {}
+    for round_row in round_rows:
+        round_row["start_min"] = cursor
+        round_duration = 0
+        for slot in round_row["slots"]:
+            slot["start_min"] = cursor
+            slot["end_min"] = cursor + int(slot.get("duration_min") or 0)
+            round_duration = max(round_duration, int(slot.get("duration_min") or 0))
+            room_minutes[slot["room"]] = room_minutes.get(slot["room"], 0) + int(slot.get("duration_min") or 0)
+            sp_minutes[slot["sp"]] = sp_minutes.get(slot["sp"], 0) + int(slot.get("duration_min") or 0)
+            examiner_minutes[slot["examiner"]] = examiner_minutes.get(slot["examiner"], 0) + int(
+                slot.get("duration_min") or 0
+            )
+            usage[slot["station_id"]] = usage.get(slot["station_id"], 0) + 1
+        round_row["duration_min"] = round_duration + buffer_min
+        round_row["end_min"] = cursor + round_duration + buffer_min
+        cursor = round_row["end_min"]
+
+    totals = [c["total_difficulty"] for c in candidates]
+    late_totals = [c["late_difficulty"] for c in candidates]
+    difficulty_spread = round(max(totals) - min(totals), 2) if totals else 0.0
+    late_spread = round(max(late_totals) - min(late_totals), 2) if late_totals else 0.0
+    quality = schedule.setdefault("quality", {})
+    quality["difficulty_min"] = min(totals) if totals else None
+    quality["difficulty_max"] = max(totals) if totals else None
+    quality["difficulty_spread"] = difficulty_spread
+    quality["late_difficulty_spread"] = late_spread
+    quality["total_minutes"] = cursor
+    quality["station_usage_min"] = min(usage.values()) if usage else 0
+    quality["station_usage_max"] = max(usage.values()) if usage else 0
+
+    warnings = [
+        w
+        for w in quality.get("warnings") or []
+        if not (
+            w.startswith("考生加权难度差")
+            or w.startswith("后两轮难度差")
+            or w.startswith("考站使用次数差")
+            or w.startswith("考官 ")
+        )
+    ]
+    if difficulty_spread > 1.0:
+        warnings.append(f"考生加权难度差 {difficulty_spread}，超过 1.0，建议重新排考。")
+    if late_spread > 1.0:
+        warnings.append(f"后两轮难度差 {late_spread}，存在顺序效应风险。")
+    if usage and max(usage.values()) - min(usage.values()) > 1:
+        warnings.append(
+            f"考站使用次数差 {max(usage.values()) - min(usage.values())}，建议调整轮次或考站配置。"
+        )
+    for examiner, minutes in examiner_minutes.items():
+        if minutes > FATIGUE_LIMIT_MIN:
+            warnings.append(f"考官 {examiner} 连续评分 {minutes:.0f} 分钟，超过疲劳阈值。")
+    quality["warnings"] = warnings
+    quality["status"] = "review" if warnings else "ok"
+
+    schedule["resources"] = {
+        "rooms": {
+            "count": RESOURCE_COUNTS["rooms"],
+            "used": len(room_minutes),
+            "max_minutes": max(room_minutes.values()) if room_minutes else 0,
+        },
+        "sps": {
+            "count": RESOURCE_COUNTS["sps"],
+            "used": len(sp_minutes),
+            "max_minutes": max(sp_minutes.values()) if sp_minutes else 0,
+        },
+        "examiners": {
+            "count": RESOURCE_COUNTS["examiners"],
+            "used": len(examiner_minutes),
+            "max_minutes": max(examiner_minutes.values()) if examiner_minutes else 0,
+        },
+    }
+
+
+def _find_relocation(
+    round_no: int,
+    affected_id: str,
+    round_row: dict[str, Any],
+    candidates: dict[str, dict[str, Any]],
+    stations: list[dict[str, Any]],
+    blocked_stations: set[str],
+    conflicted_rounds: set[tuple[str, int]],
+) -> list[dict[str, Any]] | None:
+    """用增广路径找最小换站链：优先空闲站，否则顺次顶替直到空闲站。"""
+    occupied = {slot["station_id"]: slot["candidate_id"] for slot in round_row["slots"]}
+    current_station = next(
+        entry["station_id"]
+        for entry in candidates[affected_id]["stations"]
+        if entry["round"] == round_no
+    )
+    free_station_ids = {
+        station["station_id"]
+        for station in stations
+        if station["station_id"] not in occupied
+        and station["station_id"] not in blocked_stations
+    }
+    if current_station not in blocked_stations:
+        # 考生本人让出的考站对其他人重新可用
+        free_station_ids.add(current_station)
+
+    def allowed(candidate_id: str, station_id: str, used: set[str]) -> list[dict[str, Any]]:
+        visited = {
+            entry["station_id"]
+            for entry in candidates[candidate_id]["stations"]
+            if entry["round"] != round_no
+        }
+        return [
+            station
+            for station in stations
+            if station["station_id"] not in used
+            and station["station_id"] not in blocked_stations
+            and station["station_id"] != station_id
+            and station["station_id"] not in visited
+        ]
+
+    queue: deque[tuple[str, str, list[dict[str, Any]], set[str]]] = deque(
+        [(affected_id, current_station, [], set())]
+    )
+    while queue:
+        candidate_id, station_id, path, used = queue.popleft()
+        current_difficulty = float(
+            next(
+                entry.get("difficulty") or 0
+                for entry in candidates[candidate_id]["stations"]
+                if entry["round"] == round_no
+            )
+        )
+        options = sorted(
+            allowed(candidate_id, station_id, used | blocked_stations),
+            key=lambda station: (
+                0 if station["station_id"] in free_station_ids else 1,
+                abs(float(station["difficulty"]) - current_difficulty),
+                station["station_id"],
+            ),
+        )
+        for station in options:
+            target_id = station["station_id"]
+            move = {
+                "candidate_id": candidate_id,
+                "round": round_no,
+                "from_station_id": station_id,
+                "to_station_id": target_id,
+            }
+            if target_id in free_station_ids:
+                return path + [move]
+            occupant = occupied.get(target_id)
+            if not occupant or occupant == candidate_id:
+                continue
+            if (occupant, round_no) in conflicted_rounds:
+                continue
+            queue.append((occupant, target_id, path + [move], used | {target_id}))
+    return None
+
+
+def _repair_schedule(
+    schedule: dict[str, Any],
+    conflicts: list[dict[str, Any]],
+    stations: list[dict[str, Any]],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """以换站链为主的最小改动修复：优先空闲站，必要时顺次顶替直到空闲站。"""
+    repaired = json.loads(json.dumps(schedule))
+    round_rows = _round_map(repaired)
+    candidates = _candidate_map(repaired)
+    slot_map = {
+        (slot["candidate_id"], round_row["round"]): slot
+        for round_row in round_rows.values()
+        for slot in round_row["slots"]
+    }
+    station_index = {station["station_id"]: index for index, station in enumerate(stations)}
+    station_map = {station["station_id"]: station for station in stations}
+    normalized = _normalize_conflicts(repaired, conflicts)
+
+    conflicted_rounds = {
+        (item["candidate_id"], item["round"])
+        for item in normalized
+        if item["type"] == "candidate_round"
+    }
+    all_down_stations = {
+        item["station_id"] for item in normalized if item["type"] == "station_round"
+    }
+
+    changes: list[dict[str, Any]] = []
+    unresolved: list[dict[str, Any]] = []
+    for conflict in normalized:
+        round_no = conflict["round"]
+        round_row = round_rows[round_no]
+        if conflict["type"] == "candidate_round":
+            affected_id = conflict["candidate_id"]
+        else:
+            down_station = conflict["station_id"]
+            affected_slot = next(
+                (slot for slot in round_row["slots"] if slot["station_id"] == down_station), None
+            )
+            if affected_slot is None:
+                unresolved.append(
+                    {
+                        "type": conflict["type"],
+                        "round": round_no,
+                        "station_id": down_station,
+                        "reason": "该考站在本轮已无安排（可能已被前一次修复改派）",
+                    }
+                )
+                continue
+            affected_id = affected_slot["candidate_id"]
+            if (affected_id, round_no) in conflicted_rounds:
+                raise ValueError(
+                    f"考生 {affected_id} 在第 {round_no} 轮同时被标记为不可用，请只保留考站故障冲突"
+                )
+
+        moves = _find_relocation(
+            round_no,
+            affected_id,
+            round_row,
+            candidates,
+            stations,
+            all_down_stations,
+            conflicted_rounds,
+        )
+        if not moves:
+            unresolved.append(
+                {
+                    "type": conflict["type"],
+                    "round": round_no,
+                    "candidate_id": affected_id,
+                    "reason": "本轮无可用空闲站或换站链，需人工调整或整场重排",
+                }
+            )
+            continue
+        for index, move in enumerate(moves):
+            candidate = candidates[move["candidate_id"]]
+            entry = _candidate_entry(candidate, round_no)
+            station = station_map[move["to_station_id"]]
+            _apply_station(
+                candidate=candidate,
+                station=station,
+                station_index=station_index[station["station_id"]],
+                candidate_entry=entry,
+                slot=slot_map.get((candidate["candidate_id"], round_no)),
+            )
+            changes.append(
+                {
+                    **move,
+                    "method": "chain" if len(moves) > 1 else "free_station",
+                    "swapped_with": moves[index + 1]["candidate_id"]
+                    if index + 1 < len(moves)
+                    else None,
+                    "chain_length": len(moves),
+                }
+            )
+
+    for round_row in round_rows.values():
+        station_ids = [slot["station_id"] for slot in round_row["slots"]]
+        if len(station_ids) != len(set(station_ids)):
+            raise ValueError("修复后同一轮出现重复考站，请改为整场重排")
+    for candidate in candidates.values():
+        station_ids = [entry["station_id"] for entry in candidate["stations"]]
+        if len(station_ids) != len(set(station_ids)):
+            raise ValueError(
+                f"修复后考生 {candidate['candidate_id']} 出现重复考站，请改为整场重排"
+            )
+
+    before = {
+        "difficulty_spread": (schedule.get("quality") or {}).get("difficulty_spread"),
+        "late_difficulty_spread": (schedule.get("quality") or {}).get("late_difficulty_spread"),
+        "total_minutes": (schedule.get("quality") or {}).get("total_minutes"),
+    }
+    _recompute_schedule(repaired)
+    after = {
+        "difficulty_spread": repaired["quality"]["difficulty_spread"],
+        "late_difficulty_spread": repaired["quality"]["late_difficulty_spread"],
+        "total_minutes": repaired["quality"]["total_minutes"],
+    }
+    report = {
+        "requested": normalized,
+        "changes": changes,
+        "unresolved": unresolved,
+        "before": before,
+        "after": after,
+    }
+    if not changes:
+        reasons = "；".join(item["reason"] for item in unresolved[:3])
+        raise ValueError(f"无法最小改动修复：{reasons or '没有可改派的考站'}")
+    return repaired, report
+
+
+def repair_schedule(
+    conn,
+    *,
+    conflicts: list[dict[str, Any]],
+    schedule_id: str | None = None,
+    actor: str = "考务编排",
+) -> dict[str, Any]:
+    """按现场冲突生成修复版排考表；原表保留，新表以 repaired_from 追溯。"""
+    if schedule_id:
+        row = conn.execute(
+            "SELECT schedule FROM exam_schedules WHERE schedule_id = ?", (schedule_id,)
+        ).fetchone()
+        if not row:
+            raise ValueError("排考表不存在")
+    else:
+        row = conn.execute(
+            "SELECT schedule FROM exam_schedules ORDER BY rowid DESC LIMIT 1"
+        ).fetchone()
+        if not row:
+            raise ValueError("尚未生成排考表")
+    original = json.loads(row["schedule"])
+    inputs = schedule_inputs(conn)
+    repaired, report = _repair_schedule(original, conflicts, inputs["stations"])
+
+    repaired["schedule_id"] = db.new_id("sched")
+    repaired["created_at"] = db.now_iso()
+    repaired["repaired_from"] = original.get("schedule_id")
+    repaired["repair_report"] = report
+    if report["unresolved"]:
+        repaired["quality"]["warnings"].append(
+            f"仍有 {len(report['unresolved'])} 条冲突未解决，需人工处理。"
+        )
+        repaired["quality"]["status"] = "review"
+
+    conn.execute(
+        "INSERT INTO exam_schedules(schedule_id, exam_date, params, schedule, created_at) VALUES(?,?,?,?,?)",
+        (
+            repaired["schedule_id"],
+            repaired["exam_date"],
+            json.dumps(
+                {
+                    "repaired_from": original.get("schedule_id"),
+                    "conflicts": len(report["requested"]),
+                    "unresolved": len(report["unresolved"]),
+                },
+                ensure_ascii=False,
+            ),
+            json.dumps(repaired, ensure_ascii=False),
+            repaired["created_at"],
+        ),
+    )
+    conn.commit()
+    db.append_audit(
+        conn,
+        actor=actor,
+        action="exam.schedule_repair",
+        object_type="ExamSchedule",
+        object_id=repaired["schedule_id"],
+        before={"schedule_id": original.get("schedule_id")},
+        after={
+            "changes": len(report["changes"]),
+            "unresolved": len(report["unresolved"]),
+            "difficulty_spread": repaired["quality"]["difficulty_spread"],
+        },
+    )
+    return repaired
+

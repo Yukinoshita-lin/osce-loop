@@ -988,7 +988,14 @@ async function viewSchedule() {
     api('/api/schedule/inputs'),
     api('/api/schedule/latest'),
   ]);
-  const schedule = latest.schedule;
+  let schedule = latest.schedule;
+  const scheduleCandidates = inputs.candidates
+    .map((c) => `<option value="${dataAttr(c.candidate_id)}">${esc(c.name)} · ${esc(c.candidate_id)}</option>`)
+    .join('');
+  const scheduleStations = inputs.stations
+    .map((s) => `<option value="${dataAttr(s.station_id)}">${esc(s.name)} · ${esc(s.station_id)}</option>`)
+    .join('');
+  const roundOptions = (count) => Array.from({ length: count }, (_, i) => `<option value="${i + 1}">第 ${i + 1} 轮</option>`).join('');
   const today = schedule ? schedule.exam_date : new Date().toISOString().slice(0, 10);
   $('#view').innerHTML = `
     <div class="view-head">
@@ -1013,6 +1020,28 @@ async function viewSchedule() {
       </form>
       <div class="tiny muted" style="margin-top:8px">每位考生从考站集合中抽取 ${schedule ? schedule.rounds : 6} 站；同一轮同一考站只安排一名考生。</div>
     </div>
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">冲突最小改动修复<span class="sub">只改受影响的人 · 原排考表保留</span></div>
+      <div class="btn-row" style="align-items:flex-end;gap:10px;flex-wrap:wrap">
+        <label class="field">冲突类型
+          <select id="repair-type" class="input">
+            <option value="candidate_round">考生本轮不可用</option>
+            <option value="station_round">考站本轮故障</option>
+          </select>
+        </label>
+        <label class="field" id="repair-candidate-wrap">考生
+          <select id="repair-candidate" class="input">${scheduleCandidates}</select>
+        </label>
+        <label class="field" id="repair-station-wrap" style="display:none">考站
+          <select id="repair-station" class="input">${scheduleStations}</select>
+        </label>
+        <label class="field">轮次
+          <select id="repair-round" class="input">${roundOptions(schedule ? schedule.rounds : 6)}</select>
+        </label>
+        <button class="btn" id="repair-submit" ${schedule ? '' : 'disabled'}>最小改动修复</button>
+      </div>
+      <div id="repair-result" class="tiny muted" style="margin-top:8px">选择冲突后执行修复；优先改派到本轮空闲考站，无空闲时两人对调。修复结果作为新排考表保存，原表不覆盖。</div>
+    </div>
     <div id="schedule-body">${schedule ? scheduleHtml(schedule) : '<div class="empty">尚未生成排考表。点击“生成排考表”开始。</div>'}</div>
   `;
   $('#schedule-form').addEventListener('submit', async (e) => {
@@ -1029,7 +1058,17 @@ async function viewSchedule() {
     button.textContent = '求解中…';
     try {
       const data = await api('/api/schedule/generate', { method: 'POST', body });
+      schedule = data.schedule;
       $('#schedule-body').innerHTML = scheduleHtml(data.schedule);
+      const repairRound = $('#repair-round');
+      if (repairRound) repairRound.innerHTML = roundOptions(schedule.rounds);
+      const repairButton = $('#repair-submit');
+      if (repairButton) repairButton.disabled = false;
+      const repairResult = $('#repair-result');
+      if (repairResult) {
+        repairResult.className = 'tiny muted';
+        repairResult.textContent = '排考表已更新，可继续登记现场冲突。';
+      }
       toast(`排考完成：难度差 ${data.schedule.quality.difficulty_spread} · ${data.schedule.quality.warnings.length} 条预警`);
     } catch (err) {
       toast(err.message, true);
@@ -1038,6 +1077,62 @@ async function viewSchedule() {
       button.textContent = '生成排考表';
     }
   });
+  const repairType = $('#repair-type');
+  if (repairType) {
+    repairType.addEventListener('change', () => {
+      const candidateMode = repairType.value === 'candidate_round';
+      const candidateWrap = $('#repair-candidate-wrap');
+      const stationWrap = $('#repair-station-wrap');
+      if (candidateWrap) candidateWrap.style.display = candidateMode ? '' : 'none';
+      if (stationWrap) stationWrap.style.display = candidateMode ? 'none' : '';
+    });
+  }
+  const repairSubmit = $('#repair-submit');
+  if (repairSubmit) {
+    repairSubmit.addEventListener('click', async () => {
+      if (!schedule) {
+        toast('请先生成排考表', true);
+        return;
+      }
+      const type = $('#repair-type').value;
+      const conflict = { type, round: Number($('#repair-round').value) };
+      if (type === 'candidate_round') {
+        conflict.candidate_id = $('#repair-candidate').value;
+      } else {
+        conflict.station_id = $('#repair-station').value;
+      }
+      repairSubmit.disabled = true;
+      try {
+        const data = await api('/api/schedule/repair', {
+          method: 'POST',
+          body: { schedule_id: schedule.schedule_id, conflicts: [conflict] },
+        });
+        schedule = data.schedule;
+        $('#schedule-body').innerHTML = scheduleHtml(data.schedule);
+        const report = data.report;
+        const changeText = report.changes
+          .map((c) => `${c.candidate_id} 第 ${c.round} 轮 ${c.from_station_id} → ${c.to_station_id}${c.swapped_with ? `（与 ${c.swapped_with} 对调）` : '（改派空闲考站）'}`)
+          .join('；');
+        const box = $('#repair-result');
+        if (box) {
+          box.className = 'tiny';
+          box.innerHTML = `<span class="pill teal">已修复</span> ${esc(changeText)}
+            <div class="tiny muted">难度差 ${num(report.before.difficulty_spread, 2)} → ${num(report.after.difficulty_spread, 2)} · 总时长 ${num(report.before.total_minutes, 0)} → ${num(report.after.total_minutes, 0)} 分钟</div>
+            ${report.unresolved.length ? `<div style="color:var(--amber)">未解决 ${report.unresolved.length} 条：${esc(report.unresolved.map((u) => u.reason).join('；'))}</div>` : ''}`;
+        }
+        toast('已生成修复版排考表');
+      } catch (err) {
+        const box = $('#repair-result');
+        if (box) {
+          box.className = 'tiny';
+          box.innerHTML = `<span class="pill red">无法修复</span> ${esc(err.message)}`;
+        }
+        toast(err.message, true);
+      } finally {
+        repairSubmit.disabled = false;
+      }
+    });
+  }
 }
 
 function scheduleHtml(schedule) {
@@ -1046,6 +1141,13 @@ function scheduleHtml(schedule) {
   const quality = schedule.quality || {};
   const resources = schedule.resources || {};
   const warningHtml = (quality.warnings || []).map((w) => `<div class="alert ${quality.status === 'review' ? '' : 'danger'}" style="margin-bottom:6px"><b>预警</b><p>${esc(w)}</p></div>`).join('');
+  const repair = schedule.repair_report;
+  const repairHtml = repair ? `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">最近一次最小改动修复<span class="sub">${repair.requested.length} 条冲突 · ${repair.changes.length} 处改动${schedule.repaired_from ? ` · 原表 ${esc(schedule.repaired_from)}` : ''}</span></div>
+      ${repair.changes.map((c) => `<div class="version-row"><span class="k">${esc(c.candidate_id)} · 第 ${c.round} 轮</span><span class="v">${esc(c.from_station_id)} → ${esc(c.to_station_id)}${c.swapped_with ? `（与 ${esc(c.swapped_with)} 对调）` : '（改派空闲考站）'}</span></div>`).join('')}
+      ${repair.unresolved.length ? `<div class="alert" style="margin-top:8px"><b>未解决冲突</b><p>${repair.unresolved.map((u) => esc(u.reason)).join('；')}</p></div>` : ''}
+    </div>` : '';
   const usage = {};
   const slotLookup = {};
   rounds.forEach((round) => round.slots.forEach((slot) => {
@@ -1060,6 +1162,7 @@ function scheduleHtml(schedule) {
       <div class="kpi ${quality.warnings.length ? 'amber' : 'teal'}"><div class="k">预警</div><div class="v">${quality.warnings.length}</div><div class="d">${esc(schedule.exam_date)} · ${quality.status === 'ok' ? '可直接使用' : '需人工确认'}</div></div>
     </div>
     ${warningHtml}
+    ${repairHtml}
     <div class="card" style="margin-bottom:16px">
       <div class="card-title">考生排考表<span class="sub">${candidates.length} 名考生 · ${rounds.length} 轮</span></div>
       <div class="tbl-wrap">

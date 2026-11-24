@@ -138,6 +138,7 @@ from .domain.scheduling import (
     ensure_schedule_inputs,
     generate_schedule,
     latest_schedule,
+    repair_schedule,
     schedule_inputs,
 )
 from .domain.signoff_audit import audit_signoff_chain
@@ -1983,6 +1984,34 @@ def gen_schedule(body: ScheduleBody, conn=Depends(get_conn)):
 @app.get("/api/schedule/latest")
 def get_latest_schedule(conn=Depends(get_conn)):
     return {"schedule": latest_schedule(conn)}
+
+
+class ScheduleConflictBody(BaseModel):
+    type: str = Field(pattern=r"^(candidate_round|station_round)$")
+    round: int = Field(ge=1, le=50)
+    candidate_id: str | None = None
+    station_id: str | None = None
+
+
+class ScheduleRepairBody(BaseModel):
+    schedule_id: str | None = None
+    conflicts: list[ScheduleConflictBody] = Field(min_length=1, max_length=50)
+
+
+@app.post("/api/schedule/repair")
+def repair_schedule_conflicts(
+    body: ScheduleRepairBody, request: Request, conn=Depends(get_conn)
+):
+    try:
+        schedule = repair_schedule(
+            conn,
+            conflicts=[item.model_dump() for item in body.conflicts],
+            schedule_id=body.schedule_id,
+            actor=request.state.user["display_name"],
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "schedule": schedule, "report": schedule["repair_report"]}
 
 
 @app.get("/api/execution/latest")
