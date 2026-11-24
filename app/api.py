@@ -920,6 +920,10 @@ async def ingest_attempt(
                 speaker_map=speaker_map,
                 first_speaker=asr_first_speaker,
                 subject_ref=f"media:{media['media_id']}",
+                idempotency_key=(
+                    f"asr:{media.get('sha256')}:{asr_language or 'zh'}:{asr_first_speaker}:"
+                    f"{json.dumps(speaker_map, sort_keys=True, ensure_ascii=False) if speaker_map else ''}"
+                ),
             )
         except ASRError as exc:
             _cleanup_media(media)

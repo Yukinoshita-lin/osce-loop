@@ -160,6 +160,15 @@ CREATE TABLE IF NOT EXISTS model_cards (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS ai_call_cache (
+    cache_key TEXT PRIMARY KEY,
+    capability TEXT NOT NULL,
+    model_version TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    output TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS ai_calls (
     call_id TEXT PRIMARY KEY,
     capability TEXT NOT NULL,

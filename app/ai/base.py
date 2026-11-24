@@ -1,6 +1,7 @@
 """AI 能力网关：业务层只面向“能力”，不直连模型。"""
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from dataclasses import asdict, dataclass, field
@@ -8,6 +9,8 @@ from typing import Any
 
 from .. import db
 from ..config import AI_INPUT_PRICE_PER_1K, AI_OUTPUT_PRICE_PER_1K, ASR_PRICE_PER_MINUTE
+
+_CACHE_MISS = object()
 
 
 @dataclass
@@ -58,6 +61,7 @@ class CapabilityGateway:
         transcript: list[dict[str, Any]],
         attempt_meta: dict[str, Any],
         subject_ref: str,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         def primary():
             return self.provider.score_item(
@@ -79,6 +83,7 @@ class CapabilityGateway:
             subject_ref=subject_ref,
             require_evidence=True,
             fallback_fn=fallback if self.fallback_provider else None,
+            idempotency_key=idempotency_key,
         )
 
     def draft_bundle(
@@ -95,6 +100,20 @@ class CapabilityGateway:
         """S1 命题辅助也走同一网关：绑定模型/提示版本并计量 Token 与成本。"""
         if not hasattr(self.provider, "draft_bundle"):
             raise RuntimeError("当前提供方不支持命题草案生成")
+        key_material = json.dumps(
+            {
+                "topic": topic,
+                "difficulty": difficulty,
+                "duration_min": duration_min,
+                "guidelines": guidelines,
+                "patient": patient,
+                "quotas": quotas,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        )
+        digest = hashlib.sha256(key_material.encode("utf-8")).hexdigest()
         return self._invoke(
             "draft.bundle",
             lambda: self.provider.draft_bundle(
@@ -106,6 +125,7 @@ class CapabilityGateway:
                 quotas=quotas,
             ),
             subject_ref=subject_ref,
+            idempotency_key=f"draft:{digest}",
         )
 
     def transcribe_media(
@@ -116,6 +136,7 @@ class CapabilityGateway:
         speaker_map=None,
         first_speaker: str = "patient",
         subject_ref: str,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """ASR 也必须经过网关：统一模型版本、耗时、状态与调用日志。"""
         if not hasattr(self.provider, "transcribe_media"):
@@ -129,6 +150,7 @@ class CapabilityGateway:
                 first_speaker=first_speaker,
             ),
             subject_ref=subject_ref,
+            idempotency_key=idempotency_key,
         )
 
     def _invoke(
@@ -139,7 +161,33 @@ class CapabilityGateway:
         subject_ref: str,
         require_evidence: bool = False,
         fallback_fn=None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
+        if idempotency_key:
+            cached = self._cache_lookup(capability, idempotency_key)
+            if cached is not _CACHE_MISS:
+                db.log_ai_call(
+                    self.conn,
+                    capability=capability,
+                    model_version=self.model_version,
+                    prompt_version=self.prompt_version,
+                    subject_ref=subject_ref,
+                    latency_ms=0.0,
+                    status="cached",
+                    detail={"cached": True, "idempotency_key": idempotency_key},
+                )
+                return {
+                    "status": "cached",
+                    "degraded": False,
+                    "cached": True,
+                    "output": cached,
+                    "model_version": self.model_version,
+                    "prompt_version": self.prompt_version,
+                    "latency_ms": 0.0,
+                    "input_tokens": None,
+                    "output_tokens": None,
+                    "cost_usd": 0.0,
+                }
         started = time.perf_counter()
         status = "ok"
         used_model = self.model_version
@@ -218,6 +266,8 @@ class CapabilityGateway:
                         "rubric_items": len(output.get("rubric") or []),
                     }
                 )
+        if idempotency_key and status == "ok":
+            self._cache_store(capability, idempotency_key, output)
         db.log_ai_call(
             self.conn,
             capability=capability,
@@ -234,6 +284,7 @@ class CapabilityGateway:
         return {
             "status": status,
             "degraded": status == "degraded",
+            "cached": False,
             "output": output,
             "model_version": used_model,
             "prompt_version": used_prompt,
@@ -242,6 +293,41 @@ class CapabilityGateway:
             "output_tokens": output_tokens,
             "cost_usd": cost_usd,
         }
+
+    def _cache_key(self, capability: str, idempotency_key: str) -> str:
+        return (
+            f"{capability}|{self.model_version}|{self.prompt_version}|{idempotency_key}"
+        )
+
+    def _cache_lookup(self, capability: str, idempotency_key: str) -> Any:
+        row = self.conn.execute(
+            "SELECT output FROM ai_call_cache WHERE cache_key = ?",
+            (self._cache_key(capability, idempotency_key),),
+        ).fetchone()
+        if not row:
+            return _CACHE_MISS
+        try:
+            return _deserialize_output(row["output"])
+        except (TypeError, ValueError, KeyError):
+            return _CACHE_MISS
+
+    def _cache_store(self, capability: str, idempotency_key: str, output: Any) -> None:
+        raw = _serialize_output(output)
+        if raw is None:
+            return
+        self.conn.execute(
+            "INSERT OR REPLACE INTO ai_call_cache(cache_key, capability, model_version, "
+            "prompt_version, output, created_at) VALUES(?,?,?,?,?,?)",
+            (
+                self._cache_key(capability, idempotency_key),
+                capability,
+                self.model_version,
+                self.prompt_version,
+                raw,
+                db.now_iso(),
+            ),
+        )
+        self.conn.commit()
 
     def _usage_metrics(self, capability: str) -> tuple[int | None, int | None, float | None]:
         usage = getattr(self.provider, "last_usage", None) or {}
@@ -277,6 +363,28 @@ class CapabilityGateway:
             except (TypeError, ValueError):
                 pass
         return input_tokens, output_tokens, round(cost, 6) if measured else None
+
+
+def _serialize_output(output: Any) -> str | None:
+    if isinstance(output, Suggestion):
+        return json.dumps(
+            {"kind": "suggestion", "value": asdict(output)}, ensure_ascii=False
+        )
+    if isinstance(output, dict):
+        try:
+            return json.dumps({"kind": "dict", "value": output}, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _deserialize_output(raw: str) -> Any:
+    data = json.loads(raw)
+    if data.get("kind") == "suggestion":
+        value = dict(data["value"])
+        value["evidence"] = [EvidenceSpan(**entry) for entry in value.get("evidence") or []]
+        return Suggestion(**value)
+    return data.get("value")
 
 
 def suggestion_to_dict(suggestion: Suggestion) -> dict[str, Any]:
