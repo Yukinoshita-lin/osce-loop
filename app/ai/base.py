@@ -81,6 +81,33 @@ class CapabilityGateway:
             fallback_fn=fallback if self.fallback_provider else None,
         )
 
+    def draft_bundle(
+        self,
+        *,
+        topic: str,
+        difficulty: str,
+        duration_min: int,
+        guidelines: list[dict[str, Any]],
+        patient: dict[str, Any],
+        quotas: dict[str, Any],
+        subject_ref: str = "draft",
+    ) -> dict[str, Any]:
+        """S1 命题辅助也走同一网关：绑定模型/提示版本并计量 Token 与成本。"""
+        if not hasattr(self.provider, "draft_bundle"):
+            raise RuntimeError("当前提供方不支持命题草案生成")
+        return self._invoke(
+            "draft.bundle",
+            lambda: self.provider.draft_bundle(
+                topic=topic,
+                difficulty=difficulty,
+                duration_min=duration_min,
+                guidelines=guidelines,
+                patient=patient,
+                quotas=quotas,
+            ),
+            subject_ref=subject_ref,
+        )
+
     def transcribe_media(
         self,
         *,
@@ -184,6 +211,13 @@ class CapabilityGateway:
                     "patient_utterances": output.get("patient_utterances"),
                 }
             )
+            if capability.startswith("draft."):
+                detail.update(
+                    {
+                        "title": output.get("title"),
+                        "rubric_items": len(output.get("rubric") or []),
+                    }
+                )
         db.log_ai_call(
             self.conn,
             capability=capability,

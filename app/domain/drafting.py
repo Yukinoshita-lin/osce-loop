@@ -837,6 +837,7 @@ def generate_bundle_draft(
     duration_min: int | None = None,
     actor: str = "命题专家",
     llm_provider=None,
+    llm_gateway=None,
 ) -> dict[str, Any]:
     """生成 L0 站包草案；返回草案本身、四项检查与预判信息，并写入审计。"""
     case = CASES.get(topic)
@@ -926,9 +927,10 @@ def generate_bundle_draft(
     draft_source = "template"
     llm_error = None
     template_payload = payload
-    if llm_provider is not None and hasattr(llm_provider, "draft_bundle"):
+    draft_client = llm_gateway or llm_provider
+    if draft_client is not None and hasattr(draft_client, "draft_bundle"):
         try:
-            candidate = llm_provider.draft_bundle(
+            draft_response = draft_client.draft_bundle(
                 topic=case["label"],
                 difficulty=difficulty,
                 duration_min=duration,
@@ -939,6 +941,11 @@ def generate_bundle_draft(
                     "unrelated_concern": case["unrelated"],
                     "ambiguity": case["chief_complaint"],
                 },
+            )
+            candidate = (
+                draft_response.get("output")
+                if llm_gateway is not None and isinstance(draft_response, dict)
+                else draft_response
             )
             if not isinstance(candidate, dict):
                 raise ValueError("LLM 草案必须是 JSON 对象")
@@ -994,6 +1001,12 @@ def generate_bundle_draft(
     }
     similarity = find_similar_bundles(conn, payload, threshold=0.75)
     generated_at = db.now_iso()
+    draft_model_version = (
+        getattr(draft_client, "model_version", None) if draft_source == "llm" else None
+    )
+    draft_prompt_version = (
+        getattr(draft_client, "prompt_version", None) if draft_source == "llm" else None
+    )
     result = {
         "draft": payload,
         "validation": validation,
@@ -1005,16 +1018,18 @@ def generate_bundle_draft(
         "similarity_threshold": 0.75,
         "draft_source": draft_source,
         "llm_error": llm_error,
-        "llm_model_version": getattr(llm_provider, "model_version", None)
-        if draft_source == "llm"
-        else None,
+        "llm_model_version": (
+            getattr(draft_client, "model_version", None)
+            if draft_source == "llm"
+            else None
+        ),
         "disclosure": {
             "level": DRAFT_LEVEL,
             "text": DRAFT_DISCLOSURE,
         },
         "versions": {
-            "model_version": DRAFT_MODEL_VERSION,
-            "prompt_version": DRAFT_PROMPT_VERSION,
+            "model_version": draft_model_version or DRAFT_MODEL_VERSION,
+            "prompt_version": draft_prompt_version or DRAFT_PROMPT_VERSION,
             "rubric_version": "draft-0.1",
         },
         "generated_at": generated_at,
@@ -1037,7 +1052,7 @@ def generate_bundle_draft(
             "llm_error": llm_error,
             "similarity": similarity[:3],
         },
-        model_version=DRAFT_MODEL_VERSION,
-        prompt_version=DRAFT_PROMPT_VERSION,
+        model_version=draft_model_version or DRAFT_MODEL_VERSION,
+        prompt_version=draft_prompt_version or DRAFT_PROMPT_VERSION,
     )
     return result

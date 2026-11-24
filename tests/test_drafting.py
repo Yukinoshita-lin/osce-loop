@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 
 from app import db
+from app.ai.base import CapabilityGateway
 from app.domain.bundle import freeze_bundle
 from app.domain.drafting import _quality_context, case_topics, generate_bundle_draft
 from app.domain.rubric import validate_bundle
@@ -162,7 +163,10 @@ def test_quality_context_without_history_is_explicit():
 
 
 class _DraftProvider:
+    name = "fake-draft"
     model_version = "fake-llm-1.0"
+    prompt_version = "draft-prompt-test"
+    last_usage = {"input_tokens": 120, "output_tokens": 80}
 
     def __init__(self, payload=None, error=None):
         self.payload = payload
@@ -188,6 +192,45 @@ def test_draft_uses_llm_payload_when_valid(tmp_path):
     assert result["llm_model_version"] == "fake-llm-1.0"
     assert result["draft"]["title"] == "LLM 腹痛草案"
     assert result["validation"]["can_freeze"] is True
+    conn.close()
+
+
+def test_draft_goes_through_capability_gateway(tmp_path):
+    conn = _conn(tmp_path)
+    base = generate_bundle_draft(conn, topic="abdominal_pain", difficulty="medium")["draft"]
+    base["title"] = "网关草案"
+    gateway = CapabilityGateway(
+        conn,
+        _DraftProvider(base),
+        "fake-llm-1.0",
+        "draft-prompt-test",
+    )
+    result = generate_bundle_draft(
+        conn,
+        topic="abdominal_pain",
+        difficulty="medium",
+        llm_gateway=gateway,
+    )
+    assert result["draft_source"] == "llm"
+    assert result["draft"]["title"] == "网关草案"
+    assert result["llm_model_version"] == "fake-llm-1.0"
+    assert result["versions"]["model_version"] == "fake-llm-1.0"
+    assert result["versions"]["prompt_version"] == "draft-prompt-test"
+    call = conn.execute(
+        "SELECT * FROM ai_calls WHERE capability = 'draft.bundle' ORDER BY rowid DESC LIMIT 1"
+    ).fetchone()
+    assert call is not None
+    assert call["status"] == "ok"
+    assert call["model_version"] == "fake-llm-1.0"
+    assert call["prompt_version"] == "draft-prompt-test"
+    assert call["input_tokens"] == 120
+    assert call["output_tokens"] == 80
+    audit = conn.execute(
+        "SELECT model_version, prompt_version FROM audit_events "
+        "WHERE action = 'bundle.draft_generated' ORDER BY rowid DESC LIMIT 1"
+    ).fetchone()
+    assert audit["model_version"] == "fake-llm-1.0"
+    assert audit["prompt_version"] == "draft-prompt-test"
     conn.close()
 
 

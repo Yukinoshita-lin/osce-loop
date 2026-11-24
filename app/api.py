@@ -23,6 +23,8 @@ from .config import (
     AI_OUTPUT_PRICE_PER_1K,
     ASR_PRICE_PER_MINUTE,
     ASR_PROMPT_VERSION,
+    DRAFT_MODEL_VERSION,
+    DRAFT_PROMPT_VERSION,
     LOGIN_WINDOW_SECONDS,
     MEDIA_DIR,
     MODEL_VERSION,
@@ -1380,12 +1382,14 @@ class BundleDraftBody(BaseModel):
 def bundle_draft(body: BundleDraftBody, request: Request, conn=Depends(get_conn)):
     _ensure_not_stopped(conn)
     provider_bundle = build_scoring_provider()
-    llm_provider = (
-        provider_bundle.primary
-        if provider_bundle.info.get("configured")
-        and hasattr(provider_bundle.primary, "draft_bundle")
-        else None
-    )
+    llm_gateway = None
+    if provider_bundle.info.get("configured") and hasattr(provider_bundle.primary, "draft_bundle"):
+        llm_gateway = CapabilityGateway(
+            conn,
+            provider_bundle.primary,
+            provider_bundle.model_version or DRAFT_MODEL_VERSION,
+            DRAFT_PROMPT_VERSION,
+        )
     try:
         return generate_bundle_draft(
             conn,
@@ -1393,7 +1397,7 @@ def bundle_draft(body: BundleDraftBody, request: Request, conn=Depends(get_conn)
             difficulty=body.difficulty,
             duration_min=body.duration_min,
             actor=request.state.user["display_name"],
-            llm_provider=llm_provider,
+            llm_gateway=llm_gateway,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
