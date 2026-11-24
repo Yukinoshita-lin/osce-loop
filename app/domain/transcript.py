@@ -272,6 +272,87 @@ def normalize_items(
     }
 
 
+NOTE_TIME_PREFIX = re.compile(
+    r"^\s*[\[\(]?(\d{1,3}:\d{2}(?::\d{2})?)[\]\)]?\s*[-–—:：]?\s*(.+)$"
+)
+
+
+def parse_notes(raw: str, *, duration_ms: int = 0) -> list[dict[str, Any]]:
+    """把考生笔记/操作日志转成考生侧 utterance，作为证据来源参与评分。
+
+    支持 JSON 数组（字符串或 {text, at_ms/start/phase}）与逐行文本；
+    无时间戳的笔记按场次末尾顺序排布，并在证据 note 中提示。
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return []
+    items: list[dict[str, Any]] = []
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        data = None
+    if isinstance(data, dict):
+        data = data.get("notes") or data.get("items")
+    if isinstance(data, list):
+        for entry in data:
+            if isinstance(entry, str):
+                items.append({"text": entry})
+            elif isinstance(entry, dict):
+                items.append(entry)
+    else:
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            match = NOTE_TIME_PREFIX.match(line)
+            if match:
+                items.append({"start": match.group(1), "text": match.group(2)})
+            else:
+                items.append({"text": line})
+
+    utterances: list[dict[str, Any]] = []
+    cursor = max(0, int(duration_ms))
+    for index, item in enumerate(items, start=1):
+        text = str(item.get("text") or "").strip()
+        if not text:
+            continue
+        has_time = any(key in item for key in ("start_ms", "start", "at_ms", "at"))
+        if "start_ms" in item:
+            start = _parse_time(item.get("start_ms"), assume_ms=True)
+        elif "at_ms" in item:
+            start = _parse_time(item.get("at_ms"), assume_ms=True)
+        else:
+            start = _parse_time(item.get("start", item.get("at")))
+        if not has_time or start <= 0:
+            start = cursor if not has_time else start
+        if "end_ms" in item:
+            end = _parse_time(item.get("end_ms"), assume_ms=True)
+        elif "end" in item:
+            end = _parse_time(item.get("end"))
+        else:
+            end = 0
+        if end <= start:
+            end = start + max(1800, len(text) * 80)
+        cursor = max(cursor, end) + 700
+        phase = item.get("phase")
+        if phase not in PHASES:
+            phase = _infer_phase(text, "information_gathering", "candidate")
+        utterances.append(
+            {
+                "utt_id": f"n{index:03d}",
+                "speaker": "candidate",
+                "start_ms": start,
+                "end_ms": end,
+                "text": text,
+                "asr_confidence": None,
+                "phase": phase,
+                "source": "note",
+                "note_timestamp_supplied": has_time,
+            }
+        )
+    return utterances
+
+
 def parse_transcript(filename: str, content: bytes) -> dict[str, Any]:
     try:
         text = content.decode("utf-8-sig")

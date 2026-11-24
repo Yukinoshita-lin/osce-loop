@@ -18,6 +18,27 @@ def _hash_text(text: str) -> str:
     return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()[:24]
 
 
+def _matched_evidence(matched: dict[str, Any], attempt_meta: dict[str, Any]) -> EvidenceSpan:
+    """笔记与口述都作为考生侧证据；笔记在回放时标明来源与时间戳可信度。"""
+    quote = matched["text"]
+    is_note = matched.get("source") == "note"
+    note = None
+    if is_note:
+        note = "来自考生笔记/操作日志，时间戳为记录时刻。"
+        if not matched.get("note_timestamp_supplied", True):
+            note = "来自考生笔记/操作日志；未提供时间戳，已按场次末尾定位，需人工确认。"
+    return EvidenceSpan(
+        media_id=attempt_meta.get("media_id") or "demo_media",
+        start_ms=int(matched["start_ms"]),
+        end_ms=int(matched["end_ms"]),
+        speaker=matched["speaker"],
+        quote=quote,
+        transcript_hash=_hash_text(quote),
+        evidence_kind="note" if is_note else "utterance",
+        note=note,
+    )
+
+
 class MockScoringProvider:
     """规则证据提取器。刻意保留转写/同义词遗漏，以便暴露人机分歧。"""
 
@@ -71,27 +92,13 @@ class MockScoringProvider:
             base_conf = 0.92 + min(0.04, max(0, extra_hits) * 0.01)
             score = 2
             quote = matched["text"]
-            evidence = EvidenceSpan(
-                media_id=attempt_meta.get("media_id") or "demo_media",
-                start_ms=int(matched["start_ms"]),
-                end_ms=int(matched["end_ms"]),
-                speaker=matched["speaker"],
-                quote=quote,
-                transcript_hash=_hash_text(quote),
-            )
+            evidence = _matched_evidence(matched, attempt_meta)
             rationale = f"在 {_mmss(matched['start_ms'])} 捕获“{quote}”，匹配 positive 行为锚。"
         elif matched and match_type == "partial":
             base_conf = 0.78
             score = 1
             quote = matched["text"]
-            evidence = EvidenceSpan(
-                media_id=attempt_meta.get("media_id") or "demo_media",
-                start_ms=int(matched["start_ms"]),
-                end_ms=int(matched["end_ms"]),
-                speaker=matched["speaker"],
-                quote=quote,
-                transcript_hash=_hash_text(quote),
-            )
+            evidence = _matched_evidence(matched, attempt_meta)
             rationale = f"在 {_mmss(matched['start_ms'])} 捕获“{quote}”，仅覆盖部分要素，匹配 partial 行为锚。"
         else:
             base_conf = 0.86

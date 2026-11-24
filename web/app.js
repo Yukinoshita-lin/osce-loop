@@ -532,7 +532,7 @@ function renderWorkbench(data) {
     ? `<div class="clip-meta">
          <span>${esc(ev.speaker || 'unknown')}</span>
          <span>${clipLabel}</span>
-         <span>${ev.evidence_kind === 'absence' ? '缺席证据' : 'utterance'}</span>
+         <span>${ev.evidence_kind === 'absence' ? '缺席证据' : ev.evidence_kind === 'note' ? '考生笔记' : 'utterance'}</span>
        </div>
        <blockquote class="quote ${ev.evidence_kind === 'absence' ? 'absence' : ''}">${esc(ev.quote)}</blockquote>
        ${ev.note ? `<div class="tiny muted">${esc(ev.note)}</div>` : ''}`
@@ -587,6 +587,7 @@ function renderWorkbench(data) {
           <span class="play-status" id="play-status">${data.evidence.length ? '等待播放' : '无 AI 片段'}</span>
         </div>
         ${ev && ev.evidence_kind === 'absence' ? '<div class="tiny muted" style="margin-top:6px">阴性判定使用阶段窗口作为缺席证据，播放窗口为节选，仍需人工确认边界。</div>' : ''}
+        ${ev && ev.evidence_kind === 'note' ? '<div class="tiny muted" style="margin-top:6px">笔记证据：播放窗口为记录时刻附近，原文以考生笔记为准。</div>' : ''}
       </section>
       <section class="card" id="ai-panel">
         ${aiPanelHtml(data, !state.reviewPlayed && data.evidence.length > 0)}
@@ -875,6 +876,10 @@ async function viewIngest() {
           <label class="field" style="margin-top:10px">音视频文件（未上传转写时用于 ASR）
             <input class="input" type="file" name="media_file" accept="audio/*,video/*">
           </label>
+          <label class="field" style="margin-top:10px">考生笔记 / 操作日志（可选）
+            <textarea class="input" name="candidate_notes" rows="3" placeholder="每行一条，可用 [02:14] 开头标注时间，例如：[02:14] 已嘱患者深呼吸后听诊"></textarea>
+          </label>
+          <div class="tiny muted">笔记作为考生侧证据参与评分；未标注时间的笔记按场次末尾排列，并在证据中提示需人工确认。</div>
           <div class="grid c2" style="margin-top:10px">
             <label class="field">ASR 语种
               <input class="input" name="asr_language" value="zh" maxlength="10">
@@ -943,6 +948,7 @@ function renderIngestResult(data) {
       <span>${esc(a.candidate_code)} · ${esc(a.candidate_name)}</span>
       <span>风险 ${esc(a.risk_level)}</span>
       <span>转写 ${t.utterances} 句</span>
+      ${t.notes ? `<span>笔记 ${t.notes} 条</span>` : ''}
       <span>${t.source === 'asr' ? `ASR · ${esc((t.asr || {}).model_version || '自动转写')} · ${num((t.asr || {}).latency_ms, 0)} ms` : '转写文件'}</span>
       <span>考生 ${t.candidate_utterances} / 患者 ${t.patient_utterances}</span>
       <span>${data.media ? '媒体已上传' : '无媒体'}</span>

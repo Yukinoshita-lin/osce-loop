@@ -44,7 +44,12 @@ def create_ingested_attempt(
     created_at = db.now_iso()
     plan = retention_plan(risk_level, created_at)
     duration_ms = max(int(u["end_ms"]) for u in transcript)
-    asr_confidence = round(mean(float(u.get("asr_confidence", 0.95)) for u in transcript), 3)
+    asr_values = [
+        float(u["asr_confidence"])
+        for u in transcript
+        if u.get("asr_confidence") is not None
+    ]
+    asr_confidence = round(mean(asr_values), 3) if asr_values else None
     integrity_gap = 1 if not media_url else 0
     integrity_note = None
     if integrity_gap:
@@ -115,6 +120,7 @@ def create_ingested_attempt(
             "candidate_code": candidate_code,
             "risk_level": risk_level,
             "utterances": len(transcript),
+            "notes": sum(1 for u in transcript if u.get("source") == "note"),
             "media_filename": media_filename,
             "media_sha256": media_sha256,
             "media_size_bytes": media_size_bytes,

@@ -153,7 +153,7 @@ from .domain.station_review import list_station_reviews, record_station_review
 from .domain.sus import submit_sus, sus_summary
 from .domain.trace import score_trace
 from .domain.tone import analyze_feedback_tone
-from .domain.transcript import parse_transcript
+from .domain.transcript import parse_notes, parse_transcript
 from .domain.transparency import (
     acknowledge_disclosure,
     attempt_ai_disclosure,
@@ -840,6 +840,7 @@ async def ingest_attempt(
     asr_language: str = Form("zh"),
     asr_first_speaker: str = Form("patient"),
     asr_speaker_map: str = Form(""),
+    candidate_notes: str = Form("", max_length=20000),
     transcript_file: UploadFile | None = File(None),
     media_file: UploadFile | None = File(None),
     conn=Depends(get_conn),
@@ -909,6 +910,18 @@ async def ingest_attempt(
             "speaker_labels": parsed.get("speaker_labels"),
         }
 
+    notes = parse_notes(candidate_notes, duration_ms=int(parsed.get("duration_ms") or 0))
+    if notes:
+        parsed["utterances"].extend(notes)
+        parsed["candidate_utterances"] = int(parsed.get("candidate_utterances") or 0) + len(notes)
+        parsed["duration_ms"] = max(
+            int(parsed.get("duration_ms") or 0),
+            max(int(note["end_ms"]) for note in notes),
+        )
+        parsed["warnings"].append(
+            f"已并入 {len(notes)} 条考生笔记/操作日志；未带时间戳的笔记按场次末尾排列。"
+        )
+    parsed["notes"] = len(notes)
     if not parsed.get("utterances"):
         _cleanup_media(media)
         raise HTTPException(400, "转写没有有效 utterance")
@@ -968,6 +981,7 @@ async def ingest_attempt(
             "warnings": parsed["warnings"],
             "source": parsed.get("source", "upload"),
             "asr": asr_meta,
+            "notes": parsed.get("notes", 0),
         },
         "media": media,
         "integrity_gap": not bool(media),

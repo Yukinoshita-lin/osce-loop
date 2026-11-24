@@ -11,7 +11,7 @@ from app.ai.mock import MockScoringProvider
 from app.config import MODEL_VERSION, PROMPT_VERSION
 from app.domain.bundle import freeze_bundle
 from app.domain.ingest import create_ingested_attempt
-from app.domain.transcript import parse_transcript
+from app.domain.transcript import parse_notes, parse_transcript
 from app.seed import build_bundle_payload
 
 SAMPLE_JSON = [
@@ -105,6 +105,87 @@ def test_parse_invalid_transcript():
         parse_transcript("bad.json", b"{not-json}")
     with pytest.raises(ValueError):
         parse_transcript("empty.srt", b"")
+
+
+def test_parse_notes_supports_timestamped_lines_and_plain_text():
+    notes = parse_notes(
+        "[00:08] 我先给您听诊一下，然后做心电图。\n已完成知情沟通。",
+        duration_ms=7000,
+    )
+    assert len(notes) == 2
+    first, second = notes
+    assert first["source"] == "note"
+    assert first["speaker"] == "candidate"
+    assert first["start_ms"] == 8000
+    assert first["phase"] == "assessment"
+    assert first["note_timestamp_supplied"] is True
+    assert first["asr_confidence"] is None
+    assert second["note_timestamp_supplied"] is False
+    assert second["start_ms"] >= first["end_ms"]
+
+
+def test_ingest_with_notes_produces_note_evidence(conn, bundle):
+    transcript = [
+        {
+            "utt_id": "u001",
+            "speaker": "patient",
+            "start_ms": 0,
+            "end_ms": 3000,
+            "text": "大夫，我胸口疼。",
+            "asr_confidence": 0.95,
+            "phase": "opening",
+        },
+        {
+            "utt_id": "u002",
+            "speaker": "candidate",
+            "start_ms": 4000,
+            "end_ms": 6000,
+            "text": "您好，我是急诊科张医生。",
+            "asr_confidence": 0.95,
+            "phase": "opening",
+        },
+    ] + parse_notes(
+        "[00:08] 我先给您听诊一下，然后做心电图和心电监护。",
+        duration_ms=7000,
+    )
+    gateway = CapabilityGateway(conn, MockScoringProvider(), MODEL_VERSION, PROMPT_VERSION)
+    attempt_id = create_ingested_attempt(
+        conn,
+        gateway,
+        bundle=bundle,
+        transcript=transcript,
+        candidate_code="C-NOTES-001",
+        candidate_name="笔记考生",
+        risk_level="L2",
+        release_stage="G0_offline",
+        media_id="media_notes",
+        media_url="/media/uploads/notes.wav",
+        media_filename="notes.wav",
+        actor="test",
+    )
+    attempt = conn.execute(
+        "SELECT * FROM attempts WHERE attempt_id = ?", (attempt_id,)
+    ).fetchone()
+    assert attempt["asr_confidence"] == 0.95
+    stored = json.loads(
+        conn.execute(
+            "SELECT payload FROM transcripts WHERE attempt_id = ?", (attempt_id,)
+        ).fetchone()["payload"]
+    )
+    assert any(utterance.get("source") == "note" for utterance in stored)
+    records = conn.execute(
+        "SELECT ai_evidence FROM score_records WHERE attempt_id = ? AND ai_evidence != '[]'",
+        (attempt_id,),
+    ).fetchall()
+    evidence = [
+        entry
+        for row in records
+        for entry in json.loads(row["ai_evidence"])
+        if entry.get("evidence_kind") == "note"
+    ]
+    assert evidence
+    assert evidence[0]["speaker"] == "candidate"
+    assert "笔记" in (evidence[0].get("note") or "")
 
 
 def test_ingest_creates_scored_attempt(conn, bundle):
