@@ -507,6 +507,65 @@ def test_emotion_threshold_withholds_information_under_pressure():
     assert state["emotion_load"] < 0.3
 
 
+def test_memory_needs_prompt_requires_second_ask():
+    payload = build_bundle_payload()
+    payload["sp_profile"]["persona"]["memory"] = "需提示才能回忆"
+    machine = DialogueStateMachine(payload, derive_assets(payload))
+    controller = SPController(machine)
+    state = machine.start()
+
+    first = controller.respond(state, "疼痛会放射到别处吗？")
+    assert first["intent"]["withheld"]
+    assert first["released_now"] == []
+    assert any(word in first["reply"] for word in ("记不太清", "想不起来", "具体点"))
+    assert not any("左边胳膊" in s["content"] for s in machine.slots_by_ids(first["state"]["released"]))
+
+    second = controller.respond(first["state"], "再想想，疼会不会窜到肩膀？")
+    assert second["released_now"]
+    assert any("左边胳膊" in s["content"] for s in machine.slots_by_ids(second["state"]["released"]))
+
+
+def test_partial_memory_hedges_released_content():
+    payload = build_bundle_payload()
+    payload["sp_profile"]["persona"]["memory"] = "部分模糊"
+    machine = DialogueStateMachine(payload, derive_assets(payload))
+    controller = SPController(machine)
+    result = controller.respond(machine.start(), "疼多久了？")
+    assert "好像是" in result["reply"]
+    assert "两个多小时" in result["reply"]
+    assert "记不太准" in result["reply"]
+
+
+def test_cognition_confusion_skips_release_on_third_turn():
+    payload = build_bundle_payload()
+    payload["sp_profile"]["persona"]["cognition"] = 0.7
+    machine = DialogueStateMachine(payload, derive_assets(payload))
+    controller = SPController(machine)
+    state = machine.start()
+    for text in ("疼多久了？", "还有其他不舒服吗？"):
+        result = controller.respond(state, text)
+        state = result["state"]
+        assert result["intent"]["confused"] is False
+    result = controller.respond(state, "有没有出汗恶心？")
+    assert result["intent"]["confused"] is True
+    assert result["released_now"] == []
+    assert any(word in result["reply"] for word in ("脑子", "记混", "再说一遍"))
+
+
+def test_language_barrier_asks_for_plain_words_then_releases():
+    payload = build_bundle_payload()
+    payload["sp_profile"]["persona"]["language"] = "医学词汇不理解"
+    machine = DialogueStateMachine(payload, derive_assets(payload))
+    controller = SPController(machine)
+    first = controller.respond(machine.start(), "疼痛会放射到肩膀吗？")
+    assert first["intent"]["clarification_needed"] is True
+    assert first["released_now"] == []
+    assert any(word in first["reply"] for word in ("简单", "听不太懂"))
+    second = controller.respond(first["state"], "疼会不会窜到肩膀？")
+    assert second["intent"]["clarification_needed"] is False
+    assert second["released_now"]
+
+
 def test_sp_verifier_blocks_leak():
     payload = build_bundle_payload()
     derived = derive_assets(payload)

@@ -22,6 +22,31 @@ DISTRESS_LINES = (
     "您别这么大声，我有点害怕，您慢慢说。",
     "我……我一下记不清了，您让我缓一缓。",
 )
+CONFUSED_LINES = (
+    "医生，您刚才问什么？我这一阵一阵的，脑子有点乱……",
+    "啊？您说的是……我记混了，早上还是昨天晚上来着？",
+    "您别急，我这脑子转不过来，您再说一遍行吗？",
+)
+MEMORY_PROMPT_LINES = (
+    "这个……我记不太清了，您提醒提醒我？",
+    "您这么一问，我一时想不起来，能不能说得具体点？",
+)
+CLARIFY_LINES = (
+    "医生，您说的那个词我不太明白，您能说得简单点吗？",
+    "啥意思？我听不太懂，您换个说法吧。",
+)
+MEDICAL_JARGON = (
+    "放射",
+    "既往史",
+    "过敏史",
+    "伴随症状",
+    "负荷试验",
+    "抗凝",
+    "生命体征",
+    "梗死",
+)
+PARTIAL_MEMORY = ("部分模糊", "部分记忆模糊")
+NEEDS_PROMPT_MEMORY = ("需提示才能回忆", "需要提示才能回忆")
 
 PHASE_TRIGGERS = {
     "assessment": ("听诊", "查体", "检查一下", "量血压", "触诊", "叩诊", "体格检查"),
@@ -87,6 +112,7 @@ class DialogueStateMachine:
             "released": released,
             "trust": 0,
             "emotion_load": 0.0,
+            "ask_counts": {},
             "intent_history": [],
             "transitioned": False,
             "degraded_count": 0,
@@ -116,10 +142,13 @@ class DialogueStateMachine:
         new_state = {
             **state,
             "released": list(state.get("released", [])),
+            "ask_counts": dict(state.get("ask_counts") or {}),
             "intent_history": list(state.get("intent_history", [])),
         }
         new_state["turn"] = int(state.get("turn", 0)) + 1
         intent = self.classify(user_text)
+        for slot_id in intent["matched_slots"]:
+            new_state["ask_counts"][slot_id] = int(new_state["ask_counts"].get(slot_id, 0)) + 1
         new_state["intent_history"].append(
             {"turn": new_state["turn"], "phase_target": intent["phase_target"], "empathy": intent["empathy"]}
         )
@@ -133,6 +162,18 @@ class DialogueStateMachine:
         except (TypeError, ValueError):
             threshold = 1.0
         threshold = min(1.0, max(0.0, threshold))
+        try:
+            cognition = float(persona.get("cognition", 0) or 0)
+        except (TypeError, ValueError):
+            cognition = 0.0
+        cognition = min(1.0, max(0.0, cognition))
+        memory = str(persona.get("memory") or "清晰")
+        language = str(persona.get("language") or "普通话清晰")
+        needs_prompt = memory in NEEDS_PROMPT_MEMORY
+        confused = cognition >= 0.5 and new_state["turn"] % 3 == 0
+        clarification_needed = language == "医学词汇不理解" and any(
+            term in user_text for term in MEDICAL_JARGON
+        )
         load = float(state.get("emotion_load") or 0.0)
         exclamations = user_text.count("！") + user_text.count("!")
         pressured = bool(_contains_any(user_text, PRESSURE_MARKERS)) or exclamations >= 2
@@ -147,22 +188,27 @@ class DialogueStateMachine:
             load = threshold * 0.5
         new_state["emotion_load"] = round(load, 3)
         intent["distressed"] = distressed
+        intent["confused"] = confused
+        intent["clarification_needed"] = clarification_needed
         intent["emotion_threshold"] = threshold
         intent["emotion_load"] = new_state["emotion_load"]
 
         # 开场后第一轮对话自动进入信息采集；其余阶段必须由考生行为触发
-        if intent["phase_target"]:
-            target_rank = PHASE_RANK[intent["phase_target"]]
-            if target_rank > PHASE_RANK.get(new_state["phase"], 0):
-                new_state["phase"] = intent["phase_target"]
-                new_state["transitioned"] = True
-        elif new_state["phase"] == "opening" and new_state["turn"] >= 1:
-            new_state["phase"] = "information_gathering"
+        if not (distressed or confused or clarification_needed):
+            if intent["phase_target"]:
+                target_rank = PHASE_RANK[intent["phase_target"]]
+                if target_rank > PHASE_RANK.get(new_state["phase"], 0):
+                    new_state["phase"] = intent["phase_target"]
+                    new_state["transitioned"] = True
+            elif new_state["phase"] == "opening" and new_state["turn"] >= 1:
+                new_state["phase"] = "information_gathering"
 
         released_now: list[str] = []
+        withheld: list[str] = []
         current_rank = PHASE_RANK.get(new_state["phase"], 0)
+        blocked = distressed or confused or clarification_needed
         for slot in self.slots:
-            if distressed:
+            if blocked:
                 break
             slot_id = slot["slot_id"]
             if slot_id in new_state["released"]:
@@ -176,12 +222,16 @@ class DialogueStateMachine:
                 new_state["released"].append(slot_id)
                 released_now.append(slot_id)
             elif disclosure == "on_direct_ask" and slot_id in intent["matched_slots"]:
+                if needs_prompt and int(new_state["ask_counts"].get(slot_id, 0)) < 2:
+                    withheld.append(slot_id)
+                    continue
                 new_state["released"].append(slot_id)
                 released_now.append(slot_id)
             elif disclosure == "on_trust" and int(new_state.get("trust", 0)) >= 2:
                 new_state["released"].append(slot_id)
                 released_now.append(slot_id)
 
+        intent["withheld"] = withheld
         return new_state, released_now, intent, bool(intent["phase_target"])
 
     def slots_by_ids(self, ids: list[str]) -> list[dict[str, Any]]:
@@ -247,9 +297,17 @@ class SPController:
         if not contents:
             return "医生，您问的这个……我记不太清了。"
         lead = "唉，医生，" if persona.get("persona", {}).get("tone") == "焦虑但克制" else "医生，"
+        memory = ""
+        if isinstance(persona.get("persona"), dict):
+            memory = str(persona["persona"].get("memory") or "")
+        hedged = memory in PARTIAL_MEMORY or ("部分" in memory and "模糊" in memory)
         if len(contents) == 1:
-            return f"{lead}{contents[0]}。"
-        return f"{lead}{contents[0]}。还有，{contents[1]}。"
+            core = f"{contents[0]}。"
+        else:
+            core = f"{contents[0]}。还有，{contents[1]}。"
+        if hedged:
+            core = "好像是……" + core.rstrip("。") + "，具体的我记不太准。"
+        return lead + core
 
     def verify(self, draft: str, persona: dict[str, Any], unreleased: list[dict[str, Any]]) -> dict[str, Any]:
         boundary_violations = scan_leaks(draft, unreleased)
@@ -280,8 +338,19 @@ class SPController:
         allowed = self.machine.slots_by_ids(new_state["released"])
         unreleased = self.machine.unreleased(new_state)
         distressed = bool(intent.get("distressed"))
+        confused = bool(intent.get("confused"))
+        clarification = bool(intent.get("clarification_needed"))
+        withheld = intent.get("withheld") or []
+        memory_prompt = bool(withheld) and not released_now
+        scripted = distressed or confused or clarification or memory_prompt
         if distressed:
             draft = DISTRESS_LINES[new_state["turn"] % len(DISTRESS_LINES)]
+        elif confused:
+            draft = CONFUSED_LINES[new_state["turn"] % len(CONFUSED_LINES)]
+        elif clarification:
+            draft = CLARIFY_LINES[new_state["turn"] % len(CLARIFY_LINES)]
+        elif memory_prompt:
+            draft = MEMORY_PROMPT_LINES[new_state["turn"] % len(MEMORY_PROMPT_LINES)]
         else:
             draft = self.generate(
                 allowed,
@@ -294,7 +363,7 @@ class SPController:
         verification = self.verify(draft, self.machine.persona, unreleased)
         attempts = 0
         degraded = False
-        while not distressed and not verification["passed"] and attempts < 2:
+        while not scripted and not verification["passed"] and attempts < 2:
             attempts += 1
             if not verification["repairable"]:
                 break
@@ -307,7 +376,7 @@ class SPController:
             )
             verification = self.verify(draft, self.machine.persona, unreleased)
 
-        if not verification["passed"]:
+        if not verification["passed"] and not scripted:
             draft = self.machine.safe_template(new_state["phase"])
             degraded = True
             new_state["degraded_count"] = int(new_state.get("degraded_count", 0)) + 1
