@@ -177,3 +177,37 @@ def test_feedback_ready_latency_within_target_does_not_alert(tmp_path, monkeypat
     assert not any("练习反馈生成" in title for title in titles)
     assert not any("考试反馈生成" in title for title in titles)
     conn.close()
+
+
+def test_fairness_edit_and_accessibility_gap_alerts(tmp_path, monkeypatch):
+    conn = _conn(tmp_path)
+    monkeypatch.setattr(
+        "app.domain.gates.fairness_report",
+        lambda conn, bundle_id=None: {
+            "overall_gap_sd": 0.1,
+            "edit_rate": {"gap_pp": 6.2},
+            "feedback_accessibility_gap": {"overall_gap": 0.4},
+        },
+    )
+    gates = evaluate_gates(conn, _report(0.2, 40), "G0_offline")
+    titles = [alert["title"] for alert in gates["alerts"]]
+    assert any("评分员编辑率组间差 6.2pp 超过 5pp" in title for title in titles)
+    assert any("反馈可及性组间差 0.40 分超过 0.3 分" in title for title in titles)
+    conn.close()
+
+
+def test_fairness_gaps_within_thresholds_do_not_alert(tmp_path, monkeypatch):
+    conn = _conn(tmp_path)
+    monkeypatch.setattr(
+        "app.domain.gates.fairness_report",
+        lambda conn, bundle_id=None: {
+            "overall_gap_sd": 0.1,
+            "edit_rate": {"gap_pp": 3.5},
+            "feedback_accessibility_gap": {"overall_gap": 0.2},
+        },
+    )
+    gates = evaluate_gates(conn, _report(0.2, 40), "G0_offline")
+    titles = [alert["title"] for alert in gates["alerts"]]
+    assert not any("编辑率组间差" in title for title in titles)
+    assert not any("反馈可及性组间差" in title for title in titles)
+    conn.close()

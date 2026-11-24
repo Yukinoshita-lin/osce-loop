@@ -247,6 +247,8 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
         "sp_cert_issue": sp_cert_issue,
         "near_improvement": ab.get("comparison", {}).get("near_improvement"),
         "subgroup_gap": fairness.get("overall_gap_sd"),
+        "edit_gap_pp": (fairness.get("edit_rate") or {}).get("gap_pp"),
+        "accessibility_gap": (fairness.get("feedback_accessibility_gap") or {}).get("overall_gap"),
         "teacher_hours": ab.get("comparison", {}).get("teacher_hours_reduction"),
         "academic_committee": academic_committee,
         "switch_drill": switch_drill,
@@ -337,6 +339,24 @@ def evaluate_gates(conn, report: dict[str, Any], current_stage: str) -> dict[str
                 "level": "danger",
                 "title": "亚组分数差超过 0.20 SD",
                 "detail": f"当前最大亚组差 {subgroup_gap} SD；连续超标应自动降级并复核该组边缘案例。",
+            }
+        )
+    edit_gap = values.get("edit_gap_pp")
+    if edit_gap is not None and edit_gap > 5.0:
+        alerts.append(
+            {
+                "level": "warn",
+                "title": f"评分员编辑率组间差 {edit_gap:.1f}pp 超过 5pp",
+                "detail": "提示存在口音/语速识别偏差或评分员群体差异；按预绑定路径执行 ASR 词表与声学适配、评分员校准会，并复核该组全部边缘案例。",
+            }
+        )
+    accessibility_gap = values.get("accessibility_gap")
+    if accessibility_gap is not None and accessibility_gap > 0.3:
+        alerts.append(
+            {
+                "level": "warn",
+                "title": f"反馈可及性组间差 {accessibility_gap:.2f} 分超过 0.3 分",
+                "detail": "提示某组学生更难读懂反馈；按预绑定路径进行反馈语言分级、增加术语注释并重测。",
             }
         )
     if report.get("integrity_gap_rate", 0) > 0.02:
