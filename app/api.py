@@ -130,6 +130,7 @@ from .domain.spqa import certification_for_bundle, certify_bundle, ensure_certif
 from .domain.stats import domain_scores, quality_report
 from .domain.station_quality import station_quality_report
 from .domain.sus import submit_sus, sus_summary
+from .domain.trace import score_trace
 from .domain.transcript import parse_transcript
 from .domain.transparency import (
     acknowledge_disclosure,
@@ -927,6 +928,30 @@ def attempt_export(attempt_id: str, request: Request, conn=Depends(get_conn)):
         )
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
+
+
+@app.get("/api/attempts/{attempt_id}/trace")
+def attempt_trace(
+    attempt_id: str,
+    request: Request,
+    item_id: str | None = Query(default=None),
+    conn=Depends(get_conn),
+):
+    """成绩—证据—操作互查：一条成绩项的全链路追溯。"""
+    attempt = _attempt_row(conn, attempt_id)
+    _ensure_attempt_access(request.state.user, attempt)
+    result = score_trace(conn, attempt_id, item_id=item_id)
+    if result is None:
+        raise HTTPException(404, "场次不存在")
+    db.append_audit(
+        conn,
+        actor=request.state.user["display_name"],
+        action="attempt.trace_viewed",
+        object_type="Attempt",
+        object_id=attempt_id,
+        after={"item_id": item_id, "records": len(result["records"])},
+    )
+    return result
 
 
 @app.get("/api/attempts/{attempt_id}")

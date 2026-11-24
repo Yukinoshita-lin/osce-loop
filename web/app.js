@@ -562,7 +562,9 @@ function renderWorkbench(data) {
       ${attempt.risk_level !== 'L3' && attempt.status !== 'published' ? `<button class="btn small danger" data-action="risk-escalate" data-attempt="${dataAttr(attempt.attempt_id)}">升级为 L3</button>` : ''}
       ${attempt.risk_escalated_at ? `<span class="pill red">风险已上调 · ${esc(fmtTime(attempt.risk_escalated_at))}</span>` : ''}
       <button class="btn small" data-action="export-attempt" data-attempt="${dataAttr(attempt.attempt_id)}">导出申诉包</button>
+      <button class="btn small" data-action="trace-record" data-attempt="${dataAttr(attempt.attempt_id)}" data-item="${dataAttr(data.item_id)}">成绩追溯</button>
     </div>
+    <div id="trace-result" class="tiny" style="margin:8px 0"></div>
     ${dualReviewHtml(data.dual_review)}
 
     <div class="wb-grid">
@@ -2665,6 +2667,44 @@ document.addEventListener('click', async (e) => {
   if (action === 'open-feedback') {
     state.feedbackId = el.dataset.attempt;
     location.hash = '#/feedback';
+    return;
+  }
+  if (action === 'trace-record') {
+    const attemptId = el.dataset.attempt;
+    const itemId = el.dataset.item;
+    const box = $('#trace-result');
+    if (box) box.innerHTML = '<span class="muted">追溯中…</span>';
+    try {
+      const r = await api(`/api/attempts/${encodeURIComponent(attemptId)}/trace?item_id=${encodeURIComponent(itemId)}`);
+      const entry = (r.records || [])[0] || {};
+      const record = entry.record || {};
+      const integrity = r.integrity || { issues: [] };
+      const evidenceRows = (entry.evidence || []).map((ev) => `
+        <div style="margin-top:3px">
+          <span class="pill ${ev.verified === true ? 'teal' : ev.verified === false ? 'red' : 'muted'}">${ev.verified === true ? '引文可定位' : ev.verified === false ? '引文不匹配' : '缺席证据'}</span>
+          <span class="mono tiny">${esc(ev.speaker || '')} ${mmss(ev.start_ms)}–${mmss(ev.end_ms)}</span>
+          <div>${esc(ev.quote || '')}</div>
+          ${ev.transcript_text && ev.transcript_text !== ev.quote ? `<div class="tiny muted">转写原文：${esc(ev.transcript_text)}</div>` : ''}
+        </div>`).join('') || '<div class="muted">无证据片段</div>';
+      const actionRows = (entry.review_actions || []).map((a) => `
+        <div class="tiny">${fmtTime(a.created_at)} · ${esc(a.reviewer)} · ${esc(a.action)} ${a.from_score ?? '—'} → ${a.to_score ?? '—'}${a.reason_code ? ` · ${esc(a.reason_code)}` : ''}</div>`).join('') || '<div class="tiny muted">尚无复核动作</div>';
+      const auditRows = (r.audit_events || []).slice(-6).map((ev) => `
+        <div class="tiny muted">${fmtTime(ev.created_at)} · ${esc(ev.actor)} · ${esc(ev.action)}</div>`).join('');
+      if (box) {
+        box.innerHTML = `
+          <div><span class="pill ${integrity.issues.length ? 'amber' : 'teal'}">${integrity.issues.length ? `发现 ${integrity.issues.length} 个待核查点` : '追溯链一致'}</span>
+            版本戳 ${integrity.version_stamped ? '完整' : '缺失'} · 引文 ${integrity.quotes_matched}/${integrity.quotes_checked} 可定位 · 转写 ${esc((r.transcript || {}).state || '')}</div>
+          ${(integrity.issues || []).map((issue) => `<div class="tiny" style="color:var(--amber)">${esc(issue)}</div>`).join('')}
+          <div class="tiny muted" style="margin-top:4px">成绩：AI ${record.ai_score ?? '—'} → 最终 ${record.final_score ?? '—'} · 复核人 ${esc(record.reviewer || '—')} · ${fmtTime(record.reviewed_at)}</div>
+          ${evidenceRows}
+          <div style="margin-top:4px">${actionRows}</div>
+          <div style="margin-top:4px">${auditRows}</div>`;
+      }
+      toast('已加载成绩追溯');
+    } catch (err) {
+      if (box) box.innerHTML = `<span class="pill red">追溯失败</span> ${esc(err.message)}`;
+      toast(err.message, true);
+    }
     return;
   }
   if (action === 'export-attempt') {
