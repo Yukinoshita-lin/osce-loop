@@ -337,6 +337,21 @@ CREATE TABLE IF NOT EXISTS governance_approvals (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS blueprints (
+    blueprint_id TEXT PRIMARY KEY,
+    year INTEGER NOT NULL,
+    version INTEGER NOT NULL,
+    domains TEXT NOT NULL,
+    note TEXT,
+    status TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    approved_by TEXT,
+    approved_at TEXT,
+    approval_note TEXT,
+    UNIQUE (year, version)
+);
+
 CREATE TABLE IF NOT EXISTS data_sheets (
     data_sheet_id TEXT PRIMARY KEY,
     version TEXT NOT NULL,

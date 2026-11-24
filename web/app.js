@@ -2695,7 +2695,8 @@ function usersSectionHtml(users) {
 
 async function viewQuality() {
   const canManageUsers = Boolean(state.user && state.user.role === 'admin');
-  const [data, audit, retention, backupsData, stationData, usersData, maintenance] = await Promise.all([
+  const canManageBlueprint = Boolean(state.user && state.user.role === 'exam_manager');
+  const [data, audit, retention, backupsData, stationData, usersData, maintenance, blueprintData] = await Promise.all([
     api('/api/quality'),
     api('/api/audit?limit=30'),
     api('/api/retention'),
@@ -2703,6 +2704,7 @@ async function viewQuality() {
     api('/api/quality/stations'),
     canManageUsers ? api('/api/users') : Promise.resolve({ users: [] }),
     api('/api/rubric/maintenance'),
+    api('/api/blueprint'),
   ]);
   const backups = backupsData.backups || [];
   const stationQuality = stationData.stations || [];
@@ -2804,6 +2806,28 @@ async function viewQuality() {
   const coverageNote = uncovered.length
     ? `<div class="alert" style="margin-top:8px"><b>未覆盖能力域</b><p>${uncovered.map((d) => `${esc(d.label)}（目标 ${pct(d.target, 0)}）`).join('、')} 尚无站包覆盖，建议下一年度命题补充。</p></div>`
     : '<div class="tiny muted" style="margin-top:6px">六域蓝图均已覆盖。</div>';
+  const blueprint = blueprintData || {};
+  const bpCurrent = blueprint.current || null;
+  const bpTargets = bpCurrent ? bpCurrent.domains : (blueprint.defaults || []);
+  const bpStatus = bpCurrent
+    ? `<span class="pill ${blueprint.stale ? 'amber' : 'teal'}">${blueprint.stale ? '沿用上一年度' : '已批准生效'}</span> ${bpCurrent.year} 年度 v${bpCurrent.version} · ${esc(bpCurrent.approved_by || '—')} · ${fmtTime(bpCurrent.approved_at)}`
+    : '<span class="pill amber">未批准</span> 暂按默认六域目标计算';
+  const bpShareInputs = bpTargets.map((d) => `
+    <label class="tiny">${esc(d.label)}<input class="input" type="number" name="share_${dataAttr(d.domain)}" min="0" max="100" step="1" value="${Math.round(Number(d.target_share || 0) * 100)}" style="max-width:78px"></label>`).join('');
+  const bpDrafts = (blueprint.history || []).filter((b) => b.status === 'draft');
+  const bpDraftForms = bpDrafts.map((b) => `
+    <form class="btn-row bp-approve-form" data-blueprint="${dataAttr(b.blueprint_id)}" style="flex-wrap:wrap;gap:6px;margin-top:6px">
+      <span class="tiny">草案 ${b.year} 年度 v${b.version} · ${esc(b.created_by)} · ${fmtTime(b.created_at)}</span>
+      <input class="input" name="note" placeholder="批准理由（不少于 4 字）" minlength="4" maxlength="300" required style="max-width:260px">
+      <button class="btn small primary" type="submit">批准生效</button>
+    </form>`).join('');
+  const bpHistoryRows = (blueprint.history || []).slice(0, 8).map((b) => {
+    const statusLabel = { approved: ['已生效', 'teal'], draft: ['草案', 'amber'], superseded: ['已被替代', 'muted'] }[b.status] || [b.status, 'muted'];
+    return `<div class="version-row">
+      <span class="k">${b.year} 年度 v${b.version} <span class="pill ${statusLabel[1]}">${statusLabel[0]}</span></span>
+      <span class="v">${esc(b.created_by)} 起草${b.approved_by ? ` · ${esc(b.approved_by)} 批准` : ''}${b.approval_note ? ` · ${esc(b.approval_note)}` : ''} · ${fmtTime(b.approved_at || b.created_at)}</span>
+    </div>`;
+  }).join('');
   const itemRows = ((itemQuality && itemQuality.items) || []).map((item) => `
     <tr>
       <td><div class="mono tiny muted">${esc(item.item_id)}</div><div style="font-weight:600">${esc(item.title)}</div></td>
@@ -2974,6 +2998,22 @@ async function viewQuality() {
       </div>
       ${coverageNote}
       <div class="tiny muted" style="margin-top:6px">${esc(coverage.note || '')}</div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">年度蓝图与审批<span class="sub">考什么、不考什么 · 人工批准后覆盖度才按新目标计算</span></div>
+      <div class="attempt-strip" style="margin-bottom:8px">${bpStatus}</div>
+      ${canManageBlueprint ? `<form id="blueprint-form" class="btn-row" style="flex-wrap:wrap;gap:8px;align-items:flex-end">
+        <label class="tiny">年度<input class="input" type="number" name="year" min="2020" max="2100" value="${blueprint.current_year || new Date().getFullYear()}" style="max-width:96px"></label>
+        ${bpShareInputs}
+        <input class="input" name="note" placeholder="草案说明（可选）" maxlength="300" style="max-width:220px">
+        <button class="btn small" type="submit">保存蓝图草案</button>
+      </form>` : '<div class="tiny muted">年度蓝图由考务起草并批准生效；当前为只读查看。</div>'}
+      <div class="tiny muted" style="margin-top:6px">目标占比合计需接近 100%；保存后仍是草案，须由考务填写理由批准后才生效。</div>
+      ${canManageBlueprint ? bpDraftForms : ''}
+      <div class="sep"></div>
+      <div class="tiny muted" style="margin-bottom:4px">版本历史</div>
+      ${bpHistoryRows || '<div class="tiny muted">尚无年度蓝图，当前使用默认六域目标。</div>'}
     </div>
 
     <div class="card" style="margin-bottom:16px">
@@ -3202,6 +3242,48 @@ async function viewQuality() {
       }
     });
   }
+  const blueprintForm = $('#blueprint-form');
+  if (blueprintForm) {
+    blueprintForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const form = new FormData(blueprintForm);
+      const domains = bpTargets.map((d) => ({
+        domain: d.domain,
+        label: d.label,
+        target_share: Number(form.get(`share_${d.domain}`) || 0) / 100,
+      }));
+      try {
+        await api('/api/blueprint/draft', {
+          method: 'POST',
+          body: {
+            year: Number(form.get('year')),
+            domains,
+            note: String(form.get('note') || '').trim() || null,
+          },
+        });
+        toast('已保存蓝图草案，待填写理由批准生效');
+        await viewQuality();
+      } catch (err) {
+        toast(err.message, true);
+      }
+    });
+  }
+  $$('.bp-approve-form').forEach((form) => {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const data = new FormData(form);
+      try {
+        await api(`/api/blueprint/${encodeURIComponent(form.dataset.blueprint)}/approve`, {
+          method: 'POST',
+          body: { note: String(data.get('note') || '').trim() },
+        });
+        toast('年度蓝图已批准生效，覆盖度将按新目标计算');
+        await viewQuality();
+      } catch (err) {
+        toast(err.message, true);
+      }
+    });
+  });
   const stationReviewForm = $('#station-review-form');
   if (stationReviewForm) {
     stationReviewForm.addEventListener('submit', async (e) => {

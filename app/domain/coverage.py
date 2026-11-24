@@ -1,22 +1,20 @@
-"""蓝图覆盖度：按能力域汇总最新站包，识别空白域与过度重复。"""
+"""蓝图覆盖度：按年度生效蓝图汇总最新站包，识别空白域与过度重复。"""
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
+from .blueprint import DEFAULT_BLUEPRINT, DOMAIN_LABELS, latest_approved
 from .bundle import get_bundle, list_station_bundles
-
-DEFAULT_BLUEPRINT = [
-    {"domain": "communication", "label": "沟通与人文", "target_share": 0.20},
-    {"domain": "history_taking", "label": "病史采集", "target_share": 0.25},
-    {"domain": "assessment", "label": "评估与判断", "target_share": 0.20},
-    {"domain": "clinical_reasoning", "label": "临床推理", "target_share": 0.15},
-    {"domain": "procedures", "label": "操作技能", "target_share": 0.10},
-    {"domain": "patient_safety", "label": "患者安全", "target_share": 0.10},
-]
-DOMAIN_LABELS = {entry["domain"]: entry["label"] for entry in DEFAULT_BLUEPRINT}
 
 
 def blueprint_coverage(conn) -> dict[str, Any]:
+    current_year = datetime.now().year
+    active = latest_approved(conn, current_year) or latest_approved(conn)
+    targets = active["domains"] if active else DEFAULT_BLUEPRINT
+    target_by_domain = {entry["domain"]: entry for entry in targets}
+    labels = {**DOMAIN_LABELS, **{entry["domain"]: entry["label"] for entry in targets}}
+
     bundles = []
     for summary in list_station_bundles(conn):
         bundle = get_bundle(conn, summary["bundle_id"])
@@ -30,7 +28,7 @@ def blueprint_coverage(conn) -> dict[str, Any]:
             domain = str(item.get("domain") or "other")
             weight = float(item.get("weight", 0))
             bucket = buckets.setdefault(
-                domain, {"domain": domain, "label": DOMAIN_LABELS.get(domain, domain), "items": 0, "weight": 0.0, "stations": set()}
+                domain, {"domain": domain, "label": labels.get(domain, domain), "items": 0, "weight": 0.0, "stations": set()}
             )
             bucket["items"] += 1
             bucket["weight"] += weight
@@ -40,8 +38,8 @@ def blueprint_coverage(conn) -> dict[str, Any]:
     rows = []
     for bucket in buckets.values():
         share = round(bucket["weight"] / total_weight, 3) if total_weight else 0.0
-        blueprint = next((entry for entry in DEFAULT_BLUEPRINT if entry["domain"] == bucket["domain"]), None)
-        target = blueprint["target_share"] if blueprint else None
+        blueprint_entry = target_by_domain.get(bucket["domain"])
+        target = blueprint_entry["target_share"] if blueprint_entry else None
         if len(bucket["stations"]) <= 1:
             status = "single_station"
         elif target is not None and share > target + 0.10:
@@ -69,7 +67,7 @@ def blueprint_coverage(conn) -> dict[str, Any]:
             "label": entry["label"],
             "target": entry["target_share"],
         }
-        for entry in DEFAULT_BLUEPRINT
+        for entry in targets
         if entry["domain"] not in covered
     ]
     overrepresented = [
@@ -77,7 +75,14 @@ def blueprint_coverage(conn) -> dict[str, Any]:
         for row in rows
         if row["target"] is not None and row["share"] > row["target"] + 0.10
     ]
-    extra = [row["domain"] for row in rows if row["domain"] not in DOMAIN_LABELS]
+    extra = [row["domain"] for row in rows if row["domain"] not in target_by_domain]
+    if active:
+        source_note = (
+            f"目标占比来自 {active['year']} 年度蓝图 v{active['version']}"
+            f"（{active['approved_by']} 批准）。"
+        )
+    else:
+        source_note = "尚未批准年度蓝图，暂按默认六域目标计算；请由考务起草并人工批准。"
     return {
         "domains": rows,
         "uncovered": uncovered,
@@ -85,5 +90,13 @@ def blueprint_coverage(conn) -> dict[str, Any]:
         "extra_domains": extra,
         "stations": len(bundles),
         "total_weight": round(total_weight, 2),
-        "note": "覆盖度按每个考站最新冻结版本统计；目标占比来自默认六域蓝图，可按院校培养目标调整。",
+        "blueprint": {
+            "source": "approved" if active else "default",
+            "year": active["year"] if active else None,
+            "version": active["version"] if active else None,
+            "approved_by": active["approved_by"] if active else None,
+            "approved_at": active["approved_at"] if active else None,
+            "stale": bool(active and active["year"] != current_year),
+        },
+        "note": "覆盖度按每个考站最新冻结版本统计；" + source_note,
     }

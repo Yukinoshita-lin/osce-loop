@@ -78,6 +78,7 @@ from .domain.bundle import (
     list_overrides,
     list_station_bundles,
 )
+from .domain.blueprint import approve_blueprint, blueprint_state, draft_blueprint
 from .domain.bundle_integrity import verify_bundle_integrity
 from .domain.calibration import calibration_report, import_gold_scores, parse_gold_file
 from .domain.consent import consent_status, record_consent
@@ -1742,6 +1743,55 @@ def quality_station_reviews(conn=Depends(get_conn), station_id: str | None = Non
 @app.get("/api/rubric/maintenance")
 def rubric_maintenance_report(conn=Depends(get_conn), bundle_id: str | None = None):
     return rubric_maintenance(conn, bundle_id)
+
+
+class BlueprintDraftBody(BaseModel):
+    year: int = Field(ge=2020, le=2100)
+    domains: list[dict[str, Any]] = Field(min_length=1, max_length=12)
+    note: str | None = Field(default=None, max_length=300)
+
+
+class BlueprintApproveBody(BaseModel):
+    note: str = Field(min_length=4, max_length=300)
+
+
+@app.get("/api/blueprint")
+def blueprint_overview(conn=Depends(get_conn)):
+    return blueprint_state(conn)
+
+
+@app.post("/api/blueprint/draft")
+def blueprint_draft(body: BlueprintDraftBody, request: Request, conn=Depends(get_conn)):
+    try:
+        blueprint = draft_blueprint(
+            conn,
+            year=body.year,
+            domains=body.domains,
+            note=body.note,
+            actor=request.state.user["display_name"],
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "blueprint": blueprint, "state": blueprint_state(conn)}
+
+
+@app.post("/api/blueprint/{blueprint_id}/approve")
+def blueprint_approve(
+    blueprint_id: str,
+    body: BlueprintApproveBody,
+    request: Request,
+    conn=Depends(get_conn),
+):
+    try:
+        blueprint = approve_blueprint(
+            conn,
+            blueprint_id,
+            note=body.note,
+            actor=request.state.user["display_name"],
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "blueprint": blueprint, "state": blueprint_state(conn)}
 
 
 class StationReviewBody(BaseModel):
