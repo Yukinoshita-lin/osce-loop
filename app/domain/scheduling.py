@@ -10,27 +10,27 @@ from typing import Any
 from .. import db
 
 STATIONS = [
-    ("ST01", "急性胸痛", 10, 0.90, "抢救室", "心电图机", "焦虑型", "急诊主治"),
-    ("ST02", "呼吸困难", 10, 0.80, "抢救室", "监护仪", "焦虑型", "呼吸科主治"),
-    ("ST03", "意识障碍", 12, 0.85, "抢救室", "监护仪", "认知障碍型", "神经科主治"),
-    ("ST04", "急性腹痛", 10, 0.65, "普通诊室", "超声", "克制型", "普外科主治"),
-    ("ST05", "发热待查", 8, 0.55, "普通诊室", "无", "配合型", "感染科主治"),
-    ("ST06", "用药咨询", 8, 0.50, "诊室", "处方系统", "依赖型", "临床药师"),
-    ("ST07", "知情同意", 10, 0.60, "谈话间", "知情同意书", "焦虑型", "主治医师"),
-    ("ST08", "坏消息告知", 12, 0.90, "谈话间", "无", "情绪化型", "高年资医师"),
-    ("ST09", "交接班", 10, 0.70, "示教室", "病历系统", "配合型", "主治医师"),
-    ("ST10", "出院指导", 8, 0.50, "诊室", "出院小结", "依赖型", "住院医师"),
+    ("ST01", "急性胸痛", 10, 0.90, "抢救室", "心电图机", "焦虑型", "急诊主治", 1),
+    ("ST02", "呼吸困难", 10, 0.80, "抢救室", "监护仪", "焦虑型", "呼吸科主治", 1),
+    ("ST03", "意识障碍", 12, 0.85, "抢救室", "监护仪", "认知障碍型", "神经科主治", 1),
+    ("ST04", "急性腹痛", 10, 0.65, "普通诊室", "超声", "克制型", "普外科主治", 1),
+    ("ST05", "发热待查", 8, 0.55, "普通诊室", "无", "配合型", "感染科主治", 1),
+    ("ST06", "用药咨询", 8, 0.50, "诊室", "处方系统", "依赖型", "临床药师", 1),
+    ("ST07", "知情同意", 10, 0.60, "谈话间", "知情同意书", "焦虑型", "主治医师", 0),
+    ("ST08", "坏消息告知", 12, 0.90, "谈话间", "无", "情绪化型", "高年资医师", 0),
+    ("ST09", "交接班", 10, 0.70, "示教室", "病历系统", "配合型", "主治医师", 0),
+    ("ST10", "出院指导", 8, 0.50, "诊室", "出院小结", "依赖型", "住院医师", 1),
 ]
 
 CANDIDATES = [
-    ("C2026-001", "陈雨桐", 0, 0, ""),
-    ("C2026-002", "王一帆", 5, 0, "阅读速度较慢，每站延长 5 分钟"),
-    ("C2026-003", "李昊然", 0, 1, "需要安静候考区"),
-    ("C2026-004", "赵思远", 0, 0, ""),
-    ("C2026-005", "周可欣", 5, 0, "语言表达需更多时间"),
-    ("C2026-006", "孙明哲", 0, 0, ""),
-    ("C2026-007", "吴嘉怡", 0, 1, "需要安静候考区"),
-    ("C2026-008", "郑子涵", 0, 0, ""),
+    ("C2026-001", "陈雨桐", 0, 0, "", 0, 0),
+    ("C2026-002", "王一帆", 5, 0, "阅读速度较慢，每站延长 5 分钟", 0, 0),
+    ("C2026-003", "李昊然", 0, 1, "需要安静候考区", 0, 0),
+    ("C2026-004", "赵思远", 0, 0, "需无障碍通行，并使用单独进出通道", 1, 1),
+    ("C2026-005", "周可欣", 5, 0, "语言表达需更多时间", 0, 0),
+    ("C2026-006", "孙明哲", 0, 0, "", 0, 0),
+    ("C2026-007", "吴嘉怡", 0, 1, "需要安静候考区", 0, 0),
+    ("C2026-008", "郑子涵", 0, 0, "", 0, 0),
 ]
 
 RESOURCE_COUNTS = {"rooms": 10, "sps": 10, "examiners": 10}
@@ -40,13 +40,14 @@ FATIGUE_LIMIT_MIN = 240
 def ensure_schedule_inputs(conn) -> None:
     if conn.execute("SELECT COUNT(*) AS n FROM schedule_stations").fetchone()["n"] == 0:
         conn.executemany(
-            "INSERT INTO schedule_stations(station_id, name, duration_min, difficulty, room_type, equipment, sp_type, examiner_type) "
-            "VALUES(?,?,?,?,?,?,?,?)",
+            "INSERT INTO schedule_stations(station_id, name, duration_min, difficulty, room_type, "
+            "equipment, sp_type, examiner_type, accessible) VALUES(?,?,?,?,?,?,?,?,?)",
             STATIONS,
         )
     if conn.execute("SELECT COUNT(*) AS n FROM schedule_candidates").fetchone()["n"] == 0:
         conn.executemany(
-            "INSERT INTO schedule_candidates(candidate_id, name, extra_time_min, quiet_room, note) VALUES(?,?,?,?,?)",
+            "INSERT INTO schedule_candidates(candidate_id, name, extra_time_min, quiet_room, note, "
+            "accessible_required, separate_channel) VALUES(?,?,?,?,?,?,?)",
             CANDIDATES,
         )
     conn.commit()
@@ -113,6 +114,10 @@ def _solve_assignments(
                     for station in stations
                     if station["station_id"] not in visited[candidate_id]
                     and station["station_id"] not in used_in_round[round_index]
+                    and (
+                        not candidate.get("accessible_required")
+                        or bool(station.get("accessible"))
+                    )
                 ]
                 options.sort(
                     key=lambda s: (
@@ -254,6 +259,8 @@ def generate_schedule(
                 "name": candidate["name"],
                 "extra_time_min": candidate["extra_time_min"],
                 "quiet_room": bool(candidate["quiet_room"]),
+                "accessible_required": bool(candidate.get("accessible_required")),
+                "separate_channel": bool(candidate.get("separate_channel")),
                 "note": candidate["note"],
                 "total_difficulty": round(total_difficulty, 2),
                 "late_difficulty": round(late_difficulty, 2),
@@ -331,6 +338,14 @@ def generate_schedule(
             )
         if candidate["quiet_room"]:
             warnings.append(f"{candidate['candidate_id']} 需要安静候考区，请在候考安排中单独标注。")
+        if candidate["accessible_required"]:
+            warnings.append(
+                f"{candidate['candidate_id']} 需无障碍考站，已限制在具备无障碍条件的考站轮转。"
+            )
+        if candidate["separate_channel"]:
+            warnings.append(
+                f"{candidate['candidate_id']} 需使用单独通道进出，请在候考与转场安排中单独引导。"
+            )
     if difficulty_spread > 1.0:
         warnings.append(f"考生加权难度差 {difficulty_spread}，超过 1.0，建议重新排考。")
     if late_spread > 1.0:

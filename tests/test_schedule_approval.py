@@ -28,12 +28,42 @@ def schedule(conn):
 def test_special_needs_are_listed_as_pending(conn, schedule):
     status = special_needs_status(conn, schedule)
     ids = {item["candidate_id"] for item in status["items"]}
-    assert ids == {"C2026-002", "C2026-003", "C2026-005", "C2026-007"}
+    assert ids == {"C2026-002", "C2026-003", "C2026-004", "C2026-005", "C2026-007"}
     assert status["pending"] == sorted(ids)
     assert status["approved"] == 0
     assert status["rejected"] == 0
     assert status["complete"] is False
     assert all(item["status"] == "pending" for item in status["items"])
+    accessible = next(item for item in status["items"] if item["candidate_id"] == "C2026-004")
+    assert accessible["accessible_required"] is True
+    assert accessible["separate_channel"] is True
+
+
+def test_accessible_candidate_only_uses_accessible_stations(conn):
+    schedule = generate_schedule(conn, exam_date="2026-12-10", rounds=6, seed=2026)
+    accessible = {
+        row["station_id"]
+        for row in conn.execute(
+            "SELECT station_id FROM schedule_stations WHERE accessible = 1"
+        ).fetchall()
+    }
+    assert accessible
+    candidate = next(
+        entry for entry in schedule["candidates"] if entry["candidate_id"] == "C2026-004"
+    )
+    assert candidate["accessible_required"] is True
+    assert candidate["separate_channel"] is True
+    assert {station["station_id"] for station in candidate["stations"]} <= accessible
+    warnings = schedule["quality"]["warnings"]
+    assert any("无障碍" in warning for warning in warnings)
+    assert any("单独通道" in warning for warning in warnings)
+
+
+def test_accessible_requirement_fails_when_no_accessible_station(conn):
+    conn.execute("UPDATE schedule_stations SET accessible = 0")
+    conn.commit()
+    with pytest.raises(ValueError, match="未找到可行"):
+        generate_schedule(conn, exam_date="2026-12-11", rounds=6, seed=7)
 
 
 def test_approve_and_reject_special_needs(conn, schedule):
@@ -93,7 +123,7 @@ def test_repair_creates_new_schedule_with_pending_approvals(conn, schedule):
     assert old_status["approved"] == 1
     assert new_status["schedule_id"] == repaired["schedule_id"]
     assert new_status["approved"] == 0
-    assert len(new_status["pending"]) == 4
+    assert len(new_status["pending"]) == 5
     audit = conn.execute(
         "SELECT COUNT(*) AS n FROM audit_events WHERE action = 'exam.special_needs_approval'"
     ).fetchone()["n"]

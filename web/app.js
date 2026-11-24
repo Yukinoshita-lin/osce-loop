@@ -1235,6 +1235,8 @@ function specialNeedsHtml(schedule, data) {
     const needs = [
       item.extra_time_min ? `<span class="pill amber">延长 ${item.extra_time_min}′</span>` : '',
       item.quiet_room ? '<span class="pill blue">安静候考</span>' : '',
+      item.accessible_required ? '<span class="pill teal">无障碍考站</span>' : '',
+      item.separate_channel ? '<span class="pill purple">单独通道</span>' : '',
     ].join(' ');
     const status = item.status === 'approved'
       ? '<span class="pill teal">已批准</span>'
@@ -1255,7 +1257,7 @@ function specialNeedsHtml(schedule, data) {
   return `<div class="card">
     <div class="card-title">特殊需求审批<span class="sub">${data.approved} 已批准 · ${data.rejected} 已驳回 · ${data.pending.length} 待审批</span></div>
     ${rows}
-    <div class="tiny muted" style="margin-top:6px">延长时长与安静候考区会影响公平性，必须由考务逐人确认；审批记录写入审计链。</div>
+    <div class="tiny muted" style="margin-top:6px">延长时长、安静候考区、无障碍考站与单独通道会影响公平性，必须由考务逐人确认；审批记录写入审计链。</div>
   </div>`;
 }
 
@@ -1297,7 +1299,7 @@ function scheduleHtml(schedule) {
             ${candidates.map((c) => `
               <tr>
                 <td><div class="mono tiny muted">${esc(c.candidate_id)}</div><div>${esc(c.name)}</div></td>
-                <td>${c.extra_time_min ? `<span class="pill amber">延长 ${c.extra_time_min}′</span>` : ''} ${c.quiet_room ? '<span class="pill blue">安静候考</span>' : ''} ${!c.extra_time_min && !c.quiet_room ? '<span class="muted tiny">—</span>' : ''}</td>
+                <td>${c.extra_time_min ? `<span class="pill amber">延长 ${c.extra_time_min}′</span>` : ''} ${c.quiet_room ? '<span class="pill blue">安静候考</span>' : ''} ${c.accessible_required ? '<span class="pill teal">无障碍</span>' : ''} ${c.separate_channel ? '<span class="pill purple">单独通道</span>' : ''} ${!c.extra_time_min && !c.quiet_room && !c.accessible_required && !c.separate_channel ? '<span class="muted tiny">—</span>' : ''}</td>
                 ${rounds.map((r) => {
                   const slot = (c.stations || []).find((s) => s.round === r.round);
                   const detail = slotLookup[`${c.candidate_id}:${r.round}`];

@@ -1,4 +1,4 @@
-"""排考特殊需求审批：延长时长与安静候考区由考务逐人确认并留痕。"""
+"""排考特殊需求审批：延长时长、安静候考区、无障碍与单独通道逐人确认并留痕。"""
 from __future__ import annotations
 
 import json
@@ -27,7 +27,12 @@ def _load_schedule(conn, schedule_id: str | None) -> dict[str, Any]:
 
 
 def _needs(candidate: dict[str, Any]) -> bool:
-    return bool(candidate.get("extra_time_min") or candidate.get("quiet_room"))
+    return bool(
+        candidate.get("extra_time_min")
+        or candidate.get("quiet_room")
+        or candidate.get("accessible_required")
+        or candidate.get("separate_channel")
+    )
 
 
 def _latest_approvals(conn, schedule_id: str) -> dict[str, dict[str, Any]]:
@@ -57,6 +62,8 @@ def special_needs_status(conn, schedule: dict[str, Any] | None = None) -> dict[s
                 "name": candidate.get("name"),
                 "extra_time_min": int(candidate.get("extra_time_min") or 0),
                 "quiet_room": bool(candidate.get("quiet_room")),
+                "accessible_required": bool(candidate.get("accessible_required")),
+                "separate_channel": bool(candidate.get("separate_channel")),
                 "note": candidate.get("note") or "",
                 "status": approval["decision"] if approval else "pending",
                 "status_label": DECISION_LABELS.get(approval["decision"], "待审批")
@@ -136,6 +143,8 @@ def record_special_needs_approval(
             "note": note,
             "extra_time_min": int(candidate.get("extra_time_min") or 0),
             "quiet_room": bool(candidate.get("quiet_room")),
+            "accessible_required": bool(candidate.get("accessible_required")),
+            "separate_channel": bool(candidate.get("separate_channel")),
         },
     )
     return special_needs_status(conn, schedule)

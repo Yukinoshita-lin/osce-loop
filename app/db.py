@@ -388,7 +388,8 @@ CREATE TABLE IF NOT EXISTS schedule_stations (
     room_type TEXT,
     equipment TEXT,
     sp_type TEXT,
-    examiner_type TEXT
+    examiner_type TEXT,
+    accessible INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS schedule_candidates (
@@ -396,7 +397,9 @@ CREATE TABLE IF NOT EXISTS schedule_candidates (
     name TEXT NOT NULL,
     extra_time_min INTEGER NOT NULL DEFAULT 0,
     quiet_room INTEGER NOT NULL DEFAULT 0,
-    note TEXT
+    note TEXT,
+    accessible_required INTEGER NOT NULL DEFAULT 0,
+    separate_channel INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS exam_schedules (
@@ -573,6 +576,50 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE model_cards ADD COLUMN is_public INTEGER NOT NULL DEFAULT 0")
     if "published_at" not in card_columns:
         conn.execute("ALTER TABLE model_cards ADD COLUMN published_at TEXT")
+
+    candidate_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(schedule_candidates)").fetchall()
+    }
+    if "accessible_required" not in candidate_columns:
+        conn.execute(
+            "ALTER TABLE schedule_candidates ADD COLUMN accessible_required INTEGER NOT NULL DEFAULT 0"
+        )
+    if "separate_channel" not in candidate_columns:
+        conn.execute(
+            "ALTER TABLE schedule_candidates ADD COLUMN separate_channel INTEGER NOT NULL DEFAULT 0"
+        )
+    special_needs_migration = "migration.schedule_special_needs_v1"
+    if not conn.execute(
+        "SELECT 1 FROM system_state WHERE key = ?", (special_needs_migration,)
+    ).fetchone():
+        conn.execute(
+            "UPDATE schedule_candidates SET accessible_required = 1, separate_channel = 1 "
+            "WHERE candidate_id = 'C2026-004'"
+        )
+        conn.execute(
+            "UPDATE schedule_candidates SET note = '需无障碍通行，并使用单独进出通道' "
+            "WHERE candidate_id = 'C2026-004' AND (note IS NULL OR note = '')"
+        )
+        conn.execute(
+            "INSERT INTO system_state(key, value) VALUES(?, ?)",
+            (special_needs_migration, now_iso()),
+        )
+    conn.execute(
+        "UPDATE schedule_candidates SET accessible_required = 1 "
+        "WHERE accessible_required = 0 AND note LIKE '%无障碍%'"
+    )
+    conn.execute(
+        "UPDATE schedule_candidates SET separate_channel = 1 "
+        "WHERE separate_channel = 0 AND note LIKE '%单独%通道%'"
+    )
+    station_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(schedule_stations)").fetchall()
+    }
+    if "accessible" not in station_columns:
+        conn.execute("ALTER TABLE schedule_stations ADD COLUMN accessible INTEGER NOT NULL DEFAULT 0")
+        conn.execute(
+            "UPDATE schedule_stations SET accessible = 1 WHERE room_type IN ('抢救室', '普通诊室', '诊室')"
+        )
 
     user_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
     if "candidate_code" not in user_columns:
