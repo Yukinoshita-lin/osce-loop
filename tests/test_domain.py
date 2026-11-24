@@ -767,6 +767,14 @@ def test_practice_report_has_three_part_feedback(bundle):
     assert report["disclaimer"]
     assert report["ai_versions"]["model_version"] == "mock-score-1.0"
     assert report["ai_versions"]["rubric_version"] == bundle["bundle_hash"]
+    plan = report["retry_plan"]
+    assert plan["count"] >= len(report["deductions"])
+    assert plan["items"]
+    assert all(item["focus"] for item in plan["items"])
+    assert plan["critical_count"] >= sum(1 for item in plan["items"] if item["critical"])
+    ordered = [(not item["critical"], item["score"]) for item in plan["items"]]
+    assert ordered == sorted(ordered)
+    assert plan["opening_tip"]
 
 
 def test_practice_report_scores_through_gateway(conn, bundle):

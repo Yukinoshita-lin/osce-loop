@@ -125,6 +125,30 @@ def build_practice_report(
     ]
     uncovered = [r for r in records if r["score"] == 0 and not r["covered"]]
     strengths = [r for r in records if r["score"] == 2]
+    retry_items = [r for r in records if r["score"] is not None and r["score"] < 2]
+    retry_items.sort(
+        key=lambda r: (not r["critical"], r["score"], -float(r.get("weight") or 0))
+    )
+    retry_plan = {
+        "count": len(retry_items),
+        "critical_count": sum(1 for r in retry_items if r["critical"]),
+        "items": [
+            {
+                "item_id": r["item_id"],
+                "item_title": r["item_title"],
+                "domain": r["domain"],
+                "score": r["score"],
+                "score_label": r["score_label"],
+                "critical": r["critical"],
+                "focus": r.get("alternative"),
+                "evidence_at_ms": (r.get("evidence") or {}).get("start_ms"),
+                "priority": "关键项" if r["critical"] else "提分项",
+            }
+            for r in retry_items[:6]
+        ],
+        "opening_tip": retry_items[0].get("alternative") if retry_items else None,
+        "note": "重练清单按关键项优先、低分优先排序；先用替代话术完整演练，再开始新会话。",
+    }
     ensure_feedback_units(records, {item["item_id"]: item for item in items})
     ensure_feedback_evidence(deductions, media_id="practice", duration_ms=duration_ms)
     total = _weighted_total(items, scores)
@@ -146,6 +170,7 @@ def build_practice_report(
         "domains": domain_scores(payload, scores),
         "deductions": deductions,
         "strengths": strengths,
+        "retry_plan": retry_plan,
         "uncovered": uncovered,
         "uncovered_count": len(uncovered),
         "feedback_quality": summarize_feedback(deductions),

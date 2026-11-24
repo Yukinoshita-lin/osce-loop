@@ -2347,6 +2347,12 @@ function practiceReportHtml(report) {
   }).join('');
   const uncovered = (report.uncovered || []).map((u) => `<span class="pill amber">${esc(u.item_title)}</span>`).join('');
   const strengths = (report.strengths || []).map((u) => `<span class="pill teal">${esc(u.item_title)}</span>`).join('');
+  const retry = report.retry_plan || { items: [] };
+  const retryRows = (retry.items || []).map((r, index) => `
+    <div class="version-row">
+      <span class="k">${index + 1}. ${r.critical ? '<span class="pill red">关键</span> ' : ''}${esc(r.item_title)}</span>
+      <span class="v">${esc(r.focus || '按评分项档位重新演练')}${r.evidence_at_ms === null || r.evidence_at_ms === undefined ? '' : ` · 回看 ${mmss(r.evidence_at_ms)}`}</span>
+    </div>`).join('');
   const passed = report.total !== null && report.total >= report.pass_line;
   return `
     <section class="card" style="margin-top:16px">
@@ -2375,6 +2381,11 @@ function practiceReportHtml(report) {
           ${uncovered ? `<div class="sep"></div><div class="card-title" style="margin-bottom:5px">未覆盖</div><div class="strength-list">${uncovered}</div>` : ''}
         </div>
         <div>
+          <div class="card-title">重练清单<span class="sub">关键项优先 · 共 ${retry.count || 0} 项</span></div>
+          ${retryRows || '<div class="tiny muted">本次没有需要重练的扣分项。</div>'}
+          ${retry.opening_tip ? `<div class="tiny" style="margin-top:6px"><span class="pill blue">先练这句</span> ${esc(retry.opening_tip)}</div>` : ''}
+          ${retry.note ? `<div class="tiny muted" style="margin-top:4px">${esc(retry.note)}</div>` : ''}
+          <div class="sep"></div>
           <div class="card-title">逐项反馈<span class="sub">证据 → 行为 → 替代话术</span></div>
           ${deductions || '<div class="empty">本次没有明显扣分项。</div>'}
         </div>
