@@ -2628,11 +2628,19 @@ document.addEventListener('click', async (e) => {
           <span class="pill ${c.status === 'pass' ? 'teal' : c.status === 'warn' ? 'amber' : 'red'}">${esc(c.label)}</span>
           <span>${c.status === 'pass' ? '通过' : esc((c.issues || [])[0] || '待人工核验')}</span>
         </div>`).join('');
+      const similar = result.similarity || [];
+      const similarHtml = similar.length ? `
+        <div style="margin-top:6px">
+          <span class="pill amber">相似站包</span>
+          <span>${similar.map((s) => `${esc(s.station_id)} · ${esc(s.title)} v${esc(s.version)}（相似度 ${pct(s.similarity, 0)}）`).join('；')}</span>
+          <div class="tiny muted">文本相似度仅作“换汤不换药”初筛；请人工确认考点是否真正不同。</div>
+        </div>` : '';
       box.className = 'tiny';
       box.innerHTML = `
         <div>${v.can_freeze ? '<span class="pill teal">可冻结</span>' : '<span class="pill red">存在阻断项</span>'}
           ${counts.items || 0} 个评分项 · 派生 ${counts.slots || 0} 个信息槽 / ${counts.probes || 0} 个探针</div>
         ${checksHtml}
+        ${similarHtml}
         ${changesHtml}
         ${v.blocking.length ? `<div style="margin-top:4px;color:var(--red)">${esc(v.blocking.slice(0, 3).join('；'))}</div>` : ''}`;
       toast(v.can_freeze ? '校验通过，可签字冻结' : `校验未通过：${v.blocking.length} 个阻断项`, !v.can_freeze);

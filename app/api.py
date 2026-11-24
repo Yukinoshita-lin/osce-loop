@@ -61,6 +61,7 @@ from .domain.bundle import (
     apply_authority_reset,
     diff_payloads,
     effective_authority,
+    find_similar_bundles,
     freeze_bundle,
     get_bundle,
     list_bundles,
@@ -1290,7 +1291,12 @@ def validate_bundle_proposal(body: BundlePayloadBody, conn=Depends(get_conn)):
         if not base:
             raise HTTPException(400, "base_bundle_id 指向的站包不存在")
         diff = diff_payloads(base["payload"], body.payload)
-    return {"validation": validation, "derived_counts": counts, "diff": diff}
+    return {
+        "validation": validation,
+        "derived_counts": counts,
+        "diff": diff,
+        "similarity": find_similar_bundles(conn, body.payload),
+    }
 
 
 @app.post("/api/bundles/freeze")

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+from difflib import SequenceMatcher
 from typing import Any
 
 from .. import db
@@ -28,6 +30,49 @@ def _version_key(value: str) -> tuple[int, int]:
         return int(parts[0]), int(parts[1]) if len(parts) > 1 else 0
     except (TypeError, ValueError, IndexError) as exc:
         raise ValueError("版本号格式应为 主版本.次版本，例如 1.1") from exc
+
+
+def _similarity_text(payload: dict[str, Any]) -> str:
+    parts: list[str] = [str(payload.get("title") or "")]
+    parts.extend(str(text) for text in payload.get("candidate_instructions") or [])
+    for item in payload.get("rubric") or []:
+        parts.append(str(item.get("title") or ""))
+        anchor = item.get("anchor") or {}
+        parts.extend(str(anchor.get(field) or "") for field in ("positive", "partial", "negative"))
+    return re.sub(r"[\s，。；：、！？…—·,.!?;:（）()\[\]【】]", "", "".join(parts))
+
+
+def find_similar_bundles(
+    conn,
+    payload: dict[str, Any],
+    *,
+    threshold: float = 0.85,
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    """与既往其他考站的冻结站包做文本相似度初筛，提示“换汤不换药”风险。"""
+    text = _similarity_text(payload)
+    if not text:
+        return []
+    station_id = str(payload.get("station_id") or "")
+    matches = []
+    for row in conn.execute("SELECT station_id, title, version, payload FROM bundles").fetchall():
+        if row["station_id"] == station_id:
+            continue
+        other = _similarity_text(json.loads(row["payload"] or "{}"))
+        if not other:
+            continue
+        ratio = SequenceMatcher(None, text, other).ratio()
+        if ratio >= threshold:
+            matches.append(
+                {
+                    "station_id": row["station_id"],
+                    "title": row["title"],
+                    "version": row["version"],
+                    "similarity": round(ratio, 3),
+                }
+            )
+    matches.sort(key=lambda entry: entry["similarity"], reverse=True)
+    return matches[:limit]
 
 
 def freeze_bundle(
