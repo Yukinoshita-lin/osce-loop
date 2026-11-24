@@ -6,6 +6,7 @@ import pytest
 from app import db
 from app.domain.scheduling import (
     ensure_schedule_inputs,
+    equipment_conflicts,
     generate_schedule,
     latest_schedule,
     repair_schedule,
@@ -64,6 +65,9 @@ def test_repair_candidate_round_changes_only_affected(conn):
     assert repaired["schedule_id"] != schedule["schedule_id"]
     assert repaired["repaired_from"] == schedule["schedule_id"]
     _assert_hard_constraints(repaired)
+    expected_equipment = equipment_conflicts(repaired["rounds_detail"])
+    assert repaired["quality"]["equipment_conflicts"] == expected_equipment
+    assert sum("设备冲突" in w for w in repaired["quality"]["warnings"]) == len(expected_equipment)
     assert latest_schedule(conn)["schedule_id"] == repaired["schedule_id"]
     audit = conn.execute(
         "SELECT COUNT(*) AS n FROM audit_events WHERE action = 'exam.schedule_repair'"

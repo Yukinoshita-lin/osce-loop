@@ -6,6 +6,7 @@ import pytest
 from app import db
 from app.domain.scheduling import (
     ensure_schedule_inputs,
+    equipment_conflicts,
     generate_schedule,
     latest_schedule,
     schedule_inputs,
@@ -73,6 +74,36 @@ def test_schedule_is_persisted_and_deterministic(conn):
     assert latest["schedule_id"] == second["schedule_id"]
     rows = conn.execute("SELECT COUNT(*) AS n FROM exam_schedules").fetchone()["n"]
     assert rows == 2
+
+
+def test_equipment_conflicts_are_detected_per_round():
+    round_rows = [
+        {
+            "round": 1,
+            "slots": [
+                {"station_id": "ST02", "equipment": "监护仪"},
+                {"station_id": "ST03", "equipment": "监护仪"},
+                {"station_id": "ST01", "equipment": "心电图机"},
+                {"station_id": "ST09", "equipment": "无"},
+            ],
+        },
+        {
+            "round": 2,
+            "slots": [{"station_id": "ST01", "equipment": "心电图机"}],
+        },
+    ]
+    assert equipment_conflicts(round_rows) == [
+        {"round": 1, "equipment": "监护仪", "demand": 2, "available": 1}
+    ]
+
+
+def test_generated_schedule_reports_equipment_conflicts(conn):
+    schedule = generate_schedule(conn, exam_date="2026-12-10", rounds=6, seed=2026)
+    expected = equipment_conflicts(schedule["rounds_detail"])
+    assert expected
+    assert schedule["quality"]["equipment_conflicts"] == expected
+    assert schedule["resources"]["equipment"]["available"]["监护仪"] == 1
+    assert sum("设备冲突" in w for w in schedule["quality"]["warnings"]) == len(expected)
 
 
 def test_invalid_rounds_rejected(conn):

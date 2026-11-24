@@ -34,7 +34,45 @@ CANDIDATES = [
 ]
 
 RESOURCE_COUNTS = {"rooms": 10, "sps": 10, "examiners": 10}
+EQUIPMENT_COUNTS = {
+    "心电图机": 1,
+    "监护仪": 1,
+    "超声": 1,
+    "处方系统": 1,
+    "知情同意书": 2,
+    "病历系统": 1,
+    "出院小结": 1,
+}
 FATIGUE_LIMIT_MIN = 240
+
+
+def equipment_conflicts(
+    round_rows: list[dict[str, Any]],
+    station_map: dict[str, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """按轮次检查共享设备需求是否超过可用台账。"""
+    conflicts: list[dict[str, Any]] = []
+    for round_row in round_rows:
+        counts: dict[str, int] = {}
+        for slot in round_row.get("slots") or []:
+            equipment = slot.get("equipment")
+            if not equipment and station_map:
+                equipment = (station_map.get(slot.get("station_id")) or {}).get("equipment")
+            if not equipment or equipment == "无":
+                continue
+            counts[equipment] = counts.get(equipment, 0) + 1
+        for equipment, demand in sorted(counts.items()):
+            available = EQUIPMENT_COUNTS.get(equipment)
+            if available is not None and demand > available:
+                conflicts.append(
+                    {
+                        "round": round_row["round"],
+                        "equipment": equipment,
+                        "demand": demand,
+                        "available": available,
+                    }
+                )
+    return conflicts
 
 
 def ensure_schedule_inputs(conn) -> None:
@@ -69,7 +107,7 @@ def schedule_inputs(conn) -> dict[str, Any]:
     return {
         "stations": stations,
         "candidates": candidates,
-        "resources": RESOURCE_COUNTS,
+        "resources": {**RESOURCE_COUNTS, "equipment": EQUIPMENT_COUNTS},
         "fatigue_limit_min": FATIGUE_LIMIT_MIN,
     }
 
@@ -251,6 +289,7 @@ def generate_schedule(
                     "difficulty": station["difficulty"],
                     "duration_min": station["duration_min"] + candidate["extra_time_min"],
                     "extra_time_min": candidate["extra_time_min"],
+                    "equipment": station.get("equipment"),
                 }
             )
         candidate_rows.append(
@@ -303,6 +342,7 @@ def generate_schedule(
                     "sp": sp,
                     "examiner": examiner,
                     "extra_time_min": extra,
+                    "equipment": station.get("equipment"),
                 }
             )
             examiner_minutes[examiner] = examiner_minutes.get(examiner, 0) + duration
@@ -330,7 +370,14 @@ def generate_schedule(
             index = next(i for i, s in enumerate(stations) if s["station_id"] == slot["station_id"])
             usage_counts[index] += 1
 
+    equipment_issues = equipment_conflicts(round_rows)
+
     warnings: list[str] = []
+    for conflict in equipment_issues:
+        warnings.append(
+            f"第 {conflict['round']} 轮 {conflict['equipment']} 同时需求 {conflict['demand']} 台，"
+            f"可用 {conflict['available']} 台，存在设备冲突。"
+        )
     for candidate in candidate_rows:
         if candidate["extra_time_min"]:
             warnings.append(
@@ -377,6 +424,7 @@ def generate_schedule(
             "station_usage_min": min(usage_counts) if usage_counts else 0,
             "station_usage_max": max(usage_counts) if usage_counts else 0,
             "total_minutes": cursor,
+            "equipment_conflicts": equipment_issues,
             "warnings": warnings,
             "status": "review" if warnings else "ok",
         },
@@ -384,6 +432,7 @@ def generate_schedule(
             "rooms": {"count": RESOURCE_COUNTS["rooms"], "used": len(room_minutes), "max_minutes": max(room_minutes.values()) if room_minutes else 0},
             "sps": {"count": RESOURCE_COUNTS["sps"], "used": len(sp_minutes), "max_minutes": max(sp_minutes.values()) if sp_minutes else 0},
             "examiners": {"count": RESOURCE_COUNTS["examiners"], "used": len(examiner_minutes), "max_minutes": max(examiner_minutes.values()) if examiner_minutes else 0},
+            "equipment": {"available": EQUIPMENT_COUNTS},
         },
         "policy": {
             "fairness_weight": round(fairness_weight, 3),
@@ -520,6 +569,7 @@ def _apply_station(
             "station_name": station["name"],
             "difficulty": station["difficulty"],
             "duration_min": duration,
+            "equipment": station.get("equipment"),
         }
     )
     if slot is not None:
@@ -533,6 +583,7 @@ def _apply_station(
                 "room": room,
                 "sp": sp,
                 "examiner": examiner,
+                "equipment": station.get("equipment"),
             }
         )
 
@@ -596,8 +647,16 @@ def _recompute_schedule(schedule: dict[str, Any]) -> None:
             or w.startswith("后两轮难度差")
             or w.startswith("考站使用次数差")
             or w.startswith("考官 ")
+            or "设备冲突" in w
         )
     ]
+    equipment_issues = equipment_conflicts(round_rows)
+    for conflict in equipment_issues:
+        warnings.append(
+            f"第 {conflict['round']} 轮 {conflict['equipment']} 同时需求 {conflict['demand']} 台，"
+            f"可用 {conflict['available']} 台，存在设备冲突。"
+        )
+    quality["equipment_conflicts"] = equipment_issues
     if difficulty_spread > 1.0:
         warnings.append(f"考生加权难度差 {difficulty_spread}，超过 1.0，建议重新排考。")
     if late_spread > 1.0:
@@ -628,6 +687,7 @@ def _recompute_schedule(schedule: dict[str, Any]) -> None:
             "used": len(examiner_minutes),
             "max_minutes": max(examiner_minutes.values()) if examiner_minutes else 0,
         },
+        "equipment": {"available": EQUIPMENT_COUNTS},
     }
 
 

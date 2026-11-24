@@ -1266,6 +1266,7 @@ function scheduleHtml(schedule) {
   const candidates = schedule.candidates || [];
   const quality = schedule.quality || {};
   const resources = schedule.resources || {};
+  const equipment = (resources.equipment && resources.equipment.available) || {};
   const policy = schedule.policy || {};
   const warningHtml = (quality.warnings || []).map((w) => `<div class="alert ${quality.status === 'review' ? '' : 'danger'}" style="margin-bottom:6px"><b>预警</b><p>${esc(w)}</p></div>`).join('');
   const repair = schedule.repair_report;
@@ -1317,6 +1318,7 @@ function scheduleHtml(schedule) {
         <div class="version-row"><span class="k">房间</span><span class="v">${resources.rooms.used}/${resources.rooms.count} 使用 · 峰值 ${num(resources.rooms.max_minutes, 0)} 分钟</span></div>
         <div class="version-row"><span class="k">SP</span><span class="v">${resources.sps.used}/${resources.sps.count} 使用 · 峰值 ${num(resources.sps.max_minutes, 0)} 分钟</span></div>
         <div class="version-row"><span class="k">考官</span><span class="v">${resources.examiners.used}/${resources.examiners.count} 使用 · 峰值 ${num(resources.examiners.max_minutes, 0)} 分钟</span></div>
+        <div class="version-row"><span class="k">共享设备</span><span class="v">${Object.entries(equipment).map(([name, count]) => `${esc(name)} ${count} 台`).join(' · ') || '未登记台账'}</span></div>
         <div class="sep"></div>
         <div class="card-title" style="margin-bottom:6px">考站使用次数</div>
         <div class="strength-list">${Object.entries(usage).map(([name, count]) => `<span class="pill">${esc(name)} · ${count}</span>`).join('')}</div>
@@ -1328,8 +1330,9 @@ function scheduleHtml(schedule) {
           <li>硬约束：同一考生不重复考站、同一轮同一考站仅一名考生。</li>
           <li>软约束：按已确认的公平/效率权重平衡加权难度与考站使用。</li>
           <li>顺序效应：检查后两轮难度差，避免高难站集中在末尾。</li>
-          <li>特殊需求：延长与安静候考区由考务人工确认最终安排。</li>
+          <li>特殊需求：延长、安静候考区、无障碍考站与单独通道由考务逐人确认最终安排。</li>
           <li>疲劳：同一考官连续评分超过 ${quality.fatigue_limit_min || 240} 分钟会触发预警。</li>
+          <li>设备：按共享设备台账逐轮校验，同一轮需求超过可用数量会触发冲突预警。</li>
         </ul>
         <div class="sep"></div>
         <div class="tiny muted">当前算法为确定性回溯 + 难度均衡启发式；真实部署可替换为 CP-SAT 或整数规划求解器。</div>
