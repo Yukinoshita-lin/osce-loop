@@ -101,6 +101,7 @@ from .domain.execution import (
 from .domain.ingest import create_ingested_attempt
 from .domain.integrity import backfill_transcript_hashes, transcript_integrity, verify_evidence
 from .domain.item_quality import item_quality_report
+from .domain.latency import feedback_ack_latency
 from .domain.maintenance import run_maintenance
 from .domain.media import backfill_media_hashes
 from .domain.practice import build_practice_report
@@ -1529,6 +1530,7 @@ def quality(conn=Depends(get_conn)):
         "item_quality": item_quality,
         "psychometrics": station_psychometrics(conn),
         "coverage": blueprint_coverage(conn),
+        "feedback_latency": feedback_ack_latency(conn),
         "ai_calls": {
             "count": len(calls),
             "p95_latency_ms": p95,
