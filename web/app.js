@@ -430,8 +430,9 @@ async function viewReview() {
         <h2>复核队列</h2>
         <p>按风险路由排序。打开记录先播放证据片段，AI 建议在播放后才显示——避免先看分数再找理由。</p>
       </div>
-      <div class="stat-line"><span>待复核 <b>${queue.total}</b></span><span>原因 <b>${queue.by_reason.length}</b> 类</span></div>
+      <div class="stat-line"><span>待复核 <b>${queue.total}</b></span><span>超时 <b>${queue.overdue_count || 0}</b></span><span>原因 <b>${queue.by_reason.length}</b> 类</span></div>
     </div>
+    ${queue.overdue_count ? `<div class="alert danger"><b>${queue.overdue_count} 条待复核已超过 SLA</b><p>最久等待 ${num(queue.oldest_wait_hours, 1)} 小时，已自动置顶。目标：L3 ≤ 24h · L2 ≤ 48h · L1 ≤ 72h。</p></div>` : ''}
     <div class="review-layout">
       <section class="queue-panel">
         <div class="queue-head">
@@ -487,7 +488,7 @@ function renderQueueList() {
         <span class="q-title">${item.critical ? '<span class="pill badge-critical">关键</span> ' : ''}${esc(item.item_title)}</span>
         <span class="mono tiny muted">${esc(item.item_id)}</span>
       </div>
-      <div class="q-sub"><span>${esc(item.candidate)}</span><span>${esc(item.risk_level)}</span><span>权重 ${item.weight}</span></div>
+      <div class="q-sub"><span>${esc(item.candidate)}</span><span>${esc(item.risk_level)}</span><span>权重 ${item.weight}</span>${item.overdue ? `<span class="pill red">超时 ${num(item.age_hours, 0)}h</span>` : ''}</div>
       <div class="q-reason">${reasonPill(item.routing.reason, item.routing.reason_label)}</div>
     </button>`).join('');
   $$('.queue-item', list).forEach((btn) => {

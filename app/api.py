@@ -138,6 +138,7 @@ from .domain.retention import purge_expired, refresh_retention, retention_overvi
 from .domain.readability import analyze_feedback_readability
 from .domain.request_log import append_request_log, recent_requests, request_log_summary
 from .domain.review import apply_review
+from .domain.review_sla import SLA_HOURS, review_sla
 from .domain.rewrite import PRINCIPLE as REWRITE_PRINCIPLE, suggest_anchor_rewrites
 from .domain.risk import RISK_ORDER, escalate_risk
 from .domain.rubric import AUTHORITY_LABELS, PHASE_LABELS, cap_authority, derive_assets, validate_bundle
@@ -1257,6 +1258,7 @@ def review_queue(conn=Depends(get_conn), limit: int = Query(120, ge=1, le=500)):
         bundle = get_bundle(conn, rec["bundle_id"])
         item = _item_map(bundle).get(rec["item_id"], {})
         routing = json.loads(rec["routing"] or "{}")
+        sla = review_sla(rec["created_at"], rec["risk_level"])
         items.append(
             {
                 "record_id": rec["record_id"],
@@ -1276,13 +1278,32 @@ def review_queue(conn=Depends(get_conn), limit: int = Query(120, ge=1, le=500)):
                 "status": rec["status"],
                 "authority": effective_authority(conn, bundle, item, rec["risk_level"], _stage(conn)),
                 "media_url": rec["media_url"],
+                "created_at": rec["created_at"],
+                "age_hours": sla["age_hours"],
+                "sla_hours": sla["sla_hours"],
+                "remaining_hours": sla["remaining_hours"],
+                "overdue": sla["overdue"],
             }
         )
-    items.sort(key=lambda x: (x["priority"], not x["critical"], x["attempt_id"], x["item_id"]))
+    items.sort(
+        key=lambda x: (
+            not x["overdue"],
+            x["priority"],
+            not x["critical"],
+            x["attempt_id"],
+            x["item_id"],
+        )
+    )
     return {
         "total": len(items),
         "items": items[:limit],
         "by_reason": quality_report(conn)["routing"],
+        "overdue_count": sum(1 for item in items if item["overdue"]),
+        "oldest_wait_hours": max(
+            (item["age_hours"] for item in items if item["age_hours"] is not None),
+            default=None,
+        ),
+        "sla_hours": SLA_HOURS,
     }
 
 
