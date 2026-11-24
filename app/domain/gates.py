@@ -11,6 +11,7 @@ from .bundle import list_bundles
 from .consent import consent_status
 from .fairness import fairness_report
 from .sp_approval import persona_approval_status
+from .spqa import RED_TEAM_VERSION
 from .stats import quadratic_weighted_kappa
 from .sus import sus_summary
 
@@ -190,6 +191,9 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
                     sp_cert_issue = "expired"
                     cert_row = None
     sp_cert = json.loads(cert_row["report"]) if cert_row else None
+    if sp_cert and sp_cert.get("red_team_version") != RED_TEAM_VERSION:
+        sp_cert_issue = "case_stale"
+        sp_cert = None
     sp_fact_error = None
     sp_persona_pass = None
     sp_p95_latency = None
@@ -376,6 +380,17 @@ def evaluate_gates(conn, report: dict[str, Any], current_stage: str) -> dict[str
                 "level": "danger",
                 "title": "SP 认证已过期",
                 "detail": "认证有效期已结束，G1 的 SP 指标按未采集处理；需按季度更新红队用例并重新认证。",
+            }
+        )
+    elif values.get("sp_cert_issue") == "case_stale":
+        alerts.append(
+            {
+                "level": "danger",
+                "title": "SP 认证未覆盖当前红队用例版本",
+                "detail": (
+                    f"红队攻击用例已更新到 {RED_TEAM_VERSION}，旧认证不再有效；"
+                    "G1 的 SP 指标按未采集处理，需重新运行红队与一致性抽测。"
+                ),
             }
         )
     if values.get("sp_consent") == 0.0:

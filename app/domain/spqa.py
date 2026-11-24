@@ -14,6 +14,8 @@ from .bundle import list_bundles
 from .slots import DialogueStateMachine, SPController, scan_leaks
 from .sp_approval import persona_approval_status
 
+RED_TEAM_VERSION = "2026Q4"
+
 RED_TEAM_CASES: list[dict[str, Any]] = [
     {
         "case_id": "RT-01",
@@ -191,6 +193,7 @@ def run_red_team(bundle: dict[str, Any]) -> dict[str, Any]:
     return {
         "cases": cases,
         "case_count": len(cases),
+        "case_version": RED_TEAM_VERSION,
         "passed_cases": passed_cases,
         "turn_count": total_turns,
         "leak_count": leak_count,
@@ -294,9 +297,12 @@ def run_certification(bundle: dict[str, Any]) -> dict[str, Any]:
         "station_title": bundle["payload"].get("title"),
         "persona_version": bundle["bundle_hash"],
         "current_persona_version": bundle["bundle_hash"],
+        "red_team_version": red_team["case_version"],
+        "current_red_team_version": RED_TEAM_VERSION,
         "status": status,
         "valid": status == "certified",
         "stale": False,
+        "case_stale": False,
         "checks": checks,
         "red_team": red_team,
         "consistency": consistency,
@@ -361,6 +367,9 @@ def _attach_persona_state(conn, row) -> dict[str, Any]:
     current_hash = bundle_row["bundle_hash"] if bundle_row else None
     data["current_persona_version"] = current_hash
     data["stale"] = bool(current_hash and row["persona_version"] != current_hash)
+    data["red_team_version"] = data.get("red_team_version")
+    data["current_red_team_version"] = RED_TEAM_VERSION
+    data["case_stale"] = data.get("red_team_version") != RED_TEAM_VERSION
     data["valid_until"] = row["valid_until"]
     expires = None
     if row["valid_until"]:
@@ -377,7 +386,12 @@ def _attach_persona_state(conn, row) -> dict[str, Any]:
         remaining = expires - datetime.now(timezone.utc)
         data["expired"] = remaining.total_seconds() <= 0
         data["days_remaining"] = max(0, int(remaining.total_seconds() // 86400))
-    data["valid"] = data["status"] == "certified" and not data["stale"] and not data["expired"]
+    data["valid"] = (
+        data["status"] == "certified"
+        and not data["stale"]
+        and not data["case_stale"]
+        and not data["expired"]
+    )
     return data
 
 
@@ -402,7 +416,13 @@ def certification_for_bundle(conn, bundle: dict[str, Any]) -> dict[str, Any] | N
         return None
     cert["stale"] = cert["persona_version"] != bundle["bundle_hash"]
     cert["current_persona_version"] = bundle["bundle_hash"]
-    cert["valid"] = cert["status"] == "certified" and not cert["stale"] and not cert["expired"]
+    cert["case_stale"] = cert.get("red_team_version") != RED_TEAM_VERSION
+    cert["valid"] = (
+        cert["status"] == "certified"
+        and not cert["stale"]
+        and not cert["case_stale"]
+        and not cert["expired"]
+    )
     return cert
 
 

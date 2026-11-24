@@ -5,11 +5,14 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+import app.domain.gates as gates_module
+import app.domain.spqa as spqa_module
 from app import db
 from app.domain.bundle import freeze_bundle
 from app.domain.gates import evaluate_gates
 from app.domain.sp_approval import persona_approval_status, record_persona_approval
 from app.domain.spqa import (
+    RED_TEAM_VERSION,
     certification_for_bundle,
     certify_bundle,
     ensure_certification,
@@ -49,6 +52,37 @@ def test_certification_is_bound_to_current_persona(conn):
     assert cert["valid"] is True
     assert cert["stale"] is False
     assert cert["persona_version"] == bundle["bundle_hash"]
+
+
+def test_certification_is_bound_to_red_team_case_version(conn, monkeypatch):
+    bundle = _freeze(conn)
+    report = certify_bundle(conn, bundle, actor="test")
+    assert report["red_team_version"] == RED_TEAM_VERSION
+    cert = certification_for_bundle(conn, bundle)
+    assert cert["case_stale"] is False
+    assert cert["valid"] is True
+
+    record_persona_approval(
+        conn,
+        bundle,
+        decision="approved",
+        scope="L1",
+        disclosure_approved=True,
+        forbidden_approved=True,
+        trial_approved=True,
+        actor="考官",
+    )
+    assert sp_session_ready(conn, bundle)["ready"] is True
+
+    monkeypatch.setattr(spqa_module, "RED_TEAM_VERSION", "2099Q1")
+    monkeypatch.setattr(gates_module, "RED_TEAM_VERSION", "2099Q1")
+    stale = certification_for_bundle(conn, bundle)
+    assert stale["case_stale"] is True
+    assert stale["valid"] is False
+    assert sp_session_ready(conn, bundle)["ready"] is False
+
+    result = evaluate_gates(conn, quality_report(conn), "G1_practice")
+    assert any("红队用例版本" in alert["title"] for alert in result["alerts"])
 
 
 def test_certification_has_quarterly_expiry(conn):
