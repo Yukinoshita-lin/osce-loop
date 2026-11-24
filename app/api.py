@@ -69,6 +69,7 @@ from .domain.bundle import (
     list_station_bundles,
 )
 from .domain.calibration import calibration_report, import_gold_scores, parse_gold_file
+from .domain.cost import ai_cost_summary
 from .domain.export import build_attempt_package
 from .domain.fairness import fairness_report
 from .domain.feedback import ensure_feedback_units, summarize_feedback
@@ -1488,6 +1489,7 @@ def quality(conn=Depends(get_conn)):
             "total_cost_usd": total_cost,
             "priced_calls": sum(1 for c in calls if c["cost_usd"] is not None),
             "cost_by_capability": cost_by_capability,
+            "cost_per_attempt": ai_cost_summary(conn),
             "pricing_configured": any(
                 [AI_INPUT_PRICE_PER_1K, AI_OUTPUT_PRICE_PER_1K, ASR_PRICE_PER_MINUTE]
             ),
