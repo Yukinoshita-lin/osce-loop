@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS attempts (
     media_purged_by TEXT,
     signed_off_by TEXT,
     signed_off_at TEXT,
+    feedback_note TEXT,
     published_at TEXT,
     created_at TEXT NOT NULL
 );
@@ -498,6 +499,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
         "slot_key": "TEXT",
         "appeal_snapshot": "TEXT",
         "anomalies": "TEXT",
+        "feedback_note": "TEXT",
     }
     for column, ddl in additions.items():
         if column not in existing:

@@ -91,7 +91,12 @@ from .domain.drafting import (
 )
 from .domain.export import build_attempt_package
 from .domain.fairness import fairness_report
-from .domain.feedback import ensure_feedback_evidence, ensure_feedback_units, summarize_feedback
+from .domain.feedback import (
+    ensure_feedback_evidence,
+    ensure_feedback_units,
+    feedback_note_requirement,
+    summarize_feedback,
+)
 from .domain.gates import evaluate_gates
 from .domain.governance import (
     emergency_stop_active,
@@ -653,6 +658,7 @@ def _attempt_summary(conn, attempt: dict[str, Any]) -> dict[str, Any]:
         "integrity_note": attempt.get("integrity_note"),
         "anomalies": json.loads(attempt.get("anomalies") or "[]"),
         "appeal": bool(attempt.get("appeal")),
+        "feedback_note": attempt.get("feedback_note"),
         "media_url": attempt.get("media_url"),
         "media_sha256": attempt.get("media_sha256"),
         "transcript_sha256": transcript_sha,
@@ -1138,6 +1144,7 @@ def raise_attempt_risk(attempt_id: str, body: RiskBody, conn=Depends(get_conn)):
 
 class SignoffBody(BaseModel):
     reviewer: str = Field(min_length=1)
+    feedback_note: str = Field(default="", max_length=500)
 
 
 @app.post("/api/attempts/{attempt_id}/signoff")
@@ -1166,10 +1173,16 @@ def signoff_attempt(attempt_id: str, body: SignoffBody, conn=Depends(get_conn)):
             unconfirmed = [row["item_id"] for row in critical_rows if row["status"] == "auto"]
             if unconfirmed:
                 raise HTTPException(400, f"L3 关键项必须人工确认：{', '.join(unconfirmed)}")
+    summary = _attempt_summary(conn, attempt)
+    note = body.feedback_note.strip()
+    note_error = feedback_note_requirement(summary["final_total"], summary["pass_line"], note)
+    if note_error:
+        raise HTTPException(400, note_error)
     timestamp = db.now_iso()
     conn.execute(
-        "UPDATE attempts SET status = 'signed_off', signed_off_by = ?, signed_off_at = ? WHERE attempt_id = ?",
-        (body.reviewer, timestamp, attempt_id),
+        "UPDATE attempts SET status = 'signed_off', signed_off_by = ?, signed_off_at = ?, "
+        "feedback_note = ? WHERE attempt_id = ?",
+        (body.reviewer, timestamp, note or None, attempt_id),
     )
     conn.commit()
     db.append_audit(
@@ -1179,7 +1192,11 @@ def signoff_attempt(attempt_id: str, body: SignoffBody, conn=Depends(get_conn)):
         object_type="StationAttempt",
         object_id=attempt_id,
         before={"status": attempt["status"]},
-        after={"status": "signed_off", "signed_off_by": body.reviewer},
+        after={
+            "status": "signed_off",
+            "signed_off_by": body.reviewer,
+            "feedback_note_chars": len(note),
+        },
     )
     return {"ok": True, "attempt": _attempt_summary(conn, _attempt_row(conn, attempt_id))}
 
@@ -1630,6 +1647,7 @@ def feedback(attempt_id: str, request: Request, conn=Depends(get_conn)):
     return {
         **summary,
         "status_note": "该场次尚未发布，以下为阶段性反馈" if attempt["status"] != "published" else "已发布",
+        "feedback_note": attempt.get("feedback_note"),
         "ai_disclosure": disclosure,
         "domains": domain_scores(bundle["payload"], final_scores),
         "deductions": deductions,

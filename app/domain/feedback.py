@@ -4,6 +4,23 @@ from __future__ import annotations
 from typing import Any
 
 FEEDBACK_RULE = "每条扣分反馈必须包含可回放证据时间戳与可直接背诵的替代话术。"
+MIN_ENCOURAGEMENT_CHARS = 10
+
+
+def feedback_note_requirement(
+    final_total: float | None, pass_line: float | None, note: str
+) -> str | None:
+    """未达标场次签字前必须有人工鼓励/改进说明；返回错误文案或 None。"""
+    if final_total is None or pass_line is None:
+        return None
+    try:
+        if float(final_total) >= float(pass_line):
+            return None
+    except (TypeError, ValueError):
+        return None
+    if len(str(note or "").strip()) < MIN_ENCOURAGEMENT_CHARS:
+        return f"未达标场次签字前必须填写不少于 {MIN_ENCOURAGEMENT_CHARS} 字的人工鼓励/改进说明"
+    return None
 
 
 def fallback_alternative(item: dict[str, Any]) -> str:

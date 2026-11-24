@@ -328,7 +328,7 @@ async function viewOverview() {
         <a class="link-btn" href="#/review">复核</a>
         <span class="muted"> · </span>
         <a class="link-btn" href="#/feedback" data-open-feedback="${esc(a.attempt_id)}">反馈</a>
-        ${a.pending === 0 && a.status !== 'signed_off' && a.status !== 'published' ? `<span class="muted"> · </span><button class="link-btn" data-action="signoff" data-attempt="${esc(a.attempt_id)}">签字</button>` : ''}
+        ${a.pending === 0 && a.status !== 'signed_off' && a.status !== 'published' ? `<span class="muted"> · </span><button class="link-btn" data-action="signoff" data-attempt="${esc(a.attempt_id)}" data-failing="${a.final_total !== null && a.final_total < a.pass_line ? '1' : '0'}">${a.final_total !== null && a.final_total < a.pass_line ? '签字（需寄语）' : '签字'}</button>` : ''}
         ${a.status === 'signed_off' ? `<span class="muted"> · </span><button class="link-btn" data-action="publish" data-attempt="${esc(a.attempt_id)}">发布</button>` : ''}
       </td>
     </tr>`).join('');
@@ -1715,6 +1715,11 @@ async function renderFeedback(attemptId) {
       <div class="kpi ${data.final_total !== null && data.final_total >= data.pass_line ? 'teal' : 'red'}"><div class="k">结论</div><div class="v" style="font-size:18px">${data.final_total === null ? '待定' : data.final_total >= data.pass_line ? '达标' : '未达标'}</div><div class="d">${esc(data.status_note)}</div></div>
       <div class="kpi amber"><div class="k">扣分项</div><div class="v">${data.deductions.length}</div><div class="d">优势项 ${data.strengths.length} · 人工评分项可能无片段</div></div>
     </div>
+
+    ${data.feedback_note ? `<div class="card" style="margin-bottom:16px">
+      <div class="card-title">教师寄语<span class="sub">人工撰写 · 随成绩一同发布</span></div>
+      <div class="small">${esc(data.feedback_note)}</div>
+    </div>` : ''}
 
     ${data.ai_disclosure ? `<div class="card" style="margin-bottom:16px">
       <div class="card-title">AI 参与说明<span class="sub">考生知情</span></div>
@@ -3958,15 +3963,35 @@ document.addEventListener('click', async (e) => {
     }
     return;
   }
-  if (action === 'signoff' || action === 'publish') {
+  if (action === 'signoff' && el.dataset.failing === '1') {
+    const cell = el.closest('td');
+    if (cell) {
+      cell.innerHTML = `<span class="tiny">未达标寄语</span>
+        <input class="input tiny" data-signoff-note placeholder="人工鼓励/改进说明（≥10字）" style="max-width:220px;margin:0 4px">
+        <button class="link-btn" data-action="signoff-confirm" data-attempt="${esc(el.dataset.attempt)}">确认签字</button>
+        <span class="muted"> · </span>
+        <button class="link-btn" data-action="signoff-cancel">取消</button>`;
+    }
+    return;
+  }
+  if (action === 'signoff-cancel') {
+    await viewOverview();
+    return;
+  }
+  if (action === 'signoff' || action === 'signoff-confirm' || action === 'publish') {
     const reviewer = ($('#reviewer-input').value || '').trim();
     if (!reviewer) return toast('请先填写复核人', true);
+    let feedbackNote = '';
+    if (action === 'signoff-confirm') {
+      feedbackNote = (el.closest('td')?.querySelector('[data-signoff-note]')?.value || '').trim();
+      if (!feedbackNote) return toast('未达标场次必须填写人工鼓励说明', true);
+    }
     try {
-      await api(`/api/attempts/${encodeURIComponent(el.dataset.attempt)}/${action}`, {
+      await api(`/api/attempts/${encodeURIComponent(el.dataset.attempt)}/${action === 'publish' ? 'publish' : 'signoff'}`, {
         method: 'POST',
-        body: { reviewer },
+        body: action === 'publish' ? { reviewer } : { reviewer, feedback_note: feedbackNote },
       });
-      toast(action === 'signoff' ? '已完成 human_signoff，可发布成绩' : '成绩已发布，写入审计链');
+      toast(action === 'publish' ? '成绩已发布，写入审计链' : '已完成 human_signoff，可发布成绩');
       await viewOverview();
     } catch (err) {
       toast(err.message, true);

@@ -5,8 +5,20 @@ from app.domain.feedback import (
     ensure_feedback_evidence,
     ensure_feedback_units,
     fallback_alternative,
+    feedback_note_requirement,
     summarize_feedback,
 )
+
+
+def test_failing_attempt_requires_encouragement_note():
+    assert feedback_note_requirement(45, 60, "") is not None
+    assert feedback_note_requirement(45, 60, "继续加油") is not None
+    assert (
+        feedback_note_requirement(45, 60, "你在问诊结构上已有明显进步，下一步先练熟关键三项")
+        is None
+    )
+    assert feedback_note_requirement(80, 60, "") is None
+    assert feedback_note_requirement(None, 60, "") is None
 
 
 def test_fallback_alternative_prefers_positive_anchor():
