@@ -41,6 +41,7 @@ from .domain.accessibility import (
     submit_feedback_survey,
     survey_for_attempt,
 )
+from .domain.appeals import capture_snapshot
 from .domain.audit_search import search_audit_events
 from .domain.auth import (
     SESSION_TTL_HOURS,
@@ -902,7 +903,13 @@ def appeal_attempt(attempt_id: str, conn=Depends(get_conn)):
     attempt = _attempt_row(conn, attempt_id)
     if attempt["status"] == "published":
         raise HTTPException(400, "已发布场次需通过考务申诉流程重新开启")
-    conn.execute("UPDATE attempts SET appeal = 1, status = 'pending_review' WHERE attempt_id = ?", (attempt_id,))
+    if attempt["appeal"]:
+        raise HTTPException(400, "该场次已在申诉重评中")
+    snapshot = capture_snapshot(conn, attempt)
+    conn.execute(
+        "UPDATE attempts SET appeal = 1, appeal_snapshot = ?, status = 'pending_review' WHERE attempt_id = ?",
+        (snapshot, attempt_id),
+    )
     for rec in conn.execute("SELECT * FROM score_records WHERE attempt_id = ?", (attempt_id,)).fetchall():
         routing = json.loads(rec["routing"] or "{}")
         routing.update(

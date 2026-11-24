@@ -6,6 +6,7 @@ from collections import Counter
 from typing import Any, Iterable
 
 from ..config import ASR_LOW_CONFIDENCE, REASON_LABELS
+from .appeals import appeal_metrics
 
 
 def quadratic_weighted_kappa(
@@ -201,6 +202,7 @@ def quality_report(conn, bundle_id: str | None = None) -> dict[str, Any]:
             "threshold": ASR_LOW_CONFIDENCE,
             "records": len(asr_values),
         },
+        "appeals": appeal_metrics(attempts, records),
         "item_disagreement": item_disagreement,
         "fairness": {
             "subgroup_gap_sd": None,

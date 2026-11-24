@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS attempts (
     integrity_gap INTEGER NOT NULL DEFAULT 0,
     integrity_note TEXT,
     appeal INTEGER NOT NULL DEFAULT 0,
+    appeal_snapshot TEXT,
     asr_confidence REAL,
     status TEXT NOT NULL DEFAULT 'scored',
     ai_total REAL,
@@ -418,6 +419,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
         "media_purged_by": "TEXT",
         "run_id": "TEXT",
         "slot_key": "TEXT",
+        "appeal_snapshot": "TEXT",
     }
     for column, ddl in additions.items():
         if column not in existing:

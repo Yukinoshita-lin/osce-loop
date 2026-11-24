@@ -2059,6 +2059,7 @@ async function viewQuality() {
   const itemQuality = data.item_quality || null;
   const users = usersData.users || [];
   const report = data.report;
+  const appeals = report.appeals || {};
   const gates = data.gates.gates;
   const stageLabels = {
     G0_offline: 'G0 离线副驾',
@@ -2154,6 +2155,14 @@ async function viewQuality() {
       <div class="kpi blue"><div class="k">证据定位率</div><div class="v">${pct(report.evidence.rate, 0)}</div><div class="d">${report.evidence.localized}/${report.evidence.total} 条片段</div></div>
       <div class="kpi amber"><div class="k">人工编辑率</div><div class="v">${pct(report.review.edit_rate, 0)}</div><div class="d">接受率 ${pct(report.review.accept_rate, 0)} · 复核 ${report.review.reviewed}</div></div>
       <div class="kpi red"><div class="k">证据缺口率</div><div class="v">${pct(report.integrity_gap_rate, 1)}</div><div class="d">目标 ≤ 2% · 触发全站人工</div></div>
+    </div>
+
+    <div class="attempt-strip" style="margin-bottom:16px">
+      <span>申诉 <b>${appeals.appealed || 0}</b> / ${report.counts.attempts} 场次</span>
+      <span>申诉率 <span class="pill ${(appeals.appeal_rate || 0) > 0.03 ? 'red' : 'teal'}">${pct(appeals.appeal_rate, 1)}</span> <span class="tiny muted">目标 &lt; 3%</span></span>
+      <span>已重评 <b>${appeals.compared || 0}</b> · 改判 <b>${appeals.changed || 0}</b>${appeals.in_progress ? ` · 重评中 <b>${appeals.in_progress}</b>` : ''}</span>
+      <span>改判率 <span class="pill ${appeals.change_rate === null || appeals.change_rate === undefined ? 'muted' : appeals.change_rate > 0.2 ? 'red' : 'teal'}">${appeals.change_rate === null || appeals.change_rate === undefined ? '—' : pct(appeals.change_rate, 1)}</span> <span class="tiny muted">目标 &lt; 20%</span></span>
+      ${appeals.missing_snapshot ? `<span class="tiny muted">${appeals.missing_snapshot} 场历史申诉缺少原始快照</span>` : ''}
     </div>
 
     <div class="card" style="margin-bottom:16px">
