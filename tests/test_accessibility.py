@@ -77,3 +77,24 @@ def test_survey_submission_dedup_and_threshold(conn):
     assert experience["realism"]["average"] == 6.6
     assert experience["realism"]["status"] == "fail"
     assert fairness_report(conn)["feedback_accessibility"]["status"] == "pass"
+
+
+def test_feedback_accessibility_gap_by_group(conn):
+    attempts = _attempts(conn, 4)
+    for attempt_id, origin in zip(attempts, ("城市", "城市", "农村", "农村")):
+        conn.execute(
+            "UPDATE candidate_profiles SET origin = ? WHERE attempt_id = ?",
+            (origin, attempt_id),
+        )
+    conn.commit()
+    for attempt_id, rating in zip(attempts, (5, 5, 3, 3)):
+        submit_feedback_survey(conn, attempt_id=attempt_id, rating=rating)
+
+    gap = fairness_report(conn)["feedback_accessibility_gap"]
+    origin = next(dimension for dimension in gap["dimensions"] if dimension["key"] == "origin")
+    assert origin["gap"] == 2.0
+    assert origin["status"] == "fail"
+    assert origin["threshold"] == 0.3
+    assert origin["corrective_action"].startswith("反馈语言分级")
+    assert gap["overall_gap"] >= 2.0
+    assert gap["status"] == "fail"

@@ -2086,6 +2086,7 @@ function fairnessSectionHtml(fairness) {
   const dims = fairness.dimensions || [];
   const editDims = (fairness.edit_rate || {}).dimensions || [];
   const acc = fairness.feedback_accessibility || {};
+  const accGap = fairness.feedback_accessibility_gap || {};
   const accLabel = {
     pass: '达标',
     fail: '未达标',
@@ -2118,6 +2119,12 @@ function fairnessSectionHtml(fairness) {
       <div class="sep"></div>
       <div class="tiny muted">反馈可及性：<span class="pill ${accClass}">${accLabel}</span> ${esc(acc.note || '')}</div>
       ${expLine ? `<div class="attempt-strip" style="margin-top:6px">${expLine}</div>` : ''}
+      <div class="card-title" style="margin:10px 0 5px">反馈可及性组间差<span class="sub">≤ ${num(accGap.threshold, 1)} 分（1–5 分自评）</span></div>
+      ${(accGap.dimensions || []).map((d) => `
+        <div class="version-row"><span class="k">${esc(d.label)}</span><span class="v">${d.gap === null ? '样本不足' : num(d.gap, 2) + ' 分'} ${fairPill(d.status)}</span></div>
+        <div class="tiny muted">${(d.groups || []).map((g) => `${esc(g.name)} n=${g.n} 均分 ${num(g.mean, 1)}`).join(' · ')}</div>
+        ${d.status === 'fail' ? `<div class="violation">纠正路径：${esc(d.corrective_action)}</div>` : ''}
+      `).join('')}
       <div class="tiny muted" style="margin-top:4px">${esc(fairness.note)}</div>
     </div>`;
 }

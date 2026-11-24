@@ -14,6 +14,7 @@ DIMENSIONS = [
 ]
 SCORE_GAP_THRESHOLD_SD = 0.15
 EDIT_GAP_THRESHOLD_PP = 5.0
+ACCESSIBILITY_GAP_THRESHOLD = 0.3
 
 
 def _attempt_scores(conn, bundle_id: str | None = None) -> list[dict[str, Any]]:
@@ -106,6 +107,82 @@ def _edit_rates(conn, bundle_id: str | None = None) -> list[dict[str, Any]]:
             }
         )
     return result
+
+
+def _feedback_accessibility_gaps(conn, bundle_id: str | None = None) -> dict[str, Any]:
+    """按性别/生源/语言背景比较学生反馈可及性自评（1–5 分）。"""
+    clause = ""
+    params: list[Any] = []
+    if bundle_id:
+        clause = "WHERE a.bundle_id = ?"
+        params.append(bundle_id)
+    rows = conn.execute(
+        "SELECT s.rating, p.gender, p.origin, p.language "
+        "FROM feedback_surveys s "
+        "JOIN attempts a ON a.attempt_id = s.attempt_id "
+        "JOIN candidate_profiles p ON p.attempt_id = s.attempt_id "
+        + clause,
+        tuple(params),
+    ).fetchall()
+    dimensions: list[dict[str, Any]] = []
+    measured: list[float] = []
+    for key, label in DIMENSIONS:
+        groups: dict[str, list[float]] = {}
+        for row in rows:
+            group = row[key]
+            if not group:
+                continue
+            groups.setdefault(group, []).append(float(row["rating"]))
+        group_rows = [
+            {
+                "name": group,
+                "n": len(values),
+                "mean": round(sum(values) / len(values), 2),
+            }
+            for group, values in sorted(groups.items())
+            if len(values) >= 2
+        ]
+        if len(group_rows) < 2:
+            gap = None
+            status = "insufficient"
+        else:
+            gap = round(
+                max(group["mean"] for group in group_rows)
+                - min(group["mean"] for group in group_rows),
+                2,
+            )
+            status = "pass" if gap <= ACCESSIBILITY_GAP_THRESHOLD else "fail"
+            measured.append(gap)
+        dimensions.append(
+            {
+                "key": key,
+                "label": label,
+                "groups": group_rows,
+                "gap": gap,
+                "threshold": ACCESSIBILITY_GAP_THRESHOLD,
+                "status": status,
+                "corrective_action": (
+                    "反馈语言分级（按年级可读性）→ 增加术语注释 → 重测"
+                    if status == "fail"
+                    else "维持监测，下一轮继续观察"
+                ),
+            }
+        )
+    statuses = {dimension["status"] for dimension in dimensions}
+    overall_status = (
+        "fail"
+        if "fail" in statuses
+        else "pass"
+        if statuses == {"pass"}
+        else "insufficient"
+    )
+    return {
+        "dimensions": dimensions,
+        "overall_gap": max(measured) if measured else None,
+        "threshold": ACCESSIBILITY_GAP_THRESHOLD,
+        "status": overall_status,
+        "scale": "1–5 分自评",
+    }
 
 
 def fairness_report(conn, bundle_id: str | None = None) -> dict[str, Any]:
@@ -209,6 +286,7 @@ def fairness_report(conn, bundle_id: str | None = None) -> dict[str, Any]:
             "threshold_pp": EDIT_GAP_THRESHOLD_PP,
         },
         "feedback_accessibility": feedback_accessibility(conn, bundle_id),
+        "feedback_accessibility_gap": _feedback_accessibility_gaps(conn, bundle_id),
         "overall_gap_sd": max(measured_gaps) if measured_gaps else None,
         "sample": {
             "attempts": len(attempt_scores),
