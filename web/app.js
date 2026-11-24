@@ -985,12 +985,30 @@ function downloadSampleTranscript() {
 
 /* ---------- schedule ---------- */
 async function viewSchedule() {
-  const [inputs, latest] = await Promise.all([
+  const [inputs, latest, policyData] = await Promise.all([
     api('/api/schedule/inputs'),
     api('/api/schedule/latest'),
+    api('/api/schedule/policy'),
   ]);
   let schedule = latest.schedule;
   let specialNeeds = latest.special_needs;
+  let policy = policyData.latest;
+  const policyPresets = policyData.presets || [];
+  const policyHtml = `<div class="card" style="margin-bottom:16px">
+      <div class="card-title">软约束权重确认<span class="sub">公平 vs 效率是价值判断 · 生成排考前必须确认</span></div>
+      <div class="btn-row" style="align-items:flex-end;gap:10px;flex-wrap:wrap">
+        <label class="field">权重预设
+          <select id="policy-preset" class="input">
+            ${policyPresets.map((item) => `<option value="${dataAttr(item.preset)}" ${policy && policy.preset === item.preset ? 'selected' : ''}>${esc(item.label)} · 公平权重 ${item.fairness_weight}</option>`).join('')}
+          </select>
+        </label>
+        <label class="field" style="flex:1;min-width:240px">确认理由
+          <input id="policy-note" class="input" placeholder="例如：本次模拟考优先保证考生间难度公平" value="${dataAttr(policy ? policy.note : '')}">
+        </label>
+        <button class="btn" id="policy-confirm">确认权重</button>
+      </div>
+      <div id="policy-result" class="tiny muted" style="margin-top:8px">${policy ? `当前有效权重：<span class="pill teal">${esc(policy.label)}</span> 公平权重 ${policy.fairness_weight} · ${esc(policy.actor)} · ${fmtTime(policy.created_at)}` : '尚未确认软约束权重，生成排考按钮不可用。'}</div>
+    </div>`;
   const scheduleCandidates = inputs.candidates
     .map((c) => `<option value="${dataAttr(c.candidate_id)}">${esc(c.name)} · ${esc(c.candidate_id)}</option>`)
     .join('');
@@ -1011,6 +1029,7 @@ async function viewSchedule() {
         <span>资源 <b>${inputs.resources.rooms} 房 / ${inputs.resources.sps} SP / ${inputs.resources.examiners} 考官</b></span>
       </div>
     </div>
+    ${policyHtml}
     <div class="card" style="margin-bottom:16px">
       <div class="card-title">排考参数<span class="sub">硬约束优先，软约束用于均衡</span></div>
       <form id="schedule-form" class="btn-row" style="align-items:flex-end;gap:10px;flex-wrap:wrap">
@@ -1018,7 +1037,7 @@ async function viewSchedule() {
         <label class="field">轮次数<input class="input" type="number" name="rounds" min="1" max="${inputs.stations.length}" value="${schedule ? schedule.rounds : 6}"></label>
         <label class="field">轮间缓冲（分钟）<input class="input" type="number" name="buffer_min" min="0" max="30" value="${schedule ? schedule.buffer_min : 2}"></label>
         <label class="field">随机种子<input class="input" type="number" name="seed" value="${schedule ? schedule.seed : 2026}"></label>
-        <button class="btn primary" type="submit" id="schedule-submit">生成排考表</button>
+        <button class="btn primary" type="submit" id="schedule-submit" ${policy ? '' : 'disabled'}>生成排考表</button>
       </form>
       <div class="tiny muted" style="margin-top:8px">每位考生从考站集合中抽取 ${schedule ? schedule.rounds : 6} 站；同一轮同一考站只安排一名考生。</div>
     </div>
@@ -1048,6 +1067,37 @@ async function viewSchedule() {
     <div id="special-needs-card" style="margin-top:16px">${schedule && specialNeeds ? specialNeedsHtml(schedule, specialNeeds) : ''}</div>
   `;
   const specialCard = $('#special-needs-card');
+  const policyConfirm = $('#policy-confirm');
+  if (policyConfirm) {
+    policyConfirm.addEventListener('click', async () => {
+      const preset = $('#policy-preset').value;
+      const note = ($('#policy-note').value || '').trim();
+      if (note.length < 4) {
+        toast('请填写不少于 4 字的确认理由', true);
+        return;
+      }
+      policyConfirm.disabled = true;
+      try {
+        const data = await api('/api/schedule/policy', {
+          method: 'POST',
+          body: { preset, note },
+        });
+        policy = data.policy;
+        const box = $('#policy-result');
+        if (box) {
+          box.className = 'tiny';
+          box.innerHTML = `当前有效权重：<span class="pill teal">${esc(policy.label)}</span> 公平权重 ${policy.fairness_weight} · ${esc(policy.actor)} · ${fmtTime(policy.created_at)}`;
+        }
+        const submit = $('#schedule-submit');
+        if (submit) submit.disabled = false;
+        toast(`已确认软约束权重：${policy.label}`);
+      } catch (err) {
+        toast(err.message, true);
+      } finally {
+        policyConfirm.disabled = false;
+      }
+    });
+  }
   $('#schedule-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const form = e.target;
@@ -1057,6 +1107,7 @@ async function viewSchedule() {
       rounds: Number(form.rounds.value),
       buffer_min: Number(form.buffer_min.value),
       seed: Number(form.seed.value),
+      policy_id: policy ? policy.policy_id : null,
     };
     button.disabled = true;
     button.textContent = '求解中…';
@@ -1210,6 +1261,7 @@ function scheduleHtml(schedule) {
   const candidates = schedule.candidates || [];
   const quality = schedule.quality || {};
   const resources = schedule.resources || {};
+  const policy = schedule.policy || {};
   const warningHtml = (quality.warnings || []).map((w) => `<div class="alert ${quality.status === 'review' ? '' : 'danger'}" style="margin-bottom:6px"><b>预警</b><p>${esc(w)}</p></div>`).join('');
   const repair = schedule.repair_report;
   const repairHtml = repair ? `
@@ -1266,9 +1318,10 @@ function scheduleHtml(schedule) {
       </div>
       <div class="card">
         <div class="card-title">排考纪律<span class="sub">软约束与人工保留</span></div>
+        <div class="version-row"><span class="k">权重策略</span><span class="v">${esc(policy.label || '未记录')} · 公平权重 ${policy.fairness_weight ?? '—'}${policy.confirmed_by ? ` · ${esc(policy.confirmed_by)}` : ''}</span></div>
         <ul class="small dim" style="padding-left:18px;line-height:1.9">
           <li>硬约束：同一考生不重复考站、同一轮同一考站仅一名考生。</li>
-          <li>软约束：每位考生的加权难度总和尽量接近目标值。</li>
+          <li>软约束：按已确认的公平/效率权重平衡加权难度与考站使用。</li>
           <li>顺序效应：检查后两轮难度差，避免高难站集中在末尾。</li>
           <li>特殊需求：延长与安静候考区由考务人工确认最终安排。</li>
           <li>疲劳：同一考官连续评分超过 ${quality.fatigue_limit_min || 240} 分钟会触发预警。</li>

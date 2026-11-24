@@ -80,8 +80,9 @@ def _solve_assignments(
     target: float,
     seed: int,
     attempts: int = 40,
+    fairness_weight: float = 0.5,
 ) -> dict[str, list[tuple[int, str]]]:
-    """多随机种子回溯，优先满足难度约束，再最小化考站使用次数差。"""
+    """多随机种子回溯，按确认的公平权重平衡难度与考站使用。"""
     if len(candidates) > len(stations):
         raise ValueError("考生人数不能超过单轮并行考站数（演示版约束）")
     station_map = {s["station_id"]: s for s in stations}
@@ -153,21 +154,44 @@ def _solve_assignments(
         difficulty_spread = max(totals) - min(totals)
         late_spread = max(late) - min(late)
         usage_spread = max(usage.values()) - min(usage.values())
-        over_limit = max(0.0, difficulty_spread - 1.0) + max(0.0, late_spread - 1.0)
-        score = (
-            round(over_limit, 3),
-            usage_spread,
-            max(usage.values()),
-            round(difficulty_spread, 3),
-            round(late_spread, 3),
-            attempt,
-        )
+        score = policy_score(
+            difficulty_spread=difficulty_spread,
+            late_spread=late_spread,
+            usage_spread=usage_spread,
+            max_usage=max(usage.values()),
+            fairness_weight=fairness_weight,
+        ) + (attempt,)
         if best_score is None or score < best_score:
             best_score = score
             best_result = result
     if best_result is None:
         raise ValueError("在当前约束下未找到可行排考方案")
     return best_result
+
+
+def policy_score(
+    *,
+    difficulty_spread: float,
+    late_spread: float,
+    usage_spread: float,
+    max_usage: int,
+    fairness_weight: float,
+) -> tuple[float, ...]:
+    """软约束权重下的方案排序：硬阈值优先，其余按确认的公平/效率权重加权。"""
+    over_limit = max(0.0, difficulty_spread - 1.0) + max(0.0, late_spread - 1.0)
+    balance = round(
+        fairness_weight * (difficulty_spread + late_spread)
+        + (1.0 - fairness_weight) * usage_spread,
+        3,
+    )
+    return (
+        round(over_limit, 3),
+        balance,
+        usage_spread,
+        max_usage,
+        round(difficulty_spread, 3),
+        round(late_spread, 3),
+    )
 
 
 def generate_schedule(
@@ -177,6 +201,8 @@ def generate_schedule(
     rounds: int = 6,
     buffer_min: int = 2,
     seed: int = 2026,
+    fairness_weight: float = 0.5,
+    policy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     ensure_schedule_inputs(conn)
     inputs = schedule_inputs(conn)
@@ -186,9 +212,17 @@ def generate_schedule(
         raise ValueError("轮次数必须在 1 到考站数之间")
     if buffer_min < 0:
         raise ValueError("缓冲时间不能为负")
+    try:
+        fairness_weight = float(fairness_weight)
+    except (TypeError, ValueError):
+        raise ValueError("公平权重必须是 0 到 1 之间的数字") from None
+    if fairness_weight < 0 or fairness_weight > 1:
+        raise ValueError("公平权重必须在 0 到 1 之间")
 
     target = round(mean(s["difficulty"] for s in stations) * rounds, 3)
-    assignments = _solve_assignments(candidates, stations, rounds, target, seed)
+    assignments = _solve_assignments(
+        candidates, stations, rounds, target, seed, fairness_weight=fairness_weight
+    )
     station_map = {s["station_id"]: s for s in stations}
     candidate_map = {c["candidate_id"]: c for c in candidates}
 
@@ -336,6 +370,15 @@ def generate_schedule(
             "sps": {"count": RESOURCE_COUNTS["sps"], "used": len(sp_minutes), "max_minutes": max(sp_minutes.values()) if sp_minutes else 0},
             "examiners": {"count": RESOURCE_COUNTS["examiners"], "used": len(examiner_minutes), "max_minutes": max(examiner_minutes.values()) if examiner_minutes else 0},
         },
+        "policy": {
+            "fairness_weight": round(fairness_weight, 3),
+            "policy_id": (policy or {}).get("policy_id"),
+            "label": (policy or {}).get("label") or "默认权重（未确认）",
+            "preset": (policy or {}).get("preset"),
+            "note": (policy or {}).get("note"),
+            "confirmed_by": (policy or {}).get("actor"),
+            "confirmed_at": (policy or {}).get("created_at"),
+        },
         "created_at": db.now_iso(),
     }
     conn.execute(
@@ -343,7 +386,16 @@ def generate_schedule(
         (
             schedule["schedule_id"],
             exam_date,
-            json.dumps({"rounds": rounds, "buffer_min": buffer_min, "seed": seed}, ensure_ascii=False),
+            json.dumps(
+                {
+                    "rounds": rounds,
+                    "buffer_min": buffer_min,
+                    "seed": seed,
+                    "fairness_weight": round(fairness_weight, 3),
+                    "policy_id": (policy or {}).get("policy_id"),
+                },
+                ensure_ascii=False,
+            ),
             json.dumps(schedule, ensure_ascii=False),
             schedule["created_at"],
         ),

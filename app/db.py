@@ -383,6 +383,16 @@ CREATE TABLE IF NOT EXISTS schedule_special_needs_approvals (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS schedule_policy_confirmations (
+    policy_id TEXT PRIMARY KEY,
+    preset TEXT NOT NULL,
+    fairness_weight REAL NOT NULL,
+    label TEXT NOT NULL,
+    note TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS exam_runs (
     run_id TEXT PRIMARY KEY,
     schedule_id TEXT,

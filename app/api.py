@@ -141,6 +141,12 @@ from .domain.risk import RISK_ORDER, escalate_risk
 from .domain.rubric import AUTHORITY_LABELS, PHASE_LABELS, cap_authority, derive_assets, validate_bundle
 from .domain.run_export import build_run_package
 from .domain.schedule_approval import record_special_needs_approval, special_needs_status
+from .domain.schedule_policy import (
+    confirm_policy,
+    get_policy,
+    latest_policy,
+    presets_payload,
+)
 from .domain.scheduling import (
     ensure_schedule_inputs,
     generate_schedule,
@@ -1984,10 +1990,44 @@ class ScheduleBody(BaseModel):
     rounds: int = 6
     buffer_min: int = 2
     seed: int = 2026
+    policy_id: str | None = None
+
+
+class SchedulePolicyBody(BaseModel):
+    preset: str = Field(default="balanced", pattern=r"^(fairness|balanced|efficiency)$")
+    fairness_weight: float | None = Field(default=None, ge=0, le=1)
+    note: str = Field(min_length=4, max_length=300)
+
+
+@app.get("/api/schedule/policy")
+def schedule_policy(conn=Depends(get_conn)):
+    return {"latest": latest_policy(conn), "presets": presets_payload()}
+
+
+@app.post("/api/schedule/policy")
+def confirm_schedule_policy(
+    body: SchedulePolicyBody, request: Request, conn=Depends(get_conn)
+):
+    try:
+        policy = confirm_policy(
+            conn,
+            preset=body.preset,
+            fairness_weight=body.fairness_weight,
+            note=body.note,
+            actor=request.state.user["display_name"],
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "policy": policy}
 
 
 @app.post("/api/schedule/generate")
 def gen_schedule(body: ScheduleBody, conn=Depends(get_conn)):
+    if not body.policy_id:
+        raise HTTPException(400, "生成排考前必须先确认软约束权重")
+    policy = get_policy(conn, body.policy_id)
+    if not policy:
+        raise HTTPException(400, "软约束权重确认记录不存在")
     try:
         schedule = generate_schedule(
             conn,
@@ -1995,10 +2035,17 @@ def gen_schedule(body: ScheduleBody, conn=Depends(get_conn)):
             rounds=body.rounds,
             buffer_min=body.buffer_min,
             seed=body.seed,
+            fairness_weight=policy["fairness_weight"],
+            policy=policy,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    return {"ok": True, "schedule": schedule, "special_needs": special_needs_status(conn, schedule)}
+    return {
+        "ok": True,
+        "schedule": schedule,
+        "policy": policy,
+        "special_needs": special_needs_status(conn, schedule),
+    }
 
 
 @app.get("/api/schedule/latest")
@@ -2006,6 +2053,7 @@ def get_latest_schedule(conn=Depends(get_conn)):
     schedule = latest_schedule(conn)
     return {
         "schedule": schedule,
+        "policy": latest_policy(conn),
         "special_needs": special_needs_status(conn, schedule) if schedule else None,
     }
 
