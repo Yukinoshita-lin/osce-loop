@@ -2807,6 +2807,112 @@ function usersSectionHtml(users) {
     </div>`;
 }
 
+function scorecardStatus(value, target, direction) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return 'unmeasured';
+  const current = Number(value);
+  if (direction === 'le') return current <= Number(target) ? 'pass' : 'fail';
+  if (direction === 'ge') return current >= Number(target) ? 'pass' : 'fail';
+  return current === Number(target) ? 'pass' : 'fail';
+}
+
+function scorecardPill(status) {
+  const labels = {
+    pass: ['达标', 'teal'],
+    warn: ['警示', 'amber'],
+    fail: ['未达标', 'red'],
+    insufficient: ['样本不足', 'amber'],
+    unmeasured: ['未采集', 'muted'],
+  };
+  const item = labels[status] || ['未采集', 'muted'];
+  return `<span class="pill ${item[1]}">${item[0]}</span>`;
+}
+
+function scorecardHtml(data) {
+  const report = data.report || {};
+  const values = ((data.gates || {}).metric_values) || {};
+  const ab = ((data.ab || {}).comparison) || {};
+  const fairness = data.fairness || {};
+  const experience = ((fairness.feedback_accessibility || {}).experience) || {};
+  const asrMetrics = (((data.asr_quality || {}).latest || {}).metrics) || {};
+  const asrError = asrMetrics.medical_term_error_rate === null || asrMetrics.medical_term_error_rate === undefined
+    ? asrMetrics.error_rate
+    : asrMetrics.medical_term_error_rate;
+  const costTargets = (((data.ai_calls || {}).cost_per_attempt || {}).targets) || [];
+  const ready = ((data.feedback_latency || {}).ready) || {};
+  const practiceReady = ready.practice || {};
+  const examReady = ready.exam || {};
+  const reviewShareRows = ((report.review_share || {}).by_risk) || [];
+  const appeals = report.appeals || {};
+  const review = report.review || {};
+  const rows = [];
+  const add = (group, label, target, display, status, note) => {
+    rows.push({ group, label, target, display, status, note: note || '' });
+  };
+
+  add('技术', 'SP 对话事实错误率', '≤ 2%', pct(values.sp_fact_error, 1), scorecardStatus(values.sp_fact_error, 0.02, 'le'));
+  add('技术', '人格一致性首轮通过率', '≥ 95%', pct(values.persona_pass, 0), scorecardStatus(values.persona_pass, 0.95, 'ge'));
+  add('技术', '证据定位准确率', '≥ 95%', pct(values.evidence_rate, 0), scorecardStatus(values.evidence_rate, 0.95, 'ge'));
+  add('技术', '端到端语音延迟 P95', '≤ 1.5 秒', values.p95_latency === null || values.p95_latency === undefined ? '—' : `${num(values.p95_latency, 2)} 秒`, scorecardStatus(values.p95_latency, 1.5, 'le'));
+  add('技术', '医学专名 ASR 词错率', '≤ 8%', pct(asrError, 1), scorecardStatus(asrError, 0.08, 'le'), '取最近一次 ASR 基准样本');
+
+  add('评分质量', 'AI–人 QWK', 'L2 ≥ 0.75 · L3 ≥ 0.80', num(report.qwk_ai, 3), scorecardStatus(report.qwk_ai, 0.75, 'ge'));
+  add('评分质量', '边缘案例一致率提升', '≥ 10pp', ab.near_improvement === null || ab.near_improvement === undefined ? '—' : `${num(ab.near_improvement * 100, 1)}pp`, scorecardStatus(ab.near_improvement, 0.10, 'ge'));
+  add('评分质量', '关键项漏判', '= 0', num(values.critical_miss, 0), scorecardStatus(values.critical_miss, 0, 'eq'));
+  let editStatus = scorecardStatus(review.edit_rate, 0.30, 'le');
+  if (editStatus === 'pass' && Number(review.edit_rate) < 0.05) editStatus = 'warn';
+  add('评分质量', '人工编辑率', '5%–30%', pct(review.edit_rate, 1), editStatus, '低于 5% 警惕橡皮图章');
+
+  costTargets.forEach((row) => {
+    add('运营', `${row.label}单站成本`, `≤ ¥${num(row.target_cny, 0)}`, row.avg_cny === null || row.avg_cny === undefined ? '—' : `¥${num(row.avg_cny, 2)}`, row.status || 'unmeasured', row.attempts ? `${row.attempts} 场样本` : '');
+  });
+  add('运营', '教师评分工时下降', '≥ 40%', pct(ab.teacher_hours_reduction, 1), scorecardStatus(ab.teacher_hours_reduction, 0.40, 'ge'));
+  add('运营', '练习反馈生成', '≤ 60 秒', practiceReady.count ? `平均 ${num(practiceReady.avg, 1)} 秒 · 及时率 ${pct(practiceReady.within_rate, 0)}` : '—', practiceReady.status || 'unmeasured', practiceReady.count ? `${practiceReady.count} 份报告` : '');
+  add('运营', '考试反馈生成', '≤ 72 小时', examReady.count ? `平均 ${num(examReady.avg, 1)} 小时 · 及时率 ${pct(examReady.within_rate, 0)}` : '—', examReady.status || 'unmeasured', examReady.count ? `${examReady.count} 份成绩` : '');
+  reviewShareRows.forEach((row) => {
+    if (row.target === null || row.target === undefined) return;
+    add('运营', `${row.risk_level} 人工复核占比`, `≤ ${pct(row.target, 0)}`, `${pct(row.share, 0)}（${row.reviewed}/${row.attempts}）`, scorecardStatus(row.share, row.target, 'le'));
+  });
+
+  const sus = data.sus || {};
+  let susStatus = scorecardStatus(sus.average, 75, 'ge');
+  if (susStatus === 'fail' && Number(sus.average) >= 70) susStatus = 'warn';
+  add('体验与公平', 'SUS 可用性', '≥ 75（G1 放行线 70）', num(sus.average, 1), susStatus, sus.count ? `${sus.count} 份问卷` : '');
+  const usefulness = experience.usefulness || {};
+  const realism = experience.realism || {};
+  add('体验与公平', '学生实用性评分', '≥ 7.0 / 10', num(usefulness.average, 1), usefulness.status || 'unmeasured', usefulness.count ? `${usefulness.count} 份样本` : '');
+  add('体验与公平', '学生真实感评分', '≥ 7.0 / 10', num(realism.average, 1), realism.status || 'unmeasured', realism.count ? `${realism.count} 份样本` : '');
+  add('体验与公平', '亚组分数差', '≤ 0.15 SD', fairness.overall_gap_sd === null || fairness.overall_gap_sd === undefined ? '—' : `${num(fairness.overall_gap_sd, 3)} SD`, scorecardStatus(fairness.overall_gap_sd, 0.15, 'le'));
+  add('体验与公平', '申诉率', '< 3%', pct(appeals.appeal_rate, 1), scorecardStatus(appeals.appeal_rate, 0.03, 'le'));
+  add('体验与公平', '改判率', '< 20%', pct(appeals.change_rate, 1), scorecardStatus(appeals.change_rate, 0.20, 'le'));
+
+  const groups = [];
+  rows.forEach((row) => {
+    if (!groups.includes(row.group)) groups.push(row.group);
+  });
+  const body = groups.map((group) => {
+    const groupRows = rows.filter((row) => row.group === group);
+    return groupRows.map((row, index) => `
+      <tr>
+        ${index === 0 ? `<td rowspan="${groupRows.length}" style="font-weight:600;vertical-align:top">${esc(group)}</td>` : ''}
+        <td>${esc(row.label)}${row.note ? `<div class="tiny muted">${esc(row.note)}</div>` : ''}</td>
+        <td>${esc(row.target)}</td>
+        <td>${esc(row.display)}</td>
+        <td>${scorecardPill(row.status)}</td>
+      </tr>`).join('');
+  }).join('');
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">S9 验收指标总览<span class="sub">按设计文档目标自动判定 · 未采集不冒充达标</span></div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th style="width:10%">层次</th><th>指标</th><th style="width:20%">目标</th><th style="width:24%">当前</th><th style="width:10%">状态</th></tr></thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
+      <div class="tiny muted" style="margin-top:6px">“未采集”仅表示缺少样本，不等同于达标；“警示”表示未触发红线但存在橡皮图章或体验风险。</div>
+    </div>`;
+}
+
 async function viewQuality() {
   const canManageUsers = Boolean(state.user && state.user.role === 'admin');
   const canManageBlueprint = Boolean(state.user && state.user.role === 'exam_manager');
@@ -3081,6 +3187,8 @@ async function viewQuality() {
       <span>考试反馈生成 ${readyExam.count ? `平均 <b>${num(readyExam.avg, 1)}</b> 小时 · 72h 内 <span class="pill ${readyExam.status === 'pass' ? 'teal' : 'red'}">${pct(readyExam.within_rate, 0)}</span>（${readyExam.count} 份）` : '尚无已发布成绩'}</span>
       ${appeals.missing_snapshot ? `<span class="tiny muted">${appeals.missing_snapshot} 场历史申诉缺少原始快照</span>` : ''}
     </div>
+
+    ${scorecardHtml(data)}
 
     <div class="card" style="margin-bottom:16px">
       <div class="card-title">分站质量<span class="sub">按冻结版本 · 识别低区分度考站</span></div>
