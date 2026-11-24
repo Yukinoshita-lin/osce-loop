@@ -7,6 +7,21 @@ from typing import Any
 from .rubric import PHASES, PHASE_RANK
 
 EMPATHY_MARKERS = ("理解", "担心", "别急", "放心", "陪", "难受", "辛苦", "害怕")
+PRESSURE_MARKERS = (
+    "快点",
+    "赶紧",
+    "别废话",
+    "你到底",
+    "必须",
+    "马上",
+    "说了多少遍",
+    "少啰嗦",
+)
+DISTRESS_LINES = (
+    "医生，您这么急，我心里更慌了……能不能慢一点问？",
+    "您别这么大声，我有点害怕，您慢慢说。",
+    "我……我一下记不清了，您让我缓一缓。",
+)
 
 PHASE_TRIGGERS = {
     "assessment": ("听诊", "查体", "检查一下", "量血压", "触诊", "叩诊", "体格检查"),
@@ -71,6 +86,7 @@ class DialogueStateMachine:
             "turn": 0,
             "released": released,
             "trust": 0,
+            "emotion_load": 0.0,
             "intent_history": [],
             "transitioned": False,
             "degraded_count": 0,
@@ -110,6 +126,30 @@ class DialogueStateMachine:
         if intent["empathy"]:
             new_state["trust"] = int(state.get("trust", 0)) + 1
 
+        # 情绪唤起：压力性提问累积，共情回落；超过人格卡阈值时暂停释放新信息
+        persona = self.persona.get("persona") if isinstance(self.persona.get("persona"), dict) else {}
+        try:
+            threshold = float(persona.get("emotion_threshold", 1.0))
+        except (TypeError, ValueError):
+            threshold = 1.0
+        threshold = min(1.0, max(0.0, threshold))
+        load = float(state.get("emotion_load") or 0.0)
+        exclamations = user_text.count("！") + user_text.count("!")
+        pressured = bool(_contains_any(user_text, PRESSURE_MARKERS)) or exclamations >= 2
+        if intent["empathy"]:
+            load = max(0.0, load - 0.2)
+        elif pressured:
+            load = min(1.0, load + 0.3)
+        else:
+            load = min(1.0, load + (0.08 if intent["is_question"] else 0.04))
+        distressed = threshold < 1.0 and load >= threshold
+        if distressed:
+            load = threshold * 0.5
+        new_state["emotion_load"] = round(load, 3)
+        intent["distressed"] = distressed
+        intent["emotion_threshold"] = threshold
+        intent["emotion_load"] = new_state["emotion_load"]
+
         # 开场后第一轮对话自动进入信息采集；其余阶段必须由考生行为触发
         if intent["phase_target"]:
             target_rank = PHASE_RANK[intent["phase_target"]]
@@ -122,6 +162,8 @@ class DialogueStateMachine:
         released_now: list[str] = []
         current_rank = PHASE_RANK.get(new_state["phase"], 0)
         for slot in self.slots:
+            if distressed:
+                break
             slot_id = slot["slot_id"]
             if slot_id in new_state["released"]:
                 continue
@@ -237,18 +279,22 @@ class SPController:
         new_state, released_now, intent, transitioned = self.machine.step_state(state, user_text)
         allowed = self.machine.slots_by_ids(new_state["released"])
         unreleased = self.machine.unreleased(new_state)
-        draft = self.generate(
-            allowed,
-            self.machine.persona,
-            new_state["turn"],
-            focus_ids=released_now,
-            empathy=bool(intent.get("empathy")),
-        )
+        distressed = bool(intent.get("distressed"))
+        if distressed:
+            draft = DISTRESS_LINES[new_state["turn"] % len(DISTRESS_LINES)]
+        else:
+            draft = self.generate(
+                allowed,
+                self.machine.persona,
+                new_state["turn"],
+                focus_ids=released_now,
+                empathy=bool(intent.get("empathy")),
+            )
 
         verification = self.verify(draft, self.machine.persona, unreleased)
         attempts = 0
         degraded = False
-        while not verification["passed"] and attempts < 2:
+        while not distressed and not verification["passed"] and attempts < 2:
             attempts += 1
             if not verification["repairable"]:
                 break

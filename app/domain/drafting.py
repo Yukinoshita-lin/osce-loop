@@ -915,6 +915,7 @@ def generate_bundle_draft(
             "occupation": patient["occupation"],
             "persona": {
                 "tone": case["tone"],
+                "emotion_threshold": 0.6,
                 "language": "普通话清晰",
                 "memory": "清晰",
                 "cognition": 0,

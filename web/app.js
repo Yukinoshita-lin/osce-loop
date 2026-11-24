@@ -2066,6 +2066,7 @@ function renderSP() {
           </div>
           <div class="dim-list">
             <div class="dim-row"><span>情绪基调</span><span>${esc(dims.tone || '—')}</span></div>
+            <div class="dim-row"><span>情绪唤起阈值</span><span>${esc(dims.emotion_threshold ?? '—')}</span></div>
             <div class="dim-row"><span>语言熟练度</span><span>${esc(dims.language || '—')}</span></div>
             <div class="dim-row"><span>病史记忆</span><span>${esc(dims.memory || '—')}</span></div>
             <div class="dim-row"><span>认知混乱度</span><span>${esc(dims.cognition ?? 0)}</span></div>

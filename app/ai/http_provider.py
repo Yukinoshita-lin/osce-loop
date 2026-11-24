@@ -39,8 +39,8 @@ DRAFT_SYSTEM_PROMPT = """你是 OSCE 命题助手，只输出一个 JSON 站包�
   "candidate_instructions": ["给考生的指令"],
   "sp_profile": {
     "name": "患者姓名", "age": 50, "gender": "male 或 female", "occupation": "职业",
-    "persona": {"tone": "情绪基调", "language": "语言熟练度", "memory": "病史记忆",
-                "cognition": 0, "disclosure": "披露阈值"},
+    "persona": {"tone": "情绪基调", "emotion_threshold": 0.6, "language": "语言熟练度",
+                "memory": "病史记忆", "cognition": 0, "disclosure": "披露阈值"},
     "forbidden": ["不给出诊断", "不给出用药建议", "不评价考生"],
     "opening_line": "开场白"
   },

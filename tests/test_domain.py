@@ -437,6 +437,34 @@ def test_sp_trust_threshold_releases_slot():
     assert any("瘦了五六斤" in s["content"] for s in machine.slots_by_ids(state["released"]))
 
 
+def test_emotion_threshold_withholds_information_under_pressure():
+    payload = build_bundle_payload()
+    assert payload["sp_profile"]["persona"]["emotion_threshold"] == 0.6
+    payload["sp_profile"]["persona"]["emotion_threshold"] = 0.3
+    derived = derive_assets(payload)
+    machine = DialogueStateMachine(payload, derived)
+    controller = SPController(machine)
+    state = machine.start()
+    assert state["emotion_load"] == 0
+
+    result = controller.respond(state, "疼多久了？")
+    state = result["state"]
+    assert result["intent"]["distressed"] is False
+    assert state["emotion_load"] == 0.08
+    assert "两个多小时" in result["reply"]
+
+    result = controller.respond(state, "快点说，你到底哪里疼！")
+    state = result["state"]
+    assert result["intent"]["distressed"] is True
+    assert result["released_now"] == []
+    assert any(word in result["reply"] for word in ("慌", "害怕", "缓一缓"))
+
+    result = controller.respond(state, "别急，我理解您现在很难受")
+    state = result["state"]
+    assert result["intent"]["distressed"] is False
+    assert state["emotion_load"] < 0.3
+
+
 def test_sp_verifier_blocks_leak():
     payload = build_bundle_payload()
     derived = derive_assets(payload)

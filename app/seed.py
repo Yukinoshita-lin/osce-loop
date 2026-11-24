@@ -499,6 +499,7 @@ def build_bundle_payload() -> dict[str, Any]:
             "occupation": "退休教师",
             "persona": {
                 "tone": "焦虑但克制",
+                "emotion_threshold": 0.6,
                 "language": "普通话清晰",
                 "memory": "清晰",
                 "cognition": 0,
