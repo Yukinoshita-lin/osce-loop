@@ -2181,6 +2181,41 @@ async function viewQuality() {
       <td class="num">${pct(s.integrity_gap_rate, 1)}</td>
       <td class="num">${s.fairness_gap_sd === null || s.fairness_gap_sd === undefined ? '—' : `<span class="pill ${s.fairness_gap_sd <= 0.15 ? 'teal' : 'red'}">${num(s.fairness_gap_sd, 2)} SD</span>`}</td>
     </tr>`).join('');
+  const psychometrics = data.psychometrics || [];
+  const psychoFlag = (flags) => {
+    const labels = {
+      sample_insufficient: ['样本不足', 'amber'],
+      ceiling: ['天花板', 'amber'],
+      floor: ['地板', 'red'],
+      low_discrimination: ['低区分', 'red'],
+    };
+    if (!flags || !flags.length) return '<span class="pill teal">正常</span>';
+    return flags.map((flag) => {
+      const [label, color] = labels[flag] || [flag, 'muted'];
+      return `<span class="pill ${color}">${esc(label)}</span>`;
+    }).join(' ');
+  };
+  const psychoRows = psychometrics.map((p) => {
+    const alphaClass = p.alpha === null || p.alpha === undefined ? 'muted' : p.alpha >= 0.7 ? 'teal' : p.alpha >= 0.6 ? 'amber' : 'red';
+    return `<tr>
+      <td><div style="font-weight:600">${esc(p.station_id)}</div><div class="tiny muted">${esc(p.title)}</div></td>
+      <td><span class="pill muted">v${esc(p.version)}</span></td>
+      <td class="num">${p.scored_attempts}</td>
+      <td class="num">${num(p.mean_total, 1)}</td>
+      <td class="num">${num(p.sd_total, 1)}</td>
+      <td class="num">${p.pass_rate === null ? '—' : pct(p.pass_rate, 0)}</td>
+      <td class="num"><span class="pill ${alphaClass}">${p.alpha === null || p.alpha === undefined ? '样本不足' : num(p.alpha, 3)}</span></td>
+      <td>${psychoFlag(p.flags)}</td>
+    </tr>`;
+  }).join('');
+  const psychoNotes = psychometrics.filter((p) => p.low_discrimination_items.length || p.ceiling_items.length || p.floor_items.length).map((p) => {
+    const itemMap = Object.fromEntries((p.items || []).map((item) => [item.item_id, item]));
+    const parts = [];
+    if (p.low_discrimination_items.length) parts.push(`低区分：${p.low_discrimination_items.map((id) => `${esc(id)}（${num((itemMap[id] || {}).discrimination, 2)}）`).join('、')}`);
+    if (p.ceiling_items.length) parts.push(`全员满分：${p.ceiling_items.map(esc).join('、')}`);
+    if (p.floor_items.length) parts.push(`全员零分：${p.floor_items.map(esc).join('、')}`);
+    return `<div class="version-row"><span class="k">${esc(p.station_id)}</span><span class="v">${parts.join(' · ')}</span></div>`;
+  }).join('');
   const itemRows = ((itemQuality && itemQuality.items) || []).map((item) => `
     <tr>
       <td><div class="mono tiny muted">${esc(item.item_id)}</div><div style="font-weight:600">${esc(item.title)}</div></td>
@@ -2272,6 +2307,18 @@ async function viewQuality() {
         </table>
       </div>
       <div class="tiny muted" style="margin-top:6px">分站 QWK 仅统计该冻结版本下的场次；最新版本无场次时显示为 —。</div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">站级心理测量<span class="sub">难度 · 区分度 · Cronbach's α · 异常站标记</span></div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>考站</th><th>版本</th><th class="num">场次</th><th class="num">均分</th><th class="num">SD</th><th class="num">通过率</th><th class="num">α</th><th>标记</th></tr></thead>
+          <tbody>${psychoRows || '<tr><td colspan="8" class="empty">暂无足够评分数据</td></tr>'}</tbody>
+        </table>
+      </div>
+      ${psychoNotes}
+      <div class="tiny muted" style="margin-top:6px">α ≥ 0.7 视为可接受；项级区分度 < 0.2 或全员满分/零分提示评分表或 SP 可能有问题，需人工裁定。</div>
     </div>
 
     <div class="card" style="margin-bottom:16px">

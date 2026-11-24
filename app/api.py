@@ -102,6 +102,7 @@ from .domain.item_quality import item_quality_report
 from .domain.maintenance import run_maintenance
 from .domain.media import backfill_media_hashes
 from .domain.practice import build_practice_report
+from .domain.psychometrics import station_psychometrics
 from .domain.retention import purge_expired, refresh_retention, retention_overview
 from .domain.review import apply_review
 from .domain.risk import RISK_ORDER, escalate_risk
@@ -149,6 +150,15 @@ def get_conn():
         yield conn
     finally:
         conn.close()
+
+
+@app.middleware("http")
+async def static_cache_control(request: Request, call_next):
+    """静态资源与首页每次都回源校验，避免升级后浏览器继续使用旧前端。"""
+    response = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
 
 
 @app.middleware("http")
@@ -1478,6 +1488,7 @@ def quality(conn=Depends(get_conn)):
         "gates": gates,
         "model_cards": model_cards,
         "item_quality": item_quality,
+        "psychometrics": station_psychometrics(conn),
         "ai_calls": {
             "count": len(calls),
             "p95_latency_ms": p95,
