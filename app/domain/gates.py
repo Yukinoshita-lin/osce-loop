@@ -10,6 +10,7 @@ from .ab import ab_report
 from .bundle import list_bundles
 from .consent import consent_status
 from .cost import ai_cost_summary
+from .critical_miss import critical_misses
 from .fairness import fairness_report
 from .latency import feedback_ack_latency
 from .sp_approval import persona_approval_status
@@ -339,6 +340,18 @@ def evaluate_gates(conn, report: dict[str, Any], current_stage: str) -> dict[str
                 "level": "danger",
                 "title": "亚组分数差超过 0.20 SD",
                 "detail": f"当前最大亚组差 {subgroup_gap} SD；连续超标应自动降级并复核该组边缘案例。",
+            }
+        )
+    miss_state = critical_misses(conn)
+    if miss_state.get("unresolved"):
+        alerts.append(
+            {
+                "level": "danger",
+                "title": f"关键项漏判 {miss_state['unresolved']} 条待根因分析",
+                "detail": (
+                    f"累计漏判 {miss_state.get('total', 0)} 条，其中 {miss_state['unresolved']} 条尚未归因；"
+                    "任何一次关键项漏判都必须逐条归因并绑定纠正动作，未归因项持续计入 G3 指标。"
+                ),
             }
         )
     edit_gap = values.get("edit_gap_pp")

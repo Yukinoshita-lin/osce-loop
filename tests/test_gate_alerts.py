@@ -211,3 +211,27 @@ def test_fairness_gaps_within_thresholds_do_not_alert(tmp_path, monkeypatch):
     assert not any("编辑率组间差" in title for title in titles)
     assert not any("反馈可及性组间差" in title for title in titles)
     conn.close()
+
+
+def test_unresolved_critical_miss_alerts(tmp_path, monkeypatch):
+    conn = _conn(tmp_path)
+    monkeypatch.setattr(
+        "app.domain.gates.critical_misses",
+        lambda conn, limit=50: {"total": 3, "unresolved": 1, "resolved": 2},
+    )
+    gates = evaluate_gates(conn, _report(0.2, 40), "G0_offline")
+    titles = [alert["title"] for alert in gates["alerts"]]
+    assert any("关键项漏判 1 条待根因分析" in title for title in titles)
+    conn.close()
+
+
+def test_resolved_critical_misses_do_not_alert(tmp_path, monkeypatch):
+    conn = _conn(tmp_path)
+    monkeypatch.setattr(
+        "app.domain.gates.critical_misses",
+        lambda conn, limit=50: {"total": 3, "unresolved": 0, "resolved": 3},
+    )
+    gates = evaluate_gates(conn, _report(0.2, 40), "G0_offline")
+    titles = [alert["title"] for alert in gates["alerts"]]
+    assert not any("待根因分析" in title for title in titles)
+    conn.close()
