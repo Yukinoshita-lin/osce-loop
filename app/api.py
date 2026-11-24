@@ -116,6 +116,7 @@ from .domain.retention import purge_expired, refresh_retention, retention_overvi
 from .domain.readability import analyze_feedback_readability
 from .domain.request_log import append_request_log, recent_requests, request_log_summary
 from .domain.review import apply_review
+from .domain.rewrite import PRINCIPLE as REWRITE_PRINCIPLE, suggest_anchor_rewrites
 from .domain.risk import RISK_ORDER, escalate_risk
 from .domain.rubric import AUTHORITY_LABELS, PHASE_LABELS, cap_authority, derive_assets, validate_bundle
 from .domain.run_export import build_run_package
@@ -1411,6 +1412,8 @@ def validate_bundle_proposal(body: BundlePayloadBody, conn=Depends(get_conn)):
         "derived_counts": counts,
         "diff": diff,
         "similarity": find_similar_bundles(conn, body.payload),
+        "rewrites": suggest_anchor_rewrites(body.payload),
+        "rewrite_principle": REWRITE_PRINCIPLE,
     }
 
 

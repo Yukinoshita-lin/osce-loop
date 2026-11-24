@@ -2890,11 +2890,22 @@ document.addEventListener('click', async (e) => {
           <span>${similar.map((s) => `${esc(s.station_id)} · ${esc(s.title)} v${esc(s.version)}（相似度 ${pct(s.similarity, 0)}）`).join('；')}</span>
           <div class="tiny muted">文本相似度仅作“换汤不换药”初筛；请人工确认考点是否真正不同。</div>
         </div>` : '';
+      const rewrites = result.rewrites || [];
+      const rewriteHtml = rewrites.length ? `
+        <div style="margin-top:6px">
+          <span class="pill amber">行为锚改写建议 ${rewrites.length} 条</span>
+          <div class="tiny muted">${esc(result.rewrite_principle || '行为锚必须可观察；建议只作为改写起点，最终由命题专家签字。')}</div>
+          ${rewrites.slice(0, 8).map((r) => `<div style="margin-top:3px">
+            <span class="mono tiny">${esc(r.item_id)}.${esc(r.field)}</span>
+            <span class="tiny">${esc(r.reason)}</span> → <b>${esc(r.suggestion)}</b>
+            <span class="tiny muted">${esc(r.rationale)}</span></div>`).join('')}
+        </div>` : '';
       box.className = 'tiny';
       box.innerHTML = `
         <div>${v.can_freeze ? '<span class="pill teal">可冻结</span>' : '<span class="pill red">存在阻断项</span>'}
           ${(v.counts || {}).items || counts.items || 0} 个评分项 · 派生 ${counts.slots || 0} 个信息槽 / ${counts.probes || 0} 个探针</div>
         ${checksHtml}
+        ${rewriteHtml}
         ${similarHtml}
         ${changesHtml}
         ${v.blocking.length ? `<div style="margin-top:4px;color:var(--red)">${esc(v.blocking.slice(0, 3).join('；'))}</div>` : ''}`;
