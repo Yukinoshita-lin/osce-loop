@@ -688,9 +688,11 @@ def case_topics() -> list[dict[str, Any]]:
 def _quota_check(payload: dict[str, Any], case: dict[str, Any]) -> dict[str, Any]:
     texts: list[str] = []
     for slot in payload.get("extra_slots") or []:
-        texts.append(str(slot.get("content") or ""))
+        if isinstance(slot, dict):
+            texts.append(str(slot.get("content") or ""))
     for item in payload.get("rubric") or []:
-        texts.append(str((item.get("slot") or {}).get("content") or ""))
+        if isinstance(item, dict):
+            texts.append(str((item.get("slot") or {}).get("content") or ""))
     checks = []
     for key, label, expected in (
         ("comorbidity", "至少 1 项共病", case["comorbidity"]),
@@ -721,7 +723,7 @@ def _difficulty_report(
     quota: dict[str, Any],
     historical: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    items = payload.get("rubric") or []
+    items = [item for item in payload.get("rubric") or [] if isinstance(item, dict)]
     item_count = len(items)
     critical_count = sum(1 for item in items if item.get("critical"))
     distractors = max(0, len(payload.get("extra_slots") or []) - 1)
@@ -942,6 +944,8 @@ def generate_bundle_draft(
                 raise ValueError("LLM 草案必须是 JSON 对象")
             if not isinstance(candidate.get("rubric"), list) or not candidate["rubric"]:
                 raise ValueError("LLM 草案缺少 rubric")
+            if not all(isinstance(item, dict) for item in candidate["rubric"]):
+                raise ValueError("LLM 草案的 rubric 项必须是对象")
             if not _quota_check(candidate, case)["passed"]:
                 raise ValueError("LLM 草案未满足强制配额（共病/无关诉求/主诉模糊）")
             payload = copy.deepcopy(candidate)

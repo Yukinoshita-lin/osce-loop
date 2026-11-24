@@ -211,4 +211,13 @@ def test_draft_falls_back_when_llm_fails_or_breaks_quota(tmp_path):
     )
     assert broken["draft_source"] == "template"
     assert "强制配额" in broken["llm_error"]
+
+    malformed = generate_bundle_draft(
+        conn,
+        topic="fever",
+        difficulty="medium",
+        llm_provider=_DraftProvider({"rubric": ["不是对象"]}),
+    )
+    assert malformed["draft_source"] == "template"
+    assert "必须是对象" in malformed["llm_error"]
     conn.close()
