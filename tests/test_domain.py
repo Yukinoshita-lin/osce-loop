@@ -11,7 +11,7 @@ import pytest
 from app import db
 from app.ai.base import CapabilityGateway, Suggestion
 from app.ai.mock import MockScoringProvider
-from app.ai.pipeline import _assert_schema
+from app.ai.pipeline import _asr_cohort_gap, _assert_schema
 from app.domain.bundle import (
     apply_authority_reset,
     diff_payloads,
@@ -358,6 +358,11 @@ def test_routing_priority_and_sampling():
     assert route_item(**{**common, "integrity_gap": True, "near_cutoff": True})["reason"] == "integrity_gap"
     assert route_item(**{**common, "asr_confidence": 0.4})["reason"] == "asr_low_confidence"
     assert route_item(**{**common, "asr_confidence": 0.4})["route"] == "full_station_human"
+    cohort = route_item(**{**common, "asr_cohort_gap": -0.12})
+    assert cohort["reason"] == "asr_cohort_gap"
+    assert cohort["route"] == "full_station_human"
+    assert cohort["detail"]["gap"] == -0.12
+    assert route_item(**{**common, "asr_cohort_gap": -0.05})["reason"] != "asr_cohort_gap"
     assert route_item(**{**common, "asr_confidence": 0.95, "integrity_gap": True})["reason"] == "integrity_gap"
     assert route_item(**{**common, "ai_score": None, "authority": "none"})["reason"] == "manual_only"
     dual = route_item(**{**common, "item": {**item, "critical": True}, "ai_score": 0})
@@ -395,6 +400,43 @@ def test_routing_priority_and_sampling():
     assert sampling_hit("rec_1", 0.2) == sampling_hit("rec_1", 0.2)
     assert is_near_cutoff(62.0, 60.0)
     assert not is_near_cutoff(70.0, 60.0)
+
+
+def test_asr_cohort_gap_requires_enough_history(tmp_path):
+    conn = db.connect(tmp_path / "cohort.db")
+    db.init_db(conn)
+    try:
+        def insert(index, confidence):
+            conn.execute(
+                "INSERT INTO attempts(attempt_id, bundle_id, candidate_code, candidate_name, "
+                "session_id, risk_level, asr_confidence, created_at) VALUES(?,?,?,?,?,?,?,?)",
+                (
+                    f"att_{index}",
+                    "bnd_x",
+                    f"C{index}",
+                    f"考生{index}",
+                    "sess",
+                    "L2",
+                    confidence,
+                    db.now_iso(),
+                ),
+            )
+
+        for index in range(4):
+            insert(index, 0.9)
+        conn.commit()
+        current = {"attempt_id": "att_new", "bundle_id": "bnd_x", "asr_confidence": 0.75}
+        assert _asr_cohort_gap(conn, "bnd_x", current) is None
+
+        insert(4, 0.9)
+        insert(5, 0.9)
+        conn.commit()
+        assert _asr_cohort_gap(conn, "bnd_x", current) == pytest.approx(-0.15)
+
+        current["asr_confidence"] = None
+        assert _asr_cohort_gap(conn, "bnd_x", current) is None
+    finally:
+        conn.close()
 
 
 def test_qwk_values():

@@ -4,7 +4,12 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-from ..config import ASR_LOW_CONFIDENCE, PASS_LINE_MARGIN, SAMPLE_RATES
+from ..config import (
+    ASR_COHORT_GAP,
+    ASR_LOW_CONFIDENCE,
+    PASS_LINE_MARGIN,
+    SAMPLE_RATES,
+)
 from .rubric import AUTHORITY_ORDER
 
 
@@ -35,6 +40,7 @@ def route_item(
     appeal: bool = False,
     item_disagreement_rate: float = 0.0,
     asr_confidence: float | None = None,
+    asr_cohort_gap: float | None = None,
     low_score_tail: bool = False,
     low_score_detail: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -61,6 +67,19 @@ def route_item(
             requires_human=True,
             reason_text=f"转写平均置信度 {float(asr_confidence):.2f} 低于阈值 {ASR_LOW_CONFIDENCE:.2f}，整站转人工复核",
             detail={"asr_confidence": round(float(asr_confidence), 3), "threshold": ASR_LOW_CONFIDENCE},
+        )
+
+    # 1c. 相对同站历史均值显著偏低：口音/语速等条件下工具不可靠，整站人工全量复核
+    if asr_cohort_gap is not None and float(asr_cohort_gap) <= -ASR_COHORT_GAP:
+        return _route(
+            "full_station_human",
+            "asr_cohort_gap",
+            requires_human=True,
+            reason_text=(
+                f"该考生转写置信度比同站历史均值低 {abs(float(asr_cohort_gap)):.2f}，"
+                "工具在该条件下不可靠，整站转人工复核"
+            ),
+            detail={"gap": round(float(asr_cohort_gap), 3), "threshold": ASR_COHORT_GAP},
         )
 
     # 2. 关键项 AI 判阴性：双人复核

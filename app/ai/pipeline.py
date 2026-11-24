@@ -6,6 +6,7 @@ from statistics import mean
 from typing import Any
 
 from .. import db
+from ..config import ASR_COHORT_MIN_ATTEMPTS
 from ..domain.bundle import effective_authority
 from ..domain.routing import compute_ai_total, is_near_cutoff, route_item
 from .base import CapabilityGateway, evidence_to_json
@@ -76,6 +77,21 @@ def _item_asr_confidence(
     return default
 
 
+def _asr_cohort_gap(conn, bundle_id: str, attempt: dict[str, Any]) -> float | None:
+    """当前场次转写置信度与同站历史均值的差；历史样本不足时返回 None。"""
+    current = attempt.get("asr_confidence")
+    if current is None:
+        return None
+    row = conn.execute(
+        "SELECT AVG(asr_confidence) AS avg, COUNT(*) AS n FROM attempts "
+        "WHERE bundle_id = ? AND attempt_id != ? AND asr_confidence IS NOT NULL",
+        (bundle_id, attempt["attempt_id"]),
+    ).fetchone()
+    if not row or int(row["n"] or 0) < ASR_COHORT_MIN_ATTEMPTS or row["avg"] is None:
+        return None
+    return round(float(current) - float(row["avg"]), 3)
+
+
 def run_scoring(
     conn,
     gateway: CapabilityGateway,
@@ -135,6 +151,7 @@ def run_scoring(
     near = is_near_cutoff(ai_total, pass_line)
     low_tail = risk_level == "L2" and ai_total is not None and ai_total < pass_line
     integrity_gap = bool(attempt.get("integrity_gap"))
+    asr_gap = _asr_cohort_gap(conn, bundle["bundle_id"], attempt)
 
     for item in rubric:
         item_id = item["item_id"]
@@ -238,6 +255,7 @@ def run_scoring(
             appeal=bool(attempt.get("appeal")),
             item_disagreement_rate=disagreement.get(item_id, 0.0),
             asr_confidence=item_asr,
+            asr_cohort_gap=asr_gap,
             low_score_tail=low_tail,
             low_score_detail={"ai_total": ai_total, "pass_line": pass_line},
         )

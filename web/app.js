@@ -22,6 +22,7 @@ const STATUS = {
 const REASON_COLOR = {
   integrity_gap: 'red',
   asr_low_confidence: 'amber',
+  asr_cohort_gap: 'red',
   risk_escalation: 'red',
   critical_negative: 'red',
   review_disagreement: 'red',
