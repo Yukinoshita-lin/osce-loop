@@ -194,6 +194,17 @@ CREATE TABLE IF NOT EXISTS sp_consents (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS station_reviews (
+    review_id TEXT PRIMARY KEY,
+    station_id TEXT NOT NULL,
+    bundle_id TEXT,
+    flag TEXT NOT NULL,
+    decision TEXT NOT NULL,
+    note TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS sp_reports (
     session_id TEXT PRIMARY KEY,
     bundle_id TEXT NOT NULL,

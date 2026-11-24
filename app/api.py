@@ -133,6 +133,7 @@ from .domain.slots import DialogueStateMachine, SPController
 from .domain.spqa import certification_for_bundle, certify_bundle, ensure_certification
 from .domain.stats import domain_scores, quality_report
 from .domain.station_quality import station_quality_report
+from .domain.station_review import list_station_reviews, record_station_review
 from .domain.sus import submit_sus, sus_summary
 from .domain.trace import score_trace
 from .domain.transcript import parse_transcript
@@ -1610,6 +1611,37 @@ def quality_stations(conn=Depends(get_conn)):
     return {"stations": station_quality_report(conn)}
 
 
+@app.get("/api/quality/station-reviews")
+def quality_station_reviews(conn=Depends(get_conn), station_id: str | None = None):
+    return {"reviews": list_station_reviews(conn, station_id)}
+
+
+class StationReviewBody(BaseModel):
+    station_id: str = Field(min_length=1, max_length=60)
+    flag: str = Field(default="other", pattern=r"^(ceiling|floor|low_discrimination|sample_insufficient|other)$")
+    decision: str = Field(pattern=r"^(rubric_revision|sp_retraining|teaching|monitor|no_action)$")
+    note: str = Field(min_length=1, max_length=300)
+    bundle_id: str | None = None
+
+
+@app.post("/api/quality/station-review")
+def quality_station_review(body: StationReviewBody, request: Request, conn=Depends(get_conn)):
+    _ensure_not_stopped(conn)
+    try:
+        review = record_station_review(
+            conn,
+            station_id=body.station_id,
+            flag=body.flag,
+            decision=body.decision,
+            note=body.note,
+            bundle_id=body.bundle_id,
+            actor=request.state.user["display_name"],
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "review": review, "reviews": list_station_reviews(conn, limit=20)}
+
+
 @app.get("/api/transparency")
 def transparency(conn=Depends(get_conn)):
     return public_transparency(conn)
@@ -1651,6 +1683,7 @@ def quality(conn=Depends(get_conn)):
         "model_cards": model_cards,
         "item_quality": item_quality,
         "psychometrics": station_psychometrics(conn),
+        "station_reviews": list_station_reviews(conn, limit=20),
         "coverage": blueprint_coverage(conn),
         "feedback_latency": feedback_ack_latency(conn),
         "ai_calls": {

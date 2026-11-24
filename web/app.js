@@ -2346,6 +2346,17 @@ async function viewQuality() {
     return `<div class="version-row"><span class="k">${esc(p.station_id)}</span><span class="v">${parts.join(' · ')}</span></div>`;
   }).join('');
   const coverage = data.coverage || {};
+  const flagLabels = { ceiling: '天花板', floor: '地板', low_discrimination: '低区分度', sample_insufficient: '样本不足', other: '其他异常' };
+  const decisionLabels = { rubric_revision: '修订评分表', sp_retraining: 'SP 复训', teaching: '教学改进', monitor: '继续观察', no_action: '暂不处理' };
+  const stationReviews = data.station_reviews || [];
+  const reviewRows = stationReviews.map((r) => `
+    <div class="version-row">
+      <span class="k">${esc(r.station_id)} · ${esc(flagLabels[r.flag] || r.flag)}</span>
+      <span class="v">${esc(decisionLabels[r.decision] || r.decision)} · ${esc(r.note)} · ${esc(r.actor)} · ${fmtTime(r.created_at)}</span>
+    </div>`).join('');
+  const stationReviewOptions = psychometrics
+    .map((p) => `<option value="${dataAttr(p.station_id)}">${esc(p.station_id)} · ${esc(p.title)}</option>`)
+    .join('');
   const coverageRows = (coverage.domains || []).map((d) => {
     const statusLabel = { ok: ['达标', 'teal'], overrepresented: ['过度重复', 'amber'], single_station: ['单站覆盖', 'muted'] }[d.status] || [d.status, 'muted'];
     return `<tr>
@@ -2465,6 +2476,28 @@ async function viewQuality() {
         </table>
       </div>
       ${psychoNotes}
+      <div class="sep"></div>
+      <div class="card-title" style="margin-bottom:6px">异常站处置<span class="sub">把异常标记转成可追踪动作</span></div>
+      ${stationReviewOptions ? `<form id="station-review-form" class="btn-row" style="flex-wrap:wrap;gap:6px">
+        <select class="input" name="station_id" style="max-width:170px" aria-label="考站">${stationReviewOptions}</select>
+        <select class="input" name="flag" style="max-width:130px" aria-label="异常类型">
+          <option value="low_discrimination">低区分度</option>
+          <option value="ceiling">天花板</option>
+          <option value="floor">地板</option>
+          <option value="sample_insufficient">样本不足</option>
+          <option value="other">其他异常</option>
+        </select>
+        <select class="input" name="decision" style="max-width:140px" aria-label="处置决定">
+          <option value="rubric_revision">修订评分表</option>
+          <option value="sp_retraining">SP 复训</option>
+          <option value="teaching">教学改进</option>
+          <option value="monitor">继续观察</option>
+          <option value="no_action">暂不处理</option>
+        </select>
+        <input class="input" name="note" placeholder="处置说明" style="max-width:260px" required>
+        <button class="btn small primary" type="submit">记录处置</button>
+      </form>` : '<div class="tiny muted">暂无考站可处置</div>'}
+      <div class="audit-list" style="margin-top:6px">${reviewRows || '<div class="empty">暂无处置记录</div>'}</div>
       <div class="tiny muted" style="margin-top:6px">α ≥ 0.7 视为可接受；项级区分度 < 0.2 或全员满分/零分提示评分表或 SP 可能有问题，需人工裁定。</div>
     </div>
 
@@ -2664,6 +2697,28 @@ async function viewQuality() {
             </div>`).join('')
           : '<div class="empty">没有匹配的审计事件</div>';
         toast(`检索到 ${result.total} 条，显示 ${result.events.length} 条`);
+      } catch (err) {
+        toast(err.message, true);
+      }
+    });
+  }
+  const stationReviewForm = $('#station-review-form');
+  if (stationReviewForm) {
+    stationReviewForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const form = new FormData(stationReviewForm);
+      try {
+        await api('/api/quality/station-review', {
+          method: 'POST',
+          body: {
+            station_id: form.get('station_id'),
+            flag: form.get('flag'),
+            decision: form.get('decision'),
+            note: String(form.get('note') || '').trim(),
+          },
+        });
+        toast('已记录异常站处置');
+        await viewQuality();
       } catch (err) {
         toast(err.message, true);
       }
