@@ -1526,6 +1526,7 @@ async function renderFeedback(attemptId) {
   const data = await api(`/api/feedback/${encodeURIComponent(attemptId)}`);
   const purgedNote = data.media_purged_at ? '媒体已按留存策略清理，' : '';
   const history = data.history || {};
+  const crossProfile = data.cross_station_profile || {};
   const domainMax = Math.max(1, ...data.domains.map((d) => d.score || 0));
   const deductionHtml = data.deductions.length ? data.deductions.map((u) => {
     const ev = u.evidence;
@@ -1579,6 +1580,21 @@ async function renderFeedback(attemptId) {
           <span class="v">${num(d.previous, 1)} → ${num(d.current, 1)} <span class="pill ${d.delta >= 0 ? 'teal' : 'red'}">${d.delta > 0 ? '+' : ''}${num(d.delta, 1)}</span></span>
         </div>`).join('')}
       <div class="tiny muted" style="margin-top:6px">${esc(history.note || '')}</div>
+    </div>` : ''}
+
+    ${(crossProfile.attempts_count || 0) > 0 ? `<div class="card" style="margin-bottom:16px">
+      <div class="card-title">跨站能力画像<span class="sub">${crossProfile.attempts_count} 场 · ${crossProfile.stations_count} 个考站 · 仅已发布与当前场次</span></div>
+      <div class="attempt-strip" style="margin-bottom:6px">
+        ${crossProfile.strongest ? `<span>相对优势 <b>${esc(crossProfile.strongest.label)} ${num(crossProfile.strongest.score, 1)}</b></span>` : ''}
+        ${crossProfile.weakest ? `<span>相对薄弱 <b>${esc(crossProfile.weakest.label)} ${num(crossProfile.weakest.score, 1)}</b></span>` : ''}
+      </div>
+      ${(crossProfile.domains || []).map((d) => `
+        <div class="version-row">
+          <span class="k">${esc(d.label)}</span>
+          <span class="v">${num(d.score, 1)} · 权重 ${num(d.weight, 0)} · ${d.attempts} 场 / ${d.items} 项</span>
+        </div>`).join('')}
+      ${crossProfile.attempts_count === 1 ? '<div class="tiny muted">当前仅 1 场，跨站比较需更多考站场次。</div>' : ''}
+      <div class="tiny muted" style="margin-top:6px">${esc(crossProfile.note || '')}</div>
     </div>` : ''}
 
     <div class="grid c1-2" style="margin-bottom:16px">

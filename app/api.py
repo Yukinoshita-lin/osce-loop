@@ -112,6 +112,7 @@ from .domain.latency import feedback_ack_latency
 from .domain.maintenance import run_maintenance
 from .domain.media import backfill_media_hashes
 from .domain.practice import build_practice_report
+from .domain.profile import candidate_cross_station_profile
 from .domain.psychometrics import station_psychometrics
 from .domain.retention import purge_expired, refresh_retention, retention_overview
 from .domain.readability import analyze_feedback_readability
@@ -1549,6 +1550,7 @@ def feedback(attempt_id: str, request: Request, conn=Depends(get_conn)):
         "readability": readability,
         "survey": survey_for_attempt(conn, attempt_id),
         "history": candidate_history(conn, attempt_id),
+        "cross_station_profile": candidate_cross_station_profile(conn, attempt_id),
         "feedback_rule": "每条扣分项必须包含：可回放证据 + 对应评分项档位 + 可直接背诵的替代话术。",
     }
 
