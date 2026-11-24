@@ -2984,6 +2984,9 @@ document.addEventListener('click', async (e) => {
       const quotaHtml = result.quota.checks.map((c) => `
         <span class="pill ${c.found ? 'teal' : 'red'}">${esc(c.label)}</span>`).join(' ');
       const d = result.difficulty;
+      const sourceHtml = result.draft_source === 'llm'
+        ? '<span class="pill purple">LLM 初稿</span>'
+        : '<span class="pill">模板草案</span>';
       const similar = result.similarity || [];
       const similarHtml = similar.length
         ? `<span class="pill amber">相似站包</span> ${similar.map((s) => `${esc(s.station_id)} v${esc(s.version)}（${pct(s.similarity, 0)}）`).join('；')}`
@@ -2993,7 +2996,8 @@ document.addEventListener('click', async (e) => {
         box.className = 'tiny';
         box.innerHTML = `
           <div>${v.can_freeze ? '<span class="pill teal">可进入 S2 改写</span>' : '<span class="pill red">存在阻断项</span>'}
-            ${v.counts.items} 个评分项 · 关键项 ${v.counts.critical} · ${result.draft.duration_min} 分钟 · ${esc(result.draft.station_id)}</div>
+            ${sourceHtml} ${v.counts.items} 个评分项 · 关键项 ${v.counts.critical} · ${result.draft.duration_min} 分钟 · ${esc(result.draft.station_id)}</div>
+          ${result.llm_error ? `<div class="tiny" style="color:var(--amber)">LLM 草案未采用：${esc(result.llm_error)}</div>` : ''}
           <div style="margin-top:4px">${checkHtml}</div>
           <div style="margin-top:4px"><span class="pill ${result.quota.passed ? 'teal' : 'red'}">强制配额</span> ${quotaHtml}</div>
           <div style="margin-top:4px"><span class="pill ${d.aligned ? 'teal' : 'amber'}">难度 ${esc(d.requested)} → ${esc(d.estimated)}</span>

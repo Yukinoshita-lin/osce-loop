@@ -1,6 +1,8 @@
 """S1 命题辅助：L0 草案的校验、强制配额、难度预判与去重。"""
 from __future__ import annotations
 
+import copy
+
 from app import db
 from app.domain.bundle import freeze_bundle
 from app.domain.drafting import _quality_context, case_topics, generate_bundle_draft
@@ -157,3 +159,56 @@ def test_quality_context_without_history_is_explicit():
     ]
     healthy_context = _quality_context(healthy)
     assert "未发现低区分度项" in healthy_context["advisories"][0]
+
+
+class _DraftProvider:
+    model_version = "fake-llm-1.0"
+
+    def __init__(self, payload=None, error=None):
+        self.payload = payload
+        self.error = error
+
+    def draft_bundle(self, **kwargs):
+        if self.error:
+            raise RuntimeError(self.error)
+        return copy.deepcopy(self.payload)
+
+
+def test_draft_uses_llm_payload_when_valid(tmp_path):
+    conn = _conn(tmp_path)
+    base = generate_bundle_draft(conn, topic="abdominal_pain", difficulty="medium")["draft"]
+    base["title"] = "LLM 腹痛草案"
+    result = generate_bundle_draft(
+        conn,
+        topic="abdominal_pain",
+        difficulty="medium",
+        llm_provider=_DraftProvider(base),
+    )
+    assert result["draft_source"] == "llm"
+    assert result["llm_model_version"] == "fake-llm-1.0"
+    assert result["draft"]["title"] == "LLM 腹痛草案"
+    assert result["validation"]["can_freeze"] is True
+    conn.close()
+
+
+def test_draft_falls_back_when_llm_fails_or_breaks_quota(tmp_path):
+    conn = _conn(tmp_path)
+    failed = generate_bundle_draft(
+        conn,
+        topic="fever",
+        difficulty="medium",
+        llm_provider=_DraftProvider(error="模型超时"),
+    )
+    assert failed["draft_source"] == "template"
+    assert "模型超时" in failed["llm_error"]
+    assert failed["validation"]["can_freeze"] is True
+
+    broken = generate_bundle_draft(
+        conn,
+        topic="fever",
+        difficulty="medium",
+        llm_provider=_DraftProvider({"rubric": [{"item_id": "X.01"}]}),
+    )
+    assert broken["draft_source"] == "template"
+    assert "强制配额" in broken["llm_error"]
+    conn.close()

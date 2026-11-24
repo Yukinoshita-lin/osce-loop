@@ -31,6 +31,44 @@ SYSTEM_PROMPT = """你是 OSCE 评分副驾，只能依据给出的逐字转写�
 3. 判定“该阶段未发生某行为”时，evidence_kind 用 "absence"，quote 写明缺席观察；
 4. confidence 反映证据清晰度，不要用 1.0 表示绝对确定。"""
 
+DRAFT_SYSTEM_PROMPT = """你是 OSCE 命题助手，只输出一个 JSON 站包草案，不要输出 JSON 以外的文字。
+草案仅用于 L0 内部讨论，评分表必须由命题专家改写与签字。
+结构：
+{
+  "title": "站名",
+  "candidate_instructions": ["给考生的指令"],
+  "sp_profile": {
+    "name": "患者姓名", "age": 50, "gender": "male 或 female", "occupation": "职业",
+    "persona": {"tone": "情绪基调", "language": "语言熟练度", "memory": "病史记忆",
+                "cognition": 0, "disclosure": "披露阈值"},
+    "forbidden": ["不给出诊断", "不给出用药建议", "不评价考生"],
+    "opening_line": "开场白"
+  },
+  "extra_slots": [
+    {"content": "患者可说的话", "phase": "opening", "disclosure": "active",
+     "triggers": ["触发词"], "entities": ["实体"]}
+  ],
+  "guideline_kb": [{"ref": "指南条款编号", "text": "指南原文或摘要"}],
+  "rubric": [
+    {"item_id": "HX.01", "title": "评分项名", "domain": "communication 或 history_taking 或 assessment 或 clinical_reasoning 或 procedures 或 patient_safety",
+     "anchor": {"observable": "可观察行为", "positive": "阳性档", "partial": "部分档", "negative": "阴性档"},
+     "evidence_type": "utterance 或 action 或 document 或 global",
+     "phase": "opening 或 information_gathering 或 assessment 或 plan 或 closing",
+     "weight": 1, "ai_authority": "none 或 extract 或 suggest 或 decide",
+     "critical": false, "confidence_floor": 0.55, "guideline_ref": "必须出现在 guideline_kb 的 ref",
+     "slot": {"content": "患者在该阶段能说出的信息", "triggers": ["触发词"], "entities": ["实体"], "disclosure": "on_direct_ask"},
+     "probe": {"positive": ["正则片段"], "partial": ["正则片段"]},
+     "feedback_alt": "可直接背诵的替代话术"}
+  ]
+}
+硬性规则：
+1. 每条行为锚必须包含可观察动词（询问/说明/确认/完成等）和可听可见对象，禁止“理解/具备/表现出良好…”；
+2. 每个评分项的 guideline_ref 必须出现在 guideline_kb；
+3. 每个非 global 项必须有 slot.content 与 probe.positive；
+4. 关键项不得使用 decide；
+5. 必须包含给出的共病、无关合理诉求与主诉模糊内容，不得改写；
+6. 不要写成“教科书病人”：信息应有干扰项与不确定性。"""
+
 
 class ProviderError(RuntimeError):
     """模型不可用、响应不合法或证据无法核验。"""
@@ -108,6 +146,37 @@ class HttpScoringProvider:
         response = self._post(body)
         data = self._extract_json(response)
         return self._parse(data, item=item, transcript=transcript, attempt_meta=attempt_meta)
+
+    def draft_bundle(
+        self,
+        *,
+        topic: str,
+        difficulty: str,
+        duration_min: int,
+        guidelines: list[dict[str, Any]],
+        patient: dict[str, Any],
+        quotas: dict[str, Any],
+    ) -> dict[str, Any]:
+        """返回未校验的站包草案；调用方必须再跑 validate_bundle 与配额检查。"""
+        self.last_usage = None
+        brief = {
+            "topic": topic,
+            "difficulty": difficulty,
+            "duration_min": duration_min,
+            "guidelines": guidelines,
+            "patient": patient,
+            "required_quota": quotas,
+        }
+        body = {
+            "model": self.model,
+            "temperature": 0.3,
+            "messages": [
+                {"role": "system", "content": DRAFT_SYSTEM_PROMPT},
+                {"role": "user", "content": json.dumps(brief, ensure_ascii=False)},
+            ],
+        }
+        response = self._post(body)
+        return self._extract_json(response)
 
     def _input_payload(
         self,

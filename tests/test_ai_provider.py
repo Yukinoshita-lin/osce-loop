@@ -148,6 +148,24 @@ def test_http_provider_scores_with_verifiable_evidence(fake_ai):
     assert "疼多久了" in request["messages"][1]["content"]
 
 
+def test_http_provider_drafts_bundle(fake_ai):
+    draft = {"title": "LLM 命题草案", "rubric": [{"item_id": "HX.01"}]}
+    fake_ai.enqueue(200, draft)
+    provider = _provider(fake_ai)
+    result = provider.draft_bundle(
+        topic="急性腹痛",
+        difficulty="medium",
+        duration_min=8,
+        guidelines=[{"ref": "WSES-AA-2020 §2", "text": "采集起病方式"}],
+        patient={"name": "李国强", "age": 48},
+        quotas={"comorbidity": "糖尿病", "unrelated_concern": "检查要多久", "ambiguity": "说不上来"},
+    )
+    assert result["title"] == "LLM 命题草案"
+    request = fake_ai.requests[0]
+    assert "急性腹痛" in request["messages"][1]["content"]
+    assert "WSES-AA-2020 §2" in request["messages"][1]["content"]
+
+
 def test_unverifiable_evidence_is_rejected(fake_ai):
     fake_ai.enqueue(
         200,

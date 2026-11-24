@@ -834,6 +834,7 @@ def generate_bundle_draft(
     difficulty: str = "medium",
     duration_min: int | None = None,
     actor: str = "命题专家",
+    llm_provider=None,
 ) -> dict[str, Any]:
     """生成 L0 站包草案；返回草案本身、四项检查与预判信息，并写入审计。"""
     case = CASES.get(topic)
@@ -920,6 +921,50 @@ def generate_bundle_draft(
         "rubric": rubric,
     }
 
+    draft_source = "template"
+    llm_error = None
+    template_payload = payload
+    if llm_provider is not None and hasattr(llm_provider, "draft_bundle"):
+        try:
+            candidate = llm_provider.draft_bundle(
+                topic=case["label"],
+                difficulty=difficulty,
+                duration_min=duration,
+                guidelines=case["guidelines"],
+                patient=patient,
+                quotas={
+                    "comorbidity": case["comorbidity"],
+                    "unrelated_concern": case["unrelated"],
+                    "ambiguity": case["chief_complaint"],
+                },
+            )
+            if not isinstance(candidate, dict):
+                raise ValueError("LLM 草案必须是 JSON 对象")
+            if not isinstance(candidate.get("rubric"), list) or not candidate["rubric"]:
+                raise ValueError("LLM 草案缺少 rubric")
+            if not _quota_check(candidate, case)["passed"]:
+                raise ValueError("LLM 草案未满足强制配额（共病/无关诉求/主诉模糊）")
+            payload = copy.deepcopy(candidate)
+            payload["station_id"] = case["station_id"]
+            payload["title"] = str(payload.get("title") or case["title"])
+            payload["version"] = "0.1"
+            payload["duration_min"] = duration
+            payload.setdefault("pass_line", 60)
+            payload["risk_level_default"] = "L0"
+            if not isinstance(payload.get("guideline_kb"), list) or not payload["guideline_kb"]:
+                payload["guideline_kb"] = case["guidelines"]
+            for index, item in enumerate(payload["rubric"], start=1):
+                if isinstance(item, dict):
+                    item.setdefault("seq", index)
+            payload.setdefault(
+                "instruction_item_refs",
+                [item.get("item_id") for item in payload["rubric"] if isinstance(item, dict)],
+            )
+            draft_source = "llm"
+        except Exception as exc:
+            llm_error = str(exc)
+            payload = template_payload
+
     validation = validate_bundle(payload)
     quota = _quota_check(payload, case)
     historical = station_psychometrics(conn)
@@ -954,6 +999,11 @@ def generate_bundle_draft(
         "blueprint": blueprint,
         "similarity": similarity,
         "similarity_threshold": 0.75,
+        "draft_source": draft_source,
+        "llm_error": llm_error,
+        "llm_model_version": getattr(llm_provider, "model_version", None)
+        if draft_source == "llm"
+        else None,
         "disclosure": {
             "level": DRAFT_LEVEL,
             "text": DRAFT_DISCLOSURE,
@@ -976,9 +1026,11 @@ def generate_bundle_draft(
             "topic": topic,
             "difficulty": difficulty,
             "duration_min": duration,
-            "items": len(rubric),
+            "items": len(payload.get("rubric") or []),
             "quota_passed": quota["passed"],
             "can_freeze": validation["can_freeze"],
+            "draft_source": draft_source,
+            "llm_error": llm_error,
             "similarity": similarity[:3],
         },
         model_version=DRAFT_MODEL_VERSION,
