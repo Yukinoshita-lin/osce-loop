@@ -191,6 +191,33 @@ def quality_report(conn, bundle_id: str | None = None) -> dict[str, Any]:
         bad = sum(1 for a in acts if a in ("correct", "reject"))
         item_disagreement[item_id] = round(bad / len(acts), 3)
 
+    item_titles: dict[str, str] = {}
+    for row in conn.execute("SELECT payload FROM bundles").fetchall():
+        try:
+            payload = json.loads(row["payload"] or "{}")
+        except (TypeError, ValueError):
+            continue
+        for item in payload.get("rubric") or []:
+            item_id = item.get("item_id")
+            if item_id and item.get("title"):
+                item_titles.setdefault(item_id, str(item["title"]))
+    disagreement_hotspots = [
+        {
+            "item_id": item_id,
+            "item_title": item_titles.get(item_id, item_id),
+            "rate": rate,
+            "reviews": len(item_reviews.get(item_id, [])),
+        }
+        for item_id, rate in sorted(
+            item_disagreement.items(), key=lambda pair: (-pair[1], pair[0])
+        )[:10]
+    ]
+    near_agreement = (
+        round(sum(1 for ai, gold in near_pairs if ai == gold) / len(near_pairs), 4)
+        if near_pairs
+        else None
+    )
+
     return {
         "counts": {
             "attempts": len(attempts),
@@ -202,6 +229,7 @@ def quality_report(conn, bundle_id: str | None = None) -> dict[str, Any]:
         "qwk_ai": qwk_ai,
         "qwk_human": qwk_human,
         "qwk_near_cutoff": qwk_near,
+        "near_cutoff_agreement": near_agreement,
         "evidence": {
             "total": evidence_total,
             "localized": evidence_ok,
@@ -239,6 +267,7 @@ def quality_report(conn, bundle_id: str | None = None) -> dict[str, Any]:
             "by_risk": review_share_by_risk,
         },
         "item_disagreement": item_disagreement,
+        "item_disagreement_hotspots": disagreement_hotspots,
         "fairness": {
             "subgroup_gap_sd": None,
             "note": "演示数据未采集性别/生源/语言背景，公平性回路待接入真实分组字段。",

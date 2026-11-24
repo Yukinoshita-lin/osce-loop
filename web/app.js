@@ -1849,11 +1849,13 @@ async function viewTransparency() {
       <div class="card-title">${esc(card.capability)}<span class="sub">${esc(card.model_version)} · ${esc(card.prompt_version)}</span></div>
       <div class="attempt-strip" style="margin-bottom:6px">
         <span>QWK <b>${num(card.metrics.qwk_ai, 3)}</b></span>
+        <span>边缘案例一致 <b>${pct(card.metrics.near_cutoff_agreement, 1)}</b></span>
         <span>证据定位 <b>${pct(card.metrics.evidence_rate, 1)}</b></span>
         <span>编辑率 <b>${pct(card.metrics.edit_rate, 1)}</b></span>
         <span>样本 <b>${card.metrics.sample_size ?? '—'}</b></span>
         ${card.published_at ? `<span class="tiny muted">公开于 ${fmtTime(card.published_at)}</span>` : ''}
       </div>
+      ${(card.metrics.item_disagreement_hotspots || []).length ? `<div class="tiny muted" style="margin-bottom:4px">项级分歧热点：${card.metrics.item_disagreement_hotspots.slice(0, 5).map((h) => `${esc(h.item_title || h.item_id)} ${pct(h.rate, 0)}`).join(' · ')}</div>` : ''}
       <div class="tiny" style="color:var(--amber)">${esc(card.limitations || '暂无已知限制说明')}</div>
     </div>`).join('') : '<div class="empty">尚未公开发布模型卡</div>';
   const sheetRows = sheet ? Object.entries(sheet.content || {}).map(([key, value]) => {
@@ -3035,7 +3037,8 @@ async function viewQuality() {
     <div class="card tight" style="margin-bottom:8px">
       <div class="card-title" style="margin-bottom:4px">${esc(c.capability)}<span class="sub">${esc(c.model_version)}</span></div>
       <div class="attempt-strip" style="margin-bottom:4px">${c.is_public ? '<span class="pill teal">已公开</span>' : '<span class="pill amber">未公开</span>'} ${c.published_at ? `<span class="tiny muted">${fmtTime(c.published_at)}</span>` : ''}</div>
-      <div class="tiny muted">QWK ${num(c.metrics.qwk_ai, 3)} · 证据 ${pct(c.metrics.evidence_rate, 0)} · 编辑率 ${pct(c.metrics.edit_rate, 0)} · 亚组差 ${num(c.metrics.subgroup_gap_sd, 2)} SD · n=${c.metrics.sample_size}</div>
+      <div class="tiny muted">QWK ${num(c.metrics.qwk_ai, 3)} · 边缘案例 ${pct(c.metrics.near_cutoff_agreement, 0)} · 证据 ${pct(c.metrics.evidence_rate, 0)} · 编辑率 ${pct(c.metrics.edit_rate, 0)} · 亚组差 ${num(c.metrics.subgroup_gap_sd, 2)} SD · n=${c.metrics.sample_size}</div>
+      ${(c.metrics.item_disagreement_hotspots || []).length ? `<div class="tiny muted">分歧热点：${c.metrics.item_disagreement_hotspots.slice(0, 5).map((h) => `${esc(h.item_title || h.item_id)} ${pct(h.rate, 0)}（n=${h.reviews}）`).join(' · ')}</div>` : ''}
       ${(c.metrics.subgroup_performance || []).filter((d) => d.groups && d.groups.length).map((d) => `
         <div class="tiny muted">${esc(d.label)}：${(d.groups || []).map((g) => `${esc(g.name)} ${num(g.mean, 1)}（n=${g.n}）`).join(' · ')} · gap ${num(d.gap_sd, 2)} SD</div>`).join('')}
       <div class="tiny" style="color:var(--amber);margin-top:4px">${esc(c.limitations)}</div>

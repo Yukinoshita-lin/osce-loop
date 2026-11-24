@@ -115,6 +115,8 @@ def test_refresh_creates_new_private_assets(conn):
 
     result = refresh_transparency_assets(conn, actor="透明度管理员")
     assert result["metrics"]["qwk_ai"] == report["qwk_ai"]
+    assert result["metrics"]["near_cutoff_agreement"] == report["near_cutoff_agreement"]
+    assert result["metrics"]["item_disagreement_hotspots"] == report["item_disagreement_hotspots"]
     assert result["card_id"].startswith("mc_")
     assert result["data_sheet_version"] == "1.1"
 
@@ -146,3 +148,59 @@ def test_refresh_requires_republish_for_g3(conn):
     publish_model_card(conn, actor="治理委员会")
     gates = evaluate_gates(conn, quality_report(conn), "G3_limited")
     assert gates["metric_values"]["model_card"] == 1.0
+
+
+def test_quality_report_near_agreement_and_disagreement_hotspots(tmp_path):
+    conn = db.connect(tmp_path / "quality.db")
+    db.init_db(conn)
+    conn.execute(
+        "INSERT INTO bundles(bundle_id, station_id, title, version, bundle_hash, status, "
+        "payload, derived, validation, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        (
+            "bnd_q",
+            "ST01",
+            "质量测试站",
+            "1.0",
+            "hash_q",
+            "frozen",
+            json.dumps(
+                {"rubric": [{"item_id": "HX.01", "title": "放射部位与持续时间"}]},
+                ensure_ascii=False,
+            ),
+            "{}",
+            "{}",
+            db.now_iso(),
+        ),
+    )
+    conn.execute(
+        "INSERT INTO attempts(attempt_id, bundle_id, candidate_code, candidate_name, "
+        "session_id, risk_level, near_cutoff, created_at) VALUES(?,?,?,?,?,?,?,?)",
+        ("att_q", "bnd_q", "C900", "考生", "SES_Q", "L2", 1, db.now_iso()),
+    )
+    conn.execute(
+        "INSERT INTO score_records(record_id, attempt_id, item_id, ai_score, gold_score, "
+        "routing, status, created_at) VALUES(?,?,?,?,?,?,?,?)",
+        ("rec_q", "att_q", "HX.01", 0, 2, "{}", "corrected", db.now_iso()),
+    )
+    conn.execute(
+        "INSERT INTO review_actions(action_id, record_id, reviewer, action, created_at) "
+        "VALUES(?,?,?,?,?)",
+        ("act_q", "rec_q", "主治 张蕾", "correct", db.now_iso()),
+    )
+    conn.commit()
+
+    report = quality_report(conn)
+    assert report["near_cutoff_agreement"] == 0.0
+    assert report["item_disagreement"] == {"HX.01": 1.0}
+    assert report["item_disagreement_hotspots"] == [
+        {
+            "item_id": "HX.01",
+            "item_title": "放射部位与持续时间",
+            "rate": 1.0,
+            "reviews": 1,
+        }
+    ]
+
+    result = refresh_transparency_assets(conn, actor="透明度管理员")
+    assert any("HX.01" in item for item in result["limitations"])
+    conn.close()

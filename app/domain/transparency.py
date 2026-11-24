@@ -153,12 +153,25 @@ def refresh_transparency_assets(conn, *, actor: str = "系统") -> dict[str, Any
         limitations.append("当前站包的 SP 认证缺失、过期或未覆盖最新 persona_version。")
     if fairness.get("overall_gap_sd") is None:
         limitations.append("亚组样本不足，公平性差异暂无统计结论。")
+    hotspots = [
+        item
+        for item in report.get("item_disagreement_hotspots") or []
+        if item["rate"] > 0.15
+    ]
+    if hotspots:
+        limitations.append(
+            "项级人机分歧率超过 15% 的评分项："
+            + "、".join(item["item_id"] for item in hotspots[:5])
+            + "，需优先复核行为锚表述。"
+        )
     limitations.append("模型卡与数据表基于当前数据库快照；模型或提示词版本变更后需重新生成。")
 
     metrics = {
         "qwk_ai": report["qwk_ai"],
         "qwk_human": report["qwk_human"],
         "qwk_near_cutoff": report["qwk_near_cutoff"],
+        "near_cutoff_agreement": report.get("near_cutoff_agreement"),
+        "item_disagreement_hotspots": report.get("item_disagreement_hotspots") or [],
         "evidence_rate": report["evidence"]["rate"],
         "edit_rate": report["review"]["edit_rate"],
         "sample_size": report["counts"]["records"],
