@@ -2504,11 +2504,13 @@ async function viewQuality() {
           <button class="btn small" data-action="verify-anchor">校验外部锚点</button>
           <button class="btn small" data-action="ops-health">运行健康检查</button>
           <button class="btn small" data-action="ops-request-logs">查看 API 日志</button>
+          <button class="btn small" data-action="ops-content-audit">运行内容审计抽样</button>
           ${state.user && ['admin', 'exam_manager'].includes(state.user.role) ? '<button class="btn small" data-action="ops-maintenance">运行运维维护</button><button class="btn small" data-action="ops-backup">创建数据库备份</button>' : ''}
         </div>
         <div id="audit-chain-result" class="tiny muted" style="margin-bottom:8px">尚未校验。校验会逐条重算 prev_hash 与事件哈希。</div>
         <div id="ops-health-result" class="tiny muted" style="margin-bottom:8px"></div>
         <div id="request-log-result" class="tiny muted" style="margin-bottom:8px"></div>
+        <div id="content-audit-result" class="tiny muted" style="margin-bottom:8px"></div>
         <div class="audit-list">${auditRows || '<div class="empty">暂无审计</div>'}</div>
         <div class="sep"></div>
         <div class="card-title" style="margin-bottom:6px">审计检索<span class="sub">动作前缀 / 操作者 / 对象</span></div>
@@ -3025,6 +3027,31 @@ document.addEventListener('click', async (e) => {
       toast('已加载 API 请求日志');
     } catch (err) {
       if (box) box.innerHTML = `<span class="pill red">加载失败</span> ${esc(err.message)}`;
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'ops-content-audit') {
+    const box = $('#content-audit-result');
+    try {
+      const result = await api('/api/ops/content-audit', {
+        method: 'POST',
+        body: { sample_rate: 0.2, limit: 20 },
+      });
+      const findings = result.findings || [];
+      const rows = findings.slice(0, 5).map((f) => `
+        <div style="margin-top:2px"><span class="pill ${f.severity === 'high' ? 'red' : 'amber'}">${esc(f.label)}</span>
+          <span class="mono tiny">${esc(f.attempt_id)} · ${esc(f.utt_id || '')}</span> ${esc(f.quote || '')}</div>`).join('');
+      if (box) {
+        box.innerHTML = `
+          <div><span class="pill ${result.finding_count ? 'amber' : 'teal'}">扫描 ${result.attempts_scanned}/${result.attempts_considered} 场 · 命中 ${result.finding_count} 条</span>
+            高风险 ${result.by_severity.high || 0} · 中风险 ${result.by_severity.medium || 0}</div>
+          ${rows || '<div>本次抽样未发现越界话术</div>'}
+          <div class="tiny muted" style="margin-top:2px">${esc(result.note)}</div>`;
+      }
+      toast(result.finding_count ? `内容审计命中 ${result.finding_count} 条线索` : '内容审计未发现越界话术', Boolean(result.finding_count));
+    } catch (err) {
+      if (box) box.innerHTML = `<span class="pill red">审计失败</span> ${esc(err.message)}`;
       toast(err.message, true);
     }
     return;

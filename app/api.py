@@ -71,6 +71,7 @@ from .domain.bundle import (
 from .domain.calibration import calibration_report, import_gold_scores, parse_gold_file
 from .domain.cost import ai_cost_summary
 from .domain.coverage import blueprint_coverage
+from .domain.content_audit import run_content_audit
 from .domain.drafting import (
     DRAFT_DISCLOSURE,
     DRAFT_LEVEL,
@@ -465,6 +466,27 @@ def ops_maintenance(request: Request, conn=Depends(get_conn)):
         "ok": True,
         "maintenance": run_maintenance(conn, actor=request.state.user["display_name"]),
     }
+
+
+class ContentAuditBody(BaseModel):
+    sample_rate: float = Field(default=0.2, ge=0, le=1)
+    limit: int = Field(default=20, ge=1, le=200)
+    attempt_id: str | None = None
+
+
+@app.post("/api/ops/content-audit")
+def ops_content_audit(body: ContentAuditBody, request: Request, conn=Depends(get_conn)):
+    """按比例抽样扫描 SP 越界话术与高风险表述，作为伦理安全验证线索。"""
+    try:
+        return run_content_audit(
+            conn,
+            sample_rate=body.sample_rate,
+            limit=body.limit,
+            attempt_id=body.attempt_id,
+            actor=request.state.user["display_name"],
+        )
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
 UPLOAD_DIR = MEDIA_DIR / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
