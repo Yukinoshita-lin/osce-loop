@@ -10,7 +10,7 @@ from app import db
 from app.domain.gates import evaluate_gates
 from app.domain.governance import publish_model_card
 from app.domain.stats import quality_report
-from app.domain.transparency import attempt_ai_disclosure, refresh_transparency_assets
+from app.domain.transparency import attempt_ai_disclosure, public_transparency, refresh_transparency_assets
 from app.seed import seed_if_empty
 
 
@@ -31,6 +31,21 @@ def conn(seeded_path, tmp_path):
     connection = db.connect(path)
     yield connection
     connection.close()
+
+
+def test_public_transparency_only_returns_published_assets(conn):
+    data = public_transparency(conn)
+    assert data["model_cards"] == []
+    assert data["data_sheet"] is None
+
+    publish_model_card(conn, actor="治理委员会")
+    data = public_transparency(conn)
+    assert len(data["model_cards"]) == 1
+    card = data["model_cards"][0]
+    assert card["capability"]
+    assert card["model_version"]
+    assert data["data_sheet"]["version"]
+    assert data["data_sheet"]["content"]["name"]
 
 
 def test_ai_disclosure_lists_stages_and_human_confirmation():

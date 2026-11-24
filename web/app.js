@@ -247,6 +247,7 @@ const ROUTES = {
   schedule: { title: '考务编排', render: viewSchedule },
   execution: { title: '考试执行', render: viewExecution },
   bundle: { title: '站包契约', render: viewBundle },
+  transparency: { title: '透明公开', render: viewTransparency },
   feedback: { title: '反馈报告', render: viewFeedback },
   sp: { title: 'SP 演练', render: viewSP },
   quality: { title: '质量与闸门', render: viewQuality },
@@ -1394,6 +1395,45 @@ async function viewBundle() {
 }
 
 /* ---------- feedback ---------- */
+async function viewTransparency() {
+  const data = await api('/api/transparency');
+  const cards = data.model_cards || [];
+  const sheet = data.data_sheet;
+  const cardHtml = cards.length ? cards.map((card) => `
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-title">${esc(card.capability)}<span class="sub">${esc(card.model_version)} · ${esc(card.prompt_version)}</span></div>
+      <div class="attempt-strip" style="margin-bottom:6px">
+        <span>QWK <b>${num(card.metrics.qwk_ai, 3)}</b></span>
+        <span>证据定位 <b>${pct(card.metrics.evidence_rate, 1)}</b></span>
+        <span>编辑率 <b>${pct(card.metrics.edit_rate, 1)}</b></span>
+        <span>样本 <b>${card.metrics.sample_size ?? '—'}</b></span>
+        ${card.published_at ? `<span class="tiny muted">公开于 ${fmtTime(card.published_at)}</span>` : ''}
+      </div>
+      <div class="tiny" style="color:var(--amber)">${esc(card.limitations || '暂无已知限制说明')}</div>
+    </div>`).join('') : '<div class="empty">尚未公开发布模型卡</div>';
+  const sheetRows = sheet ? Object.entries(sheet.content || {}).map(([key, value]) => {
+    const text = Array.isArray(value) ? value.join('；') : (value && typeof value === 'object') ? JSON.stringify(value) : value;
+    return `<div class="version-row"><span class="k">${esc(key)}</span><span class="v">${esc(text ?? '—')}</span></div>`;
+  }).join('') : '';
+  $('#view').innerHTML = `
+    <div class="view-head">
+      <div><h2>透明公开</h2><p>${esc(data.statement)}</p></div>
+    </div>
+    <div class="grid c1-2" style="margin-bottom:16px">
+      <div>
+        <div class="card-title" style="margin-bottom:8px">模型卡<span class="sub">已公开版本</span></div>
+        ${cardHtml}
+      </div>
+      <div class="card">
+        <div class="card-title">数据表<span class="sub">${sheet ? `v${esc(sheet.version)}` : '尚未公开'}</span></div>
+        ${sheet ? sheetRows : '<div class="empty">尚未公开发布数据表</div>'}
+        ${sheet && sheet.published_at ? `<div class="tiny muted" style="margin-top:6px">公开于 ${fmtTime(sheet.published_at)}</div>` : ''}
+      </div>
+    </div>
+    <div class="tiny muted">公开内容由治理流程发布；未公开的模型卡与数据表仅在质量与闸门页对授权角色可见。</div>
+  `;
+}
+
 async function viewFeedback() {
   const attempts = await api('/api/attempts');
   if (!attempts.length) {

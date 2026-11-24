@@ -116,7 +116,7 @@ from .domain.stats import domain_scores, quality_report
 from .domain.station_quality import station_quality_report
 from .domain.sus import submit_sus, sus_summary
 from .domain.transcript import parse_transcript
-from .domain.transparency import attempt_ai_disclosure, refresh_transparency_assets
+from .domain.transparency import attempt_ai_disclosure, public_transparency, refresh_transparency_assets
 from .domain.users import create_user, list_users, update_user
 from .seed import apply_startup_governance, seed_if_empty
 
@@ -607,7 +607,10 @@ def _priority(routing: dict[str, Any]) -> int:
 
 @app.get("/")
 def index():
-    return FileResponse(WEB_DIR / "index.html")
+    return FileResponse(
+        WEB_DIR / "index.html",
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
 
 
 @app.get("/api/overview")
@@ -1417,6 +1420,11 @@ def feedback_survey(
 @app.get("/api/quality/stations")
 def quality_stations(conn=Depends(get_conn)):
     return {"stations": station_quality_report(conn)}
+
+
+@app.get("/api/transparency")
+def transparency(conn=Depends(get_conn)):
+    return public_transparency(conn)
 
 
 @app.get("/api/quality")

@@ -98,6 +98,8 @@ def test_rbac_write_matrix():
     assert rbac_allowed("GET", "/api/feedback/att_1", "student") is True
     assert rbac_allowed("GET", "/api/review/queue", "student") is False
     assert rbac_allowed("GET", "/api/overview", "student") is False
+    assert rbac_allowed("GET", "/api/transparency", "student") is True
+    assert rbac_allowed("GET", "/api/transparency", "auditor") is True
     assert rbac_allowed("GET", "/api/bundles", "student") is False
     assert rbac_allowed("POST", "/api/bundles/validate", "exam_manager") is True
     assert rbac_allowed("POST", "/api/bundles/freeze", "examiner") is False

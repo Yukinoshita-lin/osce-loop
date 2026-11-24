@@ -56,6 +56,44 @@ def attempt_ai_disclosure(
     }
 
 
+def public_transparency(conn) -> dict[str, Any]:
+    """考生/校内可查的公开摘要：只返回已公开的模型卡与最新公开数据表。"""
+    cards = []
+    seen: set[str] = set()
+    for row in conn.execute(
+        "SELECT * FROM model_cards WHERE is_public = 1 ORDER BY created_at DESC"
+    ).fetchall():
+        if row["capability"] in seen:
+            continue
+        seen.add(row["capability"])
+        cards.append(
+            {
+                "capability": row["capability"],
+                "model_version": row["model_version"],
+                "prompt_version": row["prompt_version"],
+                "metrics": json.loads(row["metrics"] or "{}"),
+                "limitations": row["limitations"],
+                "published_at": row["published_at"],
+            }
+        )
+    sheet_row = conn.execute(
+        "SELECT * FROM data_sheets WHERE is_public = 1 ORDER BY created_at DESC, rowid DESC LIMIT 1"
+    ).fetchone()
+    sheet = None
+    if sheet_row:
+        sheet = {
+            "version": sheet_row["version"],
+            "published_at": sheet_row["published_at"],
+            "content": json.loads(sheet_row["content"] or "{}"),
+        }
+    return {
+        "model_cards": cards,
+        "data_sheet": sheet,
+        "statement": "本页只展示已公开发布的模型卡与数据表摘要；未公开版本不对外可见。",
+        "as_of": db.now_iso(),
+    }
+
+
 def refresh_transparency_assets(conn, *, actor: str = "系统") -> dict[str, Any]:
     report = quality_report(conn)
     fairness = fairness_report(conn)
