@@ -138,7 +138,7 @@ from .domain.psychometrics import station_psychometrics
 from .domain.retention import purge_expired, refresh_retention, retention_overview
 from .domain.readability import analyze_feedback_readability
 from .domain.request_log import append_request_log, recent_requests, request_log_summary
-from .domain.review import apply_review
+from .domain.review import apply_review, blind_dual_review
 from .domain.review_sla import SLA_HOURS, review_sla
 from .domain.rewrite import PRINCIPLE as REWRITE_PRINCIPLE, suggest_anchor_rewrites
 from .domain.risk import RISK_ORDER, escalate_risk
@@ -1309,7 +1309,7 @@ def review_queue(conn=Depends(get_conn), limit: int = Query(120, ge=1, le=500)):
 
 
 @app.get("/api/review/{record_id}")
-def review_detail(record_id: str, conn=Depends(get_conn)):
+def review_detail(record_id: str, request: Request, conn=Depends(get_conn)):
     row = conn.execute("SELECT * FROM score_records WHERE record_id = ?", (record_id,)).fetchone()
     if not row:
         raise HTTPException(404, "评分记录不存在")
@@ -1317,6 +1317,12 @@ def review_detail(record_id: str, conn=Depends(get_conn)):
     attempt = _attempt_row(conn, record["attempt_id"])
     bundle = _bundle_or_404(conn, attempt["bundle_id"])
     public = _record_public(conn, record, bundle, attempt)
+    user = request.state.user
+    public["dual_review"] = blind_dual_review(
+        public.get("dual_review"),
+        viewer=user.get("display_name"),
+        role=user.get("role"),
+    )
     transcript = conn.execute("SELECT payload FROM transcripts WHERE attempt_id = ?", (attempt["attempt_id"],)).fetchone()
     public["attempt"] = _attempt_summary(conn, attempt)
     public["transcript"] = json.loads(transcript["payload"]) if transcript else []

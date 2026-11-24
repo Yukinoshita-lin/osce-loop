@@ -519,8 +519,10 @@ function dualReviewHtml(dual) {
       : '等待第二位独立复核员';
   return `<div class="alert ${status === 'disagreement' ? 'danger' : ''}" style="margin-top:10px">
     <b>${title}</b>
-    <p>关键项要求 ${dual.required || 2} 位不同评分员独立给出档位；同一评分员不可重复提交。</p>
-    ${reviews.map((r, i) => `<div class="tiny">第 ${i + 1} 位 · ${esc(r.reviewer)} → ${r.score === null || r.score === undefined ? '—' : esc(r.score)} 档 · ${esc(r.action)} · ${fmtTime(r.at)}</div>`).join('')}
+    <p>关键项要求 ${dual.required || 2} 位不同评分员独立给出档位；同一评分员不可重复提交。${dual.blind && !dual.viewer_submitted ? '当前为盲评：完成前不显示另一位评分员的档位。' : ''}</p>
+    ${reviews.map((r, i) => r.action === 'hidden'
+      ? `<div class="tiny">第 ${i + 1} 位 · 另一位评分员 · <span class="pill muted">盲评中</span></div>`
+      : `<div class="tiny">第 ${i + 1} 位 · ${esc(r.reviewer)} → ${r.score === null || r.score === undefined ? '—' : esc(r.score)} 档 · ${esc(r.action)} · ${fmtTime(r.at)}</div>`).join('')}
   </div>`;
 }
 

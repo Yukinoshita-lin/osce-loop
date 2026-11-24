@@ -6,7 +6,7 @@ import json
 import pytest
 
 from app import db
-from app.domain.review import apply_review
+from app.domain.review import apply_review, blind_dual_review
 
 
 def _conn(tmp_path):
@@ -113,6 +113,36 @@ def test_dual_review_disagreement_escalates_to_senior(tmp_path):
     assert row["reviewer"] == "高年资 赵敏"
     assert json.loads(row["routing"])["dual_review"]["stage"] == 3
     conn.close()
+
+
+def test_blind_dual_review_masks_other_reviewer():
+    dual = {
+        "status": "awaiting_second",
+        "required": 2,
+        "reviews": [
+            {"reviewer": "主治 张蕾", "action": "accept", "score": 2, "at": "2026-12-10T09:10:00+08:00"}
+        ],
+    }
+    masked = blind_dual_review(dual, viewer="主治 王强", role="examiner")
+    assert masked["blind"] is True
+    assert masked["viewer_submitted"] is False
+    assert masked["reviews"][0]["action"] == "hidden"
+    assert masked["reviews"][0]["score"] is None
+    assert "主治 张蕾" not in masked["reviews"][0]["reviewer"]
+
+    own = blind_dual_review(dual, viewer="主治 张蕾", role="examiner")
+    assert own["viewer_submitted"] is True
+    assert own["reviews"][0]["score"] == 2
+
+    auditor = blind_dual_review(dual, viewer="审计员 周宁", role="auditor")
+    assert auditor["reviews"][0]["score"] == 2
+    assert "blind" not in auditor
+
+    resolved = {**dual, "status": "resolved"}
+    assert blind_dual_review(resolved, viewer="主治 王强", role="examiner")["reviews"][0]["score"] == 2
+
+    empty = {"status": "awaiting_second", "required": 2, "reviews": []}
+    assert blind_dual_review(empty, viewer="主治 王强", role="examiner") is empty
 
 
 def test_normal_review_finalizes_in_one_action(tmp_path):

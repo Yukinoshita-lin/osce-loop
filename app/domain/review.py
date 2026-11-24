@@ -35,6 +35,41 @@ def _insert_action(
     )
 
 
+def blind_dual_review(
+    dual: dict[str, Any] | None,
+    *,
+    viewer: str | None,
+    role: str | None,
+) -> dict[str, Any] | None:
+    """双人独立复核进行中：只向当前评分员展示其本人已提交的档位。"""
+    if not dual:
+        return dual
+    if dual.get("status") not in ("pending", "awaiting_second"):
+        return dual
+    if role == "auditor":
+        return dual
+    reviews = dual.get("reviews") or []
+    if not reviews:
+        return dual
+    masked = []
+    own_submitted = False
+    for review in reviews:
+        if viewer and review.get("reviewer") == viewer:
+            own_submitted = True
+            masked.append(review)
+        else:
+            masked.append(
+                {
+                    "reviewer": "另一位评分员（盲评中）",
+                    "action": "hidden",
+                    "score": None,
+                    "reason_code": None,
+                    "at": None,
+                }
+            )
+    return {**dual, "reviews": masked, "blind": True, "viewer_submitted": own_submitted}
+
+
 def apply_review(
     conn,
     record: dict[str, Any],
