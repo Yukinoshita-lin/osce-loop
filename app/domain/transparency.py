@@ -20,6 +20,42 @@ def _next_version(version: str | None) -> str:
         return "1.1"
 
 
+def attempt_ai_disclosure(
+    attempt, records: list[dict[str, Any]], *, has_transcript: bool
+) -> dict[str, Any]:
+    """考生可读的 AI 参与说明：哪些环节用了 AI、最终由谁确认。"""
+    stages: list[str] = []
+    if has_transcript:
+        stages.append("语音转写（ASR）")
+    if any(rec.get("ai_score") is not None for rec in records):
+        stages.append("证据定位与评分建议")
+    reviewers = sorted(
+        {
+            rec.get("reviewer")
+            for rec in records
+            if rec.get("reviewer") and rec.get("reviewer") != "AI"
+        }
+        | ({attempt.get("signed_off_by")} if attempt.get("signed_off_by") else set())
+    )
+    models = sorted({rec.get("model_version") for rec in records if rec.get("model_version")})
+    prompts = sorted({rec.get("prompt_version") for rec in records if rec.get("prompt_version")})
+    human_confirmed = bool(reviewers) or attempt.get("status") in ("signed_off", "published")
+    if not stages:
+        statement = "本场次未使用 AI 自动评分，成绩由人工评定。"
+    elif human_confirmed:
+        statement = "AI 参与了上述环节并给出建议；最终成绩由人工复核确认。"
+    else:
+        statement = "AI 参与了上述环节并给出建议；该场次尚未完成人工签字确认。"
+    return {
+        "stages": stages,
+        "model_versions": models,
+        "prompt_versions": prompts,
+        "human_confirmed": human_confirmed,
+        "human_reviewers": reviewers,
+        "statement": statement,
+    }
+
+
 def refresh_transparency_assets(conn, *, actor: str = "系统") -> dict[str, Any]:
     report = quality_report(conn)
     fairness = fairness_report(conn)

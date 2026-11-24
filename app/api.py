@@ -116,7 +116,7 @@ from .domain.stats import domain_scores, quality_report
 from .domain.station_quality import station_quality_report
 from .domain.sus import submit_sus, sus_summary
 from .domain.transcript import parse_transcript
-from .domain.transparency import refresh_transparency_assets
+from .domain.transparency import attempt_ai_disclosure, refresh_transparency_assets
 from .domain.users import create_user, list_users, update_user
 from .seed import apply_startup_governance, seed_if_empty
 
@@ -1369,9 +1369,14 @@ def feedback(attempt_id: str, request: Request, conn=Depends(get_conn)):
         else:
             deductions.append(unit)
     ensure_feedback_units(deductions + strengths, items)
+    has_transcript = (
+        conn.execute("SELECT 1 FROM transcripts WHERE attempt_id = ?", (attempt_id,)).fetchone()
+        is not None
+    )
     return {
         **summary,
         "status_note": "该场次尚未发布，以下为阶段性反馈" if attempt["status"] != "published" else "已发布",
+        "ai_disclosure": attempt_ai_disclosure(attempt, records, has_transcript=has_transcript),
         "domains": domain_scores(bundle["payload"], final_scores),
         "deductions": deductions,
         "strengths": strengths,

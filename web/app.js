@@ -1456,6 +1456,16 @@ async function renderFeedback(attemptId) {
       <div class="kpi amber"><div class="k">扣分项</div><div class="v">${data.deductions.length}</div><div class="d">优势项 ${data.strengths.length} · 人工评分项可能无片段</div></div>
     </div>
 
+    ${data.ai_disclosure ? `<div class="card" style="margin-bottom:16px">
+      <div class="card-title">AI 参与说明<span class="sub">考生知情</span></div>
+      <div class="attempt-strip" style="margin-bottom:6px">
+        <span>参与环节 <b>${data.ai_disclosure.stages.length ? esc(data.ai_disclosure.stages.join('、')) : '无'}</b></span>
+        ${data.ai_disclosure.model_versions.length ? `<span>模型 <b>${esc(data.ai_disclosure.model_versions.join('、'))}</b></span>` : ''}
+        <span>${data.ai_disclosure.human_confirmed ? '<span class="pill teal">已人工确认</span>' : '<span class="pill amber">待人工签字</span>'}${data.ai_disclosure.human_reviewers.length ? ` ${esc(data.ai_disclosure.human_reviewers.join('、'))}` : ''}</span>
+      </div>
+      <div class="small">${esc(data.ai_disclosure.statement)}</div>
+    </div>` : ''}
+
     <div class="grid c1-2" style="margin-bottom:16px">
       <div class="card">
         <div class="card-title">能力域画像<span class="sub">12 站可映射到 6 个能力域</span></div>
