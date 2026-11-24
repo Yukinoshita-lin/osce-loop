@@ -40,8 +40,14 @@ def blueprint_coverage(conn) -> dict[str, Any]:
         share = round(bucket["weight"] / total_weight, 3) if total_weight else 0.0
         blueprint_entry = target_by_domain.get(bucket["domain"])
         target = blueprint_entry["target_share"] if blueprint_entry else None
-        if len(bucket["stations"]) <= 1:
+        target_stations = blueprint_entry.get("target_stations") if blueprint_entry else None
+        station_ids = sorted(bucket["stations"])
+        if len(station_ids) <= 1:
             status = "single_station"
+        elif target_stations is not None and len(station_ids) < target_stations:
+            status = "underrepresented"
+        elif target_stations is not None and len(station_ids) > target_stations + 1:
+            status = "overrepresented"
         elif target is not None and share > target + 0.10:
             status = "overrepresented"
         else:
@@ -50,11 +56,13 @@ def blueprint_coverage(conn) -> dict[str, Any]:
             {
                 "domain": bucket["domain"],
                 "label": bucket["label"],
-                "stations": len(bucket["stations"]),
+                "stations": len(station_ids),
+                "station_ids": station_ids,
                 "items": bucket["items"],
                 "weight": round(bucket["weight"], 2),
                 "share": share,
                 "target": target,
+                "target_stations": target_stations,
                 "status": status,
             }
         )
@@ -66,6 +74,7 @@ def blueprint_coverage(conn) -> dict[str, Any]:
             "domain": entry["domain"],
             "label": entry["label"],
             "target": entry["target_share"],
+            "target_stations": entry.get("target_stations"),
         }
         for entry in targets
         if entry["domain"] not in covered

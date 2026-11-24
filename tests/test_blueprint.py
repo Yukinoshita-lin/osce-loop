@@ -62,6 +62,21 @@ def test_draft_validates_share_total_and_domains(conn):
             note=None,
             actor="考务",
         )
+    with pytest.raises(ValueError, match="目标站数"):
+        draft_blueprint(
+            conn,
+            year=year,
+            domains=[
+                {
+                    "domain": "communication",
+                    "label": "沟通",
+                    "target_share": 1.0,
+                    "target_stations": -1,
+                }
+            ],
+            note=None,
+            actor="考务",
+        )
 
 
 def test_approval_requires_reason_and_activates_latest_version(conn):
@@ -141,3 +156,31 @@ def test_approved_blueprint_drives_coverage_targets(conn):
     assert "communication" not in coverage["extra_domains"]
     assert "assessment" in coverage["extra_domains"]
     assert coverage["uncovered"] == []
+
+
+def test_target_station_counts_drive_coverage_matrix(conn):
+    freeze_bundle(conn, build_bundle_payload(), actor="测试", version="1.0")
+    second = build_bundle_payload()
+    second["station_id"] = "ST-CARDIO-002"
+    second["title"] = str(second["title"]) + "（并行站）"
+    freeze_bundle(conn, second, actor="测试", version="1.0")
+    year = datetime.now().year
+    domains = [dict(entry) for entry in DEFAULT_BLUEPRINT]
+    domains[1]["target_stations"] = 3
+    draft = draft_blueprint(
+        conn,
+        year=year,
+        domains=domains,
+        note="设定目标站数",
+        actor="考务 李萍",
+    )
+    assert draft["domains"][1]["target_stations"] == 3
+    approve_blueprint(conn, draft["blueprint_id"], note="课程委员会批准目标站数", actor="考务 李萍")
+
+    coverage = blueprint_coverage(conn)
+    rows = {row["domain"]: row for row in coverage["domains"]}
+    history = rows["history_taking"]
+    assert history["target_stations"] == 3
+    assert history["stations"] == 2
+    assert len(history["station_ids"]) == 2
+    assert history["status"] == "underrepresented"

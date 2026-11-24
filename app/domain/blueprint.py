@@ -48,9 +48,19 @@ def _clean_domains(domains: Any) -> list[dict[str, Any]]:
             raise ValueError(f"能力域 {domain} 的目标占比必须是数字") from exc
         if share < 0 or share > 1:
             raise ValueError(f"能力域 {domain} 的目标占比应在 0–1 之间")
+        entry_clean = {"domain": domain, "label": label, "target_share": round(share, 3)}
+        target_stations = entry.get("target_stations")
+        if target_stations is not None and str(target_stations).strip() != "":
+            try:
+                target_stations = int(target_stations)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"能力域 {domain} 的目标站数必须是整数") from exc
+            if target_stations < 0 or target_stations > 50:
+                raise ValueError(f"能力域 {domain} 的目标站数应在 0–50 之间")
+            entry_clean["target_stations"] = target_stations
         seen.add(domain)
         total += share
-        cleaned.append({"domain": domain, "label": label, "target_share": round(share, 3)})
+        cleaned.append(entry_clean)
     if abs(total - 1.0) > SHARE_TOLERANCE:
         raise ValueError(f"能力域目标占比合计应接近 1.0，当前为 {total:.3f}")
     return cleaned

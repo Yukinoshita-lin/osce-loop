@@ -2907,19 +2907,20 @@ async function viewQuality() {
       <span class="v">${g.attempts} 场 · 均分 ${num(g.mean_total, 1)} · SD ${num(g.sd_total, 1)} · 通过率 ${g.pass_rate === null ? '—' : pct(g.pass_rate, 0)}</span>
     </div>`).join('');
   const coverageRows = (coverage.domains || []).map((d) => {
-    const statusLabel = { ok: ['达标', 'teal'], overrepresented: ['过度重复', 'amber'], single_station: ['单站覆盖', 'muted'] }[d.status] || [d.status, 'muted'];
+    const statusLabel = { ok: ['达标', 'teal'], overrepresented: ['过度重复', 'amber'], underrepresented: ['低于目标站数', 'red'], single_station: ['单站覆盖', 'muted'] }[d.status] || [d.status, 'muted'];
     return `<tr>
       <td><div style="font-weight:600">${esc(d.label)}</div><div class="mono tiny muted">${esc(d.domain)}</div></td>
       <td class="num">${d.stations}</td>
       <td class="num">${d.items}</td>
+      <td class="tiny">${(d.station_ids || []).map((id) => `<span class="pill">${esc(id)}</span>`).join(' ') || '—'}</td>
       <td class="num">${pct(d.share, 1)}</td>
-      <td class="num">${d.target === null ? '—' : pct(d.target, 0)}</td>
+      <td class="num">${d.target === null ? '—' : pct(d.target, 0)}<div class="tiny muted">${d.target_stations === null || d.target_stations === undefined ? '站数未设' : `目标 ${d.target_stations} 站`}</div></td>
       <td><span class="pill ${statusLabel[1]}">${esc(statusLabel[0])}</span></td>
     </tr>`;
   }).join('');
   const uncovered = coverage.uncovered || [];
   const coverageNote = uncovered.length
-    ? `<div class="alert" style="margin-top:8px"><b>未覆盖能力域</b><p>${uncovered.map((d) => `${esc(d.label)}（目标 ${pct(d.target, 0)}）`).join('、')} 尚无站包覆盖，建议下一年度命题补充。</p></div>`
+    ? `<div class="alert" style="margin-top:8px"><b>未覆盖能力域</b><p>${uncovered.map((d) => `${esc(d.label)}（目标 ${pct(d.target, 0)}${d.target_stations === null || d.target_stations === undefined ? '' : ` / ${d.target_stations} 站`}）`).join('、')} 尚无站包覆盖，建议下一年度命题补充。</p></div>`
     : '<div class="tiny muted" style="margin-top:6px">六域蓝图均已覆盖。</div>';
   const blueprint = blueprintData || {};
   const bpCurrent = blueprint.current || null;
@@ -2928,7 +2929,8 @@ async function viewQuality() {
     ? `<span class="pill ${blueprint.stale ? 'amber' : 'teal'}">${blueprint.stale ? '沿用上一年度' : '已批准生效'}</span> ${bpCurrent.year} 年度 v${bpCurrent.version} · ${esc(bpCurrent.approved_by || '—')} · ${fmtTime(bpCurrent.approved_at)}`
     : '<span class="pill amber">未批准</span> 暂按默认六域目标计算';
   const bpShareInputs = bpTargets.map((d) => `
-    <label class="tiny">${esc(d.label)}<input class="input" type="number" name="share_${dataAttr(d.domain)}" min="0" max="100" step="1" value="${Math.round(Number(d.target_share || 0) * 100)}" style="max-width:78px"></label>`).join('');
+    <label class="tiny">${esc(d.label)} 占比<input class="input" type="number" name="share_${dataAttr(d.domain)}" min="0" max="100" step="1" value="${Math.round(Number(d.target_share || 0) * 100)}" style="max-width:78px"></label>
+    <label class="tiny">目标站数<input class="input" type="number" name="stations_${dataAttr(d.domain)}" min="0" max="50" step="1" value="${d.target_stations === null || d.target_stations === undefined ? '' : d.target_stations}" placeholder="可选" style="max-width:78px"></label>`).join('');
   const bpDrafts = (blueprint.history || []).filter((b) => b.status === 'draft');
   const bpDraftForms = bpDrafts.map((b) => `
     <form class="btn-row bp-approve-form" data-blueprint="${dataAttr(b.blueprint_id)}" style="flex-wrap:wrap;gap:6px;margin-top:6px">
@@ -3126,11 +3128,11 @@ async function viewQuality() {
     </div>
 
     <div class="card" style="margin-bottom:16px">
-      <div class="card-title">蓝图覆盖度<span class="sub">六域目标占比 · 空白域与过度重复</span></div>
+      <div class="card-title">蓝图覆盖度<span class="sub">目标占比与目标站数 · 覆盖矩阵 · 空白域与过度重复</span></div>
       <div class="tbl-wrap">
         <table>
-          <thead><tr><th>能力域</th><th class="num">覆盖站数</th><th class="num">评分项</th><th class="num">权重占比</th><th class="num">目标</th><th>判定</th></tr></thead>
-          <tbody>${coverageRows || '<tr><td colspan="6" class="empty">暂无站包</td></tr>'}</tbody>
+          <thead><tr><th>能力域</th><th class="num">覆盖站数</th><th class="num">评分项</th><th>覆盖考站</th><th class="num">权重占比</th><th class="num">目标</th><th>判定</th></tr></thead>
+          <tbody>${coverageRows || '<tr><td colspan="7" class="empty">暂无站包</td></tr>'}</tbody>
         </table>
       </div>
       ${coverageNote}
@@ -3416,11 +3418,18 @@ async function viewQuality() {
     blueprintForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const form = new FormData(blueprintForm);
-      const domains = bpTargets.map((d) => ({
-        domain: d.domain,
-        label: d.label,
-        target_share: Number(form.get(`share_${d.domain}`) || 0) / 100,
-      }));
+      const domains = bpTargets.map((d) => {
+        const rawStations = form.get(`stations_${d.domain}`);
+        const entry = {
+          domain: d.domain,
+          label: d.label,
+          target_share: Number(form.get(`share_${d.domain}`) || 0) / 100,
+        };
+        if (rawStations !== null && String(rawStations).trim() !== '') {
+          entry.target_stations = Number(rawStations);
+        }
+        return entry;
+      });
       try {
         await api('/api/blueprint/draft', {
           method: 'POST',
