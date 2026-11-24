@@ -2479,10 +2479,12 @@ async function viewQuality() {
           <button class="btn small" data-action="create-anchor">写入审计锚点</button>
           <button class="btn small" data-action="verify-anchor">校验外部锚点</button>
           <button class="btn small" data-action="ops-health">运行健康检查</button>
+          <button class="btn small" data-action="ops-request-logs">查看 API 日志</button>
           ${state.user && ['admin', 'exam_manager'].includes(state.user.role) ? '<button class="btn small" data-action="ops-maintenance">运行运维维护</button><button class="btn small" data-action="ops-backup">创建数据库备份</button>' : ''}
         </div>
         <div id="audit-chain-result" class="tiny muted" style="margin-bottom:8px">尚未校验。校验会逐条重算 prev_hash 与事件哈希。</div>
         <div id="ops-health-result" class="tiny muted" style="margin-bottom:8px"></div>
+        <div id="request-log-result" class="tiny muted" style="margin-bottom:8px"></div>
         <div class="audit-list">${auditRows || '<div class="empty">暂无审计</div>'}</div>
         <div class="sep"></div>
         <div class="card-title" style="margin-bottom:6px">审计检索<span class="sub">动作前缀 / 操作者 / 对象</span></div>
@@ -2859,6 +2861,28 @@ document.addEventListener('click', async (e) => {
       toast(result.status === 'ok' ? '健康检查通过' : '健康检查发现降级项', result.status !== 'ok');
     } catch (err) {
       if (box) box.innerHTML = `<span class="pill red">检查失败</span> ${esc(err.message)}`;
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'ops-request-logs') {
+    const box = $('#request-log-result');
+    try {
+      const result = await api('/api/ops/request-logs?limit=20&days=7');
+      const s = result.summary;
+      const statusText = Object.entries(s.by_status || {}).map(([key, count]) => `${esc(key)}:${count}`).join(' · ') || '暂无';
+      const rows = (result.recent || []).slice(-8).reverse().map((row) => `
+        <div class="mono" style="margin-top:2px">${esc(row.method || '')} ${esc(row.path || '')} · ${row.status} · ${num(row.duration_ms, 1)}ms · ${esc(row.user || '匿名')}</div>`).join('');
+      if (box) {
+        box.innerHTML = `
+          <div><span class="pill ${s.errors ? 'amber' : 'teal'}">近 ${s.days} 天 ${s.total} 次请求</span>
+            错误 ${s.errors} · 均值 ${s.avg_duration_ms === null ? '—' : `${num(s.avg_duration_ms, 1)}ms`} · P95 ${s.p95_duration_ms === null ? '—' : `${num(s.p95_duration_ms, 1)}ms`}</div>
+          <div style="margin-top:2px">状态分布 ${statusText} · 高频 ${(s.top_paths || []).map((x) => `${esc(x.path)}:${x.count}`).join(' · ') || '暂无'}</div>
+          ${rows || '<div>暂无请求明细</div>'}`;
+      }
+      toast('已加载 API 请求日志');
+    } catch (err) {
+      if (box) box.innerHTML = `<span class="pill red">加载失败</span> ${esc(err.message)}`;
       toast(err.message, true);
     }
     return;

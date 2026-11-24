@@ -14,6 +14,10 @@ DB_PATH = Path(os.getenv("OSCELOOP_DB", str(DATA_DIR / "osceloop.db")))
 AUDIT_ANCHOR_PATH = Path(
     os.getenv("OSCELOOP_AUDIT_ANCHOR_PATH", str(DATA_DIR / "audit_anchors.jsonl"))
 )
+# API 全量请求日志：按天切分，生产环境应挂载独立卷并设置轮转/归档。
+REQUEST_LOG_DIR = Path(
+    os.getenv("OSCELOOP_REQUEST_LOG_DIR", str(DATA_DIR / "request_logs"))
+)
 
 # AI 输出三元版本戳：任何一个变化都必须重新校准权限（见方案 6.3）
 MODEL_VERSION = os.getenv("OSCELOOP_MODEL_VERSION", "mock-score-1.0")

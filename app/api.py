@@ -108,6 +108,7 @@ from .domain.practice import build_practice_report
 from .domain.psychometrics import station_psychometrics
 from .domain.retention import purge_expired, refresh_retention, retention_overview
 from .domain.readability import analyze_feedback_readability
+from .domain.request_log import append_request_log, recent_requests, request_log_summary
 from .domain.review import apply_review
 from .domain.risk import RISK_ORDER, escalate_risk
 from .domain.rubric import AUTHORITY_LABELS, PHASE_LABELS, cap_authority, derive_assets, validate_bundle
@@ -241,6 +242,32 @@ async def security_headers(request: Request, call_next):
     return response
 
 
+@app.middleware("http")
+async def request_log_middleware(request: Request, call_next):
+    if not request.url.path.startswith("/api/"):
+        return await call_next(request)
+    started = time.perf_counter()
+    status = 500
+    try:
+        response = await call_next(request)
+        status = response.status_code
+        return response
+    finally:
+        user = getattr(request.state, "user", None) or {}
+        append_request_log(
+            {
+                "at": db.now_iso(),
+                "method": request.method,
+                "path": request.url.path,
+                "status": status,
+                "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+                "user": user.get("username"),
+                "role": user.get("role"),
+                "ip": request.client.host if request.client else "",
+            }
+        )
+
+
 class LoginBody(BaseModel):
     username: str = Field(min_length=1)
     password: str = Field(min_length=1)
@@ -337,6 +364,15 @@ def healthz():
 @app.get("/api/ops/health")
 def ops_health(conn=Depends(get_conn)):
     return system_health(conn)
+
+
+@app.get("/api/ops/request-logs")
+def ops_request_logs(
+    limit: int = Query(100, ge=1, le=500),
+    days: int = Query(7, ge=1, le=31),
+):
+    """API 全量请求日志：近期明细 + 多日汇总，用于故障排查与容量评估。"""
+    return {"summary": request_log_summary(days=days), "recent": recent_requests(limit=limit)}
 
 
 class UserCreateBody(BaseModel):
