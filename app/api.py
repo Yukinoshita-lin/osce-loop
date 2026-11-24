@@ -139,6 +139,7 @@ from .domain.review import apply_review
 from .domain.rewrite import PRINCIPLE as REWRITE_PRINCIPLE, suggest_anchor_rewrites
 from .domain.risk import RISK_ORDER, escalate_risk
 from .domain.rubric import AUTHORITY_LABELS, PHASE_LABELS, cap_authority, derive_assets, validate_bundle
+from .domain.rubric_maintenance import REASON_CODES, rubric_maintenance
 from .domain.run_export import build_run_package
 from .domain.schedule_approval import record_special_needs_approval, special_needs_status
 from .domain.schedule_policy import (
@@ -1302,9 +1303,6 @@ class ReviewBody(BaseModel):
     seconds_spent: float | None = None
 
 
-REASON_CODES = ("证据不足", "判定过严", "判定过宽", "行为锚歧义", "其他")
-
-
 @app.post("/api/review/{record_id}/action")
 def review_action(record_id: str, body: ReviewBody, conn=Depends(get_conn)):
     _ensure_not_stopped(conn)
@@ -1727,6 +1725,11 @@ def quality_stations(conn=Depends(get_conn)):
 @app.get("/api/quality/station-reviews")
 def quality_station_reviews(conn=Depends(get_conn), station_id: str | None = None):
     return {"reviews": list_station_reviews(conn, station_id)}
+
+
+@app.get("/api/rubric/maintenance")
+def rubric_maintenance_report(conn=Depends(get_conn), bundle_id: str | None = None):
+    return rubric_maintenance(conn, bundle_id)
 
 
 class StationReviewBody(BaseModel):

@@ -2687,13 +2687,14 @@ function usersSectionHtml(users) {
 
 async function viewQuality() {
   const canManageUsers = Boolean(state.user && state.user.role === 'admin');
-  const [data, audit, retention, backupsData, stationData, usersData] = await Promise.all([
+  const [data, audit, retention, backupsData, stationData, usersData, maintenance] = await Promise.all([
     api('/api/quality'),
     api('/api/audit?limit=30'),
     api('/api/retention'),
     api('/api/ops/backups'),
     api('/api/quality/stations'),
     canManageUsers ? api('/api/users') : Promise.resolve({ users: [] }),
+    api('/api/rubric/maintenance'),
   ]);
   const backups = backupsData.backups || [];
   const stationQuality = stationData.stations || [];
@@ -2806,6 +2807,24 @@ async function viewQuality() {
       <td class="num">${num(item.avg_confidence, 2)}</td>
       <td class="num">${item.discrimination === null || item.discrimination === undefined ? '—' : `<span class="pill ${item.discrimination < 0.2 ? 'red' : item.discrimination >= 0.3 ? 'teal' : 'amber'}">${num(item.discrimination, 2)}</span>`}</td>
       <td>${item.needs_review ? '<span class="pill amber">建议改写</span>' : '<span class="pill teal">可判</span>'}</td>
+    </tr>`).join('');
+  const maint = maintenance || { items: [], reasons: [], totals: {} };
+  const maintReasonChips = (maint.reasons || []).map((r) => {
+    const color = r.code === '行为锚歧义' ? 'red' : r.code === '证据不足' ? 'amber' : 'muted';
+    return `<span class="pill ${color}">${esc(r.code)} ${r.count}</span>`;
+  }).join(' ');
+  const maintRows = (maint.items || []).map((item) => `
+    <tr>
+      <td><div class="mono tiny muted">${esc(item.item_id)}</div><div style="font-weight:600">${esc(item.title)}</div></td>
+      <td>${item.critical ? '<span class="pill red">关键</span>' : '<span class="muted tiny">—</span>'}</td>
+      <td class="num">${item.total}</td>
+      <td class="num">${item.accepted}</td>
+      <td class="num">${item.corrected}</td>
+      <td class="num">${item.rejected}</td>
+      <td class="num">${pct(item.disagreement, 0)}</td>
+      <td>${item.dominant_reason ? `<span class="pill amber">${esc(item.dominant_reason)}</span>` : '<span class="muted tiny">—</span>'}</td>
+      <td class="tiny">${esc(item.suggested_action || '—')}</td>
+      <td>${item.needs_review ? '<span class="pill red">优先维护</span>' : '<span class="pill teal">观察</span>'}</td>
     </tr>`).join('');
   const gateCards = gates.map((gate) => `
     <div class="gate-card ${gate.is_current ? 'current' : ''} ${gate.is_locked ? 'locked' : ''}">
@@ -2959,6 +2978,23 @@ async function viewQuality() {
       </div>
       <div class="tiny muted" style="margin-top:6px">判定规则：复核 ≥3 且编辑率 ≥30%，或金标准 ≥3 且一致率 ≤60%，或区分度 < 0.2 且记录 ≥5，标记为“建议改写”。</div>
       ${(report.asr && report.asr.records) ? `<div class="tiny" style="margin-top:4px">ASR 平均置信度 <b>${num(report.asr.avg_confidence, 3)}</b> · 低于阈值 ${num(report.asr.threshold, 2)} 的场次 <b>${report.asr.low_confidence_attempts}</b>（评分时已整站转人工）</div>` : ''}
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">评分表维护看板<span class="sub">拒绝理由码聚合到评分项 · 直接指向该改哪条锚</span></div>
+      <div class="attempt-strip" style="margin-bottom:10px">
+        <span>复核动作 <b>${maint.totals.actions || 0}</b></span>
+        <span>涉及评分项 <b>${maint.totals.reviewed_items || 0}</b></span>
+        <span>优先维护 <b>${maint.totals.needs_review || 0}</b></span>
+        ${maintReasonChips || '<span class="tiny muted">尚无拒绝理由码</span>'}
+      </div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>评分项</th><th>关键</th><th class="num">动作</th><th class="num">接受</th><th class="num">修正</th><th class="num">拒绝</th><th class="num">分歧率</th><th>主要理由</th><th>建议维护动作</th><th>判定</th></tr></thead>
+          <tbody>${maintRows || '<tr><td colspan="10" class="empty">暂无复核动作；拒绝评分时填写理由码后会在此聚合</td></tr>'}</tbody>
+        </table>
+      </div>
+      <div class="tiny muted" style="margin-top:6px">${esc(maint.note || '')} 判定：拒绝 ≥2 次，或复核 ≥3 次且分歧率 ≥50%。</div>
     </div>
 
     ${canManageUsers ? usersSectionHtml(users) : ''}
