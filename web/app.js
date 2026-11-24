@@ -2745,6 +2745,7 @@ async function viewQuality() {
       ceiling: ['天花板', 'amber'],
       floor: ['地板', 'red'],
       low_discrimination: ['低区分', 'red'],
+      redundant_items: ['项间重复', 'amber'],
     };
     if (!flags || !flags.length) return '<span class="pill teal">正常</span>';
     return flags.map((flag) => {
@@ -2765,12 +2766,17 @@ async function viewQuality() {
       <td>${psychoFlag(p.flags)}</td>
     </tr>`;
   }).join('');
-  const psychoNotes = psychometrics.filter((p) => p.low_discrimination_items.length || p.ceiling_items.length || p.floor_items.length).map((p) => {
+  const psychoNotes = psychometrics.filter((p) => p.low_discrimination_items.length || p.ceiling_items.length || p.floor_items.length || (p.redundant_pairs || []).length).map((p) => {
     const itemMap = Object.fromEntries((p.items || []).map((item) => [item.item_id, item]));
     const parts = [];
     if (p.low_discrimination_items.length) parts.push(`低区分：${p.low_discrimination_items.map((id) => `${esc(id)}（${num((itemMap[id] || {}).discrimination, 2)}）`).join('、')}`);
     if (p.ceiling_items.length) parts.push(`全员满分：${p.ceiling_items.map(esc).join('、')}`);
     if (p.floor_items.length) parts.push(`全员零分：${p.floor_items.map(esc).join('、')}`);
+    if ((p.redundant_pairs || []).length) {
+      const pairs = p.redundant_pairs;
+      const shown = pairs.slice(0, 3).map((pair) => `${esc(pair.item_a)}↔${esc(pair.item_b)}（r=${num(pair.r, 2)}，n=${pair.n}）`).join('、');
+      parts.push(`项间高相关：${shown}${pairs.length > 3 ? ` 等 ${pairs.length} 对` : ''}`);
+    }
     return `<div class="version-row"><span class="k">${esc(p.station_id)}</span><span class="v">${parts.join(' · ')}</span></div>`;
   }).join('');
   const coverage = data.coverage || {};

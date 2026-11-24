@@ -1,4 +1,4 @@
-"""站级心理测量：难度、区分度、Cronbach's α 与地板/天花板异常。"""
+"""站级心理测量：难度、区分度、项间相关、Cronbach's α 与地板/天花板异常。"""
 from __future__ import annotations
 
 import statistics
@@ -37,6 +37,29 @@ def _cronbach_alpha(matrix: list[list[float]]) -> float | None:
         return None
     alpha = k / (k - 1) * (1 - sum(item_variances) / total_variance)
     return round(alpha, 3)
+
+
+def _pairwise_correlations(
+    scores: dict[str, dict[str, int]], item_ids: list[str]
+) -> list[dict[str, Any]]:
+    """两两计算项间 Pearson 相关；样本不足或方差为零的配对不返回。"""
+    pairs: list[dict[str, Any]] = []
+    for index, item_a in enumerate(item_ids):
+        for item_b in item_ids[index + 1 :]:
+            xs: list[float] = []
+            ys: list[float] = []
+            for per_attempt in scores.values():
+                if item_a in per_attempt and item_b in per_attempt:
+                    xs.append(float(per_attempt[item_a]))
+                    ys.append(float(per_attempt[item_b]))
+            correlation = _pearson(xs, ys)
+            if correlation is None:
+                continue
+            pairs.append(
+                {"item_a": item_a, "item_b": item_b, "r": correlation, "n": len(xs)}
+            )
+    pairs.sort(key=lambda entry: abs(entry["r"]), reverse=True)
+    return pairs
 
 
 def _weighted_total(items: list[dict[str, Any]], scores: dict[str, int]) -> float | None:
@@ -130,6 +153,10 @@ def station_psychometrics(conn) -> list[dict[str, Any]]:
             if entry["discrimination"] is not None and entry["discrimination"] < 0.2
         ]
         alpha = _cronbach_alpha(complete_rows)
+        inter_item = _pairwise_correlations(scores, item_ids)
+        redundant_pairs = [
+            entry for entry in inter_item if entry["r"] >= 0.8 and entry["n"] >= 5
+        ]
         flags = []
         if len(totals) < 5:
             flags.append("sample_insufficient")
@@ -139,6 +166,8 @@ def station_psychometrics(conn) -> list[dict[str, Any]]:
             flags.append("floor")
         if low_discrimination:
             flags.append("low_discrimination")
+        if redundant_pairs:
+            flags.append("redundant_items")
         results.append(
             {
                 "bundle_id": bundle["bundle_id"],
@@ -156,6 +185,8 @@ def station_psychometrics(conn) -> list[dict[str, Any]]:
                 "ceiling_items": ceiling_items,
                 "floor_items": floor_items,
                 "low_discrimination_items": low_discrimination,
+                "inter_item": inter_item[:10],
+                "redundant_pairs": redundant_pairs[:10],
                 "items": item_stats,
             }
         )

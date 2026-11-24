@@ -54,6 +54,46 @@ def test_station_psychometrics_flags_ceiling_floor_and_computes_alpha(tmp_path):
     conn.close()
 
 
+def test_inter_item_correlation_flags_redundant_pairs(tmp_path):
+    conn = db.connect(tmp_path / "psycho_corr.db")
+    db.init_db(conn)
+    bundle = freeze_bundle(conn, build_bundle_payload(), actor="test", version="1.0")
+    item_ids = [item["item_id"] for item in bundle["payload"]["rubric"]]
+    pair_items = (item_ids[0], item_ids[1])
+    pattern = [0, 1, 2, 0, 1]
+
+    for index in range(5):
+        attempt_id = f"att_c{index}"
+        conn.execute(
+            "INSERT INTO attempts(attempt_id, bundle_id, candidate_code, candidate_name, session_id, "
+            "risk_level, status, created_at) VALUES(?,?,?,?,?,?,?,?)",
+            (attempt_id, bundle["bundle_id"], f"C{index}", "考生", "SES", "L2", "accepted", db.now_iso()),
+        )
+        for offset, item_id in enumerate(item_ids):
+            score = pattern[index] if item_id in pair_items else (index + offset) % 3
+            conn.execute(
+                "INSERT INTO score_records(record_id, attempt_id, item_id, final_score, routing, status, created_at) "
+                "VALUES(?,?,?,?,?,?,?)",
+                (f"rec_{attempt_id}_{item_id}", attempt_id, item_id, score, "{}", "accepted", db.now_iso()),
+            )
+    conn.commit()
+
+    station = station_psychometrics(conn)[0]
+    pair = next(
+        entry
+        for entry in station["inter_item"]
+        if {entry["item_a"], entry["item_b"]} == set(pair_items)
+    )
+    assert pair["r"] == 1.0
+    assert pair["n"] == 5
+    assert any(
+        {entry["item_a"], entry["item_b"]} == set(pair_items)
+        for entry in station["redundant_pairs"]
+    )
+    assert "redundant_items" in station["flags"]
+    conn.close()
+
+
 def test_station_psychometrics_marks_insufficient_sample(tmp_path):
     conn = db.connect(tmp_path / "psycho_empty.db")
     db.init_db(conn)
