@@ -47,6 +47,12 @@ MEDICAL_JARGON = (
 )
 PARTIAL_MEMORY = ("部分模糊", "部分记忆模糊")
 NEEDS_PROMPT_MEMORY = ("需提示才能回忆", "需要提示才能回忆")
+GUIDANCE_LINES = {
+    "opening": "医生，我还有点担心……您还有什么要问我的吗？",
+    "information_gathering": "医生，我还有点担心，有些难受的地方好像还没说清楚……",
+    "assessment": "医生，检查的时候您轻一点，我有点紧张……",
+    "plan": "医生，那我回去以后要注意什么？",
+}
 
 PHASE_TRIGGERS = {
     "assessment": ("听诊", "查体", "检查一下", "量血压", "触诊", "叩诊", "体格检查"),
@@ -94,6 +100,11 @@ class DialogueStateMachine:
         self.slots = bundle_derived.get("slots", [])
         self.phase_order = bundle_derived.get("phase_order", list(PHASES))
         self.persona = bundle_payload.get("sp_profile", {})
+        self.checkpoints = {
+            checkpoint.get("phase"): checkpoint
+            for checkpoint in bundle_derived.get("checkpoints", [])
+            if checkpoint.get("phase")
+        }
         self.guidance = self._build_guidance(bundle_derived)
 
     def _build_guidance(self, derived: dict[str, Any]) -> dict[str, str]:
@@ -116,6 +127,7 @@ class DialogueStateMachine:
             "intent_history": [],
             "transitioned": False,
             "degraded_count": 0,
+            "guided_phases": [],
         }
 
     def classify(self, text: str) -> dict[str, Any]:
@@ -144,6 +156,8 @@ class DialogueStateMachine:
             "released": list(state.get("released", [])),
             "ask_counts": dict(state.get("ask_counts") or {}),
             "intent_history": list(state.get("intent_history", [])),
+            "guided_phases": list(state.get("guided_phases") or []),
+            "transitioned": False,
         }
         new_state["turn"] = int(state.get("turn", 0)) + 1
         intent = self.classify(user_text)
@@ -197,9 +211,20 @@ class DialogueStateMachine:
         if not (distressed or confused or clarification_needed):
             if intent["phase_target"]:
                 target_rank = PHASE_RANK[intent["phase_target"]]
-                if target_rank > PHASE_RANK.get(new_state["phase"], 0):
-                    new_state["phase"] = intent["phase_target"]
-                    new_state["transitioned"] = True
+                current_phase = new_state["phase"]
+                if target_rank > PHASE_RANK.get(current_phase, 0):
+                    missing = self._missing_must_probe(new_state, current_phase)
+                    if missing and current_phase not in new_state["guided_phases"]:
+                        new_state["guided_phases"].append(current_phase)
+                        intent["guidance"] = True
+                        intent["guidance_text"] = GUIDANCE_LINES.get(
+                            current_phase, "医生，我还有点担心……"
+                        )
+                        intent["missing_items"] = missing
+                        intent["transition_blocked"] = True
+                    else:
+                        new_state["phase"] = intent["phase_target"]
+                        new_state["transitioned"] = True
             elif new_state["phase"] == "opening" and new_state["turn"] >= 1:
                 new_state["phase"] = "information_gathering"
 
@@ -232,7 +257,30 @@ class DialogueStateMachine:
                 released_now.append(slot_id)
 
         intent["withheld"] = withheld
-        return new_state, released_now, intent, bool(intent["phase_target"])
+        return new_state, released_now, intent, bool(new_state.get("transitioned"))
+
+    def _missing_must_probe(self, state: dict[str, Any], phase: str) -> list[str]:
+        """阶段末检查：该阶段的关键评分项是否已被问及，未问及则返回项 ID。"""
+        checkpoint = self.checkpoints.get(phase) or {}
+        must_probe = checkpoint.get("must_probe") or []
+        if not must_probe:
+            return []
+        released = set(state.get("released") or [])
+        asked = state.get("ask_counts") or {}
+        missing: list[str] = []
+        for item_id in must_probe:
+            linked = [
+                slot for slot in self.slots if item_id in (slot.get("linked_items") or [])
+            ]
+            if not linked:
+                continue
+            covered = any(
+                slot["slot_id"] in released or int(asked.get(slot["slot_id"], 0)) > 0
+                for slot in linked
+            )
+            if not covered:
+                missing.append(item_id)
+        return missing
 
     def slots_by_ids(self, ids: list[str]) -> list[dict[str, Any]]:
         idset = set(ids)
@@ -359,6 +407,12 @@ class SPController:
                 focus_ids=released_now,
                 empathy=bool(intent.get("empathy")),
             )
+        guidance_text = intent.get("guidance_text") if intent.get("guidance") else None
+        if guidance_text:
+            if released_now:
+                draft = draft.rstrip("。！？") + "。" + guidance_text
+            else:
+                draft = guidance_text
 
         verification = self.verify(draft, self.machine.persona, unreleased)
         attempts = 0

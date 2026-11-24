@@ -463,6 +463,48 @@ def test_sp_slots_are_gated():
     assert any(v["kind"] == "information_boundary" for v in leaks)
 
 
+def test_sp_guides_when_key_items_unasked_at_phase_end():
+    payload = build_bundle_payload()
+    derived = derive_assets(payload)
+    machine = DialogueStateMachine(payload, derived)
+    controller = SPController(machine)
+    state = machine.start()
+    first = controller.respond(state, "疼多久了？")
+    state = first["state"]
+    assert state["phase"] == "information_gathering"
+
+    guided = controller.respond(state, "我先给您听诊一下。")
+    state = guided["state"]
+    assert guided["intent"].get("guidance") is True
+    assert guided["intent"].get("transition_blocked") is True
+    assert guided["intent"].get("missing_items")
+    assert state["phase"] == "information_gathering"
+    assert guided["transitioned"] is False
+    assert state["guided_phases"] == ["information_gathering"]
+    assert "担心" in guided["reply"] and "还没说清楚" in guided["reply"]
+    assert not any(
+        v.get("kind") == "information_boundary"
+        for v in scan_leaks(guided["reply"], machine.unreleased(state))
+    )
+
+    advanced = controller.respond(state, "我先给您听诊一下。")
+    assert advanced["state"]["phase"] == "assessment"
+    assert advanced["transitioned"] is True
+    assert advanced["intent"].get("guidance") is not True
+
+
+def test_sp_advances_without_guidance_when_must_probe_is_empty():
+    payload = build_bundle_payload()
+    machine = DialogueStateMachine(payload, derive_assets(payload))
+    machine.checkpoints["information_gathering"]["must_probe"] = []
+    controller = SPController(machine)
+    state = controller.respond(machine.start(), "疼多久了？")["state"]
+    advanced = controller.respond(state, "我先给您听诊一下。")
+    assert advanced["state"]["phase"] == "assessment"
+    assert advanced["transitioned"] is True
+    assert advanced["intent"].get("guidance") is not True
+
+
 def test_sp_trust_threshold_releases_slot():
     payload = build_bundle_payload()
     derived = derive_assets(payload)
