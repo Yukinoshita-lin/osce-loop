@@ -2437,7 +2437,9 @@ async function viewQuality() {
     <div class="card tight" style="margin-bottom:8px">
       <div class="card-title" style="margin-bottom:4px">${esc(c.capability)}<span class="sub">${esc(c.model_version)}</span></div>
       <div class="attempt-strip" style="margin-bottom:4px">${c.is_public ? '<span class="pill teal">已公开</span>' : '<span class="pill amber">未公开</span>'} ${c.published_at ? `<span class="tiny muted">${fmtTime(c.published_at)}</span>` : ''}</div>
-      <div class="tiny muted">QWK ${num(c.metrics.qwk_ai, 3)} · 证据 ${pct(c.metrics.evidence_rate, 0)} · 编辑率 ${pct(c.metrics.edit_rate, 0)} · n=${c.metrics.sample_size}</div>
+      <div class="tiny muted">QWK ${num(c.metrics.qwk_ai, 3)} · 证据 ${pct(c.metrics.evidence_rate, 0)} · 编辑率 ${pct(c.metrics.edit_rate, 0)} · 亚组差 ${num(c.metrics.subgroup_gap_sd, 2)} SD · n=${c.metrics.sample_size}</div>
+      ${(c.metrics.subgroup_performance || []).filter((d) => d.groups && d.groups.length).map((d) => `
+        <div class="tiny muted">${esc(d.label)}：${(d.groups || []).map((g) => `${esc(g.name)} ${num(g.mean, 1)}（n=${g.n}）`).join(' · ')} · gap ${num(d.gap_sd, 2)} SD</div>`).join('')}
       <div class="tiny" style="color:var(--amber);margin-top:4px">${esc(c.limitations)}</div>
     </div>`).join('');
 

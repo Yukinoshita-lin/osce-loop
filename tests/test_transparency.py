@@ -127,6 +127,7 @@ def test_refresh_creates_new_private_assets(conn):
     assert card["is_public"] == 0
     assert sheet["is_public"] == 0
     assert json.loads(card["metrics"])["qwk_ai"] == report["qwk_ai"]
+    assert isinstance(json.loads(card["metrics"])["subgroup_performance"], list)
     assert conn.execute("SELECT COUNT(*) AS n FROM model_cards").fetchone()["n"] == cards_before + 1
     assert conn.execute("SELECT COUNT(*) AS n FROM data_sheets").fetchone()["n"] == sheets_before + 1
 

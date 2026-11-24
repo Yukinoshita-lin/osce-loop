@@ -165,6 +165,16 @@ def refresh_transparency_assets(conn, *, actor: str = "系统") -> dict[str, Any
         "gold_records": report["counts"]["gold_records"],
         "integrity_gap_rate": report["integrity_gap_rate"],
         "subgroup_gap_sd": fairness.get("overall_gap_sd"),
+        "subgroup_performance": [
+            {
+                "dimension": dimension.get("key"),
+                "label": dimension.get("label"),
+                "groups": dimension.get("groups") or [],
+                "gap_sd": dimension.get("gap_sd"),
+                "status": dimension.get("status"),
+            }
+            for dimension in fairness.get("dimensions") or []
+        ],
         "near_improvement": (ab.get("comparison") or {}).get("near_improvement"),
         "teacher_hours_reduction": (ab.get("comparison") or {}).get("teacher_hours_reduction"),
         "sp_fact_error_rate": (cert or {}).get("red_team", {}).get("fact_error_rate"),
