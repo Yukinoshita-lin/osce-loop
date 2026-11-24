@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from .. import db
@@ -156,6 +157,58 @@ def start_run(conn, *, schedule_id: str | None = None, actor: str = "考务") ->
     return get_run(conn, run_id)
 
 
+def _evidence_facts(payload: dict[str, Any], transcript: list[dict[str, Any]]) -> dict[str, Any]:
+    """按转写中的考生发言统计已有/缺失证据，只输出事实计数，不输出判断。"""
+    candidate_lines = [
+        str(utterance.get("text") or "")
+        for utterance in transcript
+        if utterance.get("speaker") == "candidate"
+    ]
+    candidate_text = "\n".join(candidate_lines)
+    measured = 0
+    covered = 0
+    missing_critical = 0
+    for item in payload.get("rubric") or []:
+        if item.get("evidence_type") == "global":
+            continue
+        probe = item.get("probe") or {}
+        patterns = [
+            pattern
+            for pattern in [*(probe.get("positive") or []), *(probe.get("partial") or [])]
+            if pattern
+        ]
+        if not patterns:
+            continue
+        measured += 1
+        matched = False
+        for pattern in patterns:
+            try:
+                if re.search(pattern, candidate_text):
+                    matched = True
+                    break
+            except re.error:
+                continue
+        if matched:
+            covered += 1
+        elif item.get("critical"):
+            missing_critical += 1
+    missing = measured - covered
+    facts = [
+        f"已采集候选发言 {len(candidate_lines)} 段",
+        f"尚无证据的评分项 {missing} 项",
+    ]
+    if missing_critical:
+        facts.append(f"其中关键项 {missing_critical} 项尚无证据")
+    return {
+        "utterances": len(candidate_lines),
+        "measured": measured,
+        "covered": covered,
+        "missing": missing,
+        "missing_critical": missing_critical,
+        "facts": facts,
+    }
+
+
 def get_run(conn, run_id: str) -> dict[str, Any]:
     row = conn.execute("SELECT * FROM exam_runs WHERE run_id = ?", (run_id,)).fetchone()
     if not row:
@@ -189,6 +242,31 @@ def get_run(conn, run_id: str) -> dict[str, Any]:
         ).fetchall()
     }
     attempt_ids = [slot["attempt_id"] for slot in slots if slot.get("attempt_id")]
+    bundle_payloads: dict[str, dict[str, Any]] = {}
+    bundle_ids = {row["bundle_id"] for row in attempt_rows.values()}
+    if bundle_ids:
+        placeholders = ",".join("?" * len(bundle_ids))
+        for row in conn.execute(
+            f"SELECT bundle_id, payload FROM bundles WHERE bundle_id IN ({placeholders})",
+            tuple(bundle_ids),
+        ).fetchall():
+            try:
+                bundle_payloads[row["bundle_id"]] = json.loads(row["payload"])
+            except (TypeError, ValueError):
+                continue
+    transcripts: dict[str, list[dict[str, Any]]] = {}
+    if attempt_ids:
+        placeholders = ",".join("?" * len(attempt_ids))
+        for row in conn.execute(
+            f"SELECT attempt_id, payload FROM transcripts WHERE attempt_id IN ({placeholders})",
+            tuple(attempt_ids),
+        ).fetchall():
+            try:
+                parsed = json.loads(row["payload"])
+            except (TypeError, ValueError):
+                continue
+            if isinstance(parsed, list):
+                transcripts[row["attempt_id"]] = parsed
     pending_by_attempt: dict[str, int] = {}
     if attempt_ids:
         placeholders = ",".join("?" * len(attempt_ids))
@@ -214,6 +292,12 @@ def get_run(conn, run_id: str) -> dict[str, Any]:
                 "integrity_gap": bool(attempt["integrity_gap"]),
             }
             if attempt
+            else None
+        )
+        payload = bundle_payloads.get(attempt["bundle_id"]) if attempt else None
+        slot["evidence_facts"] = (
+            _evidence_facts(payload, transcripts.get(attempt["attempt_id"], []))
+            if payload and attempt
             else None
         )
     events = []

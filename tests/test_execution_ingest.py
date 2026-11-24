@@ -99,6 +99,12 @@ def test_ingest_links_attempt_to_run_slot(conn):
     refreshed = get_run(conn, run["run_id"])
     linked = next(s for s in refreshed["slots"] if s["slot_key"] == slot["slot_key"])
     assert linked["attempt"]["attempt_id"] == attempt_id
+    facts = linked["evidence_facts"]
+    assert facts["utterances"] == 2
+    assert facts["measured"] > 0
+    assert facts["covered"] > 0
+    assert facts["missing"] > 0
+    assert any("尚无证据的评分项" in fact for fact in facts["facts"])
     assert refreshed["counts"]["ingested"] == 1
     assert refreshed["integrity"]["ingested"] == 1
     assert refreshed["integrity"]["missing"] == refreshed["counts"]["total"] - 1
