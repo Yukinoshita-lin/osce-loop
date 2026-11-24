@@ -2708,7 +2708,7 @@ function usersSectionHtml(users) {
 async function viewQuality() {
   const canManageUsers = Boolean(state.user && state.user.role === 'admin');
   const canManageBlueprint = Boolean(state.user && state.user.role === 'exam_manager');
-  const [data, audit, retention, backupsData, stationData, usersData, maintenance, blueprintData] = await Promise.all([
+  const [data, audit, retention, backupsData, stationData, usersData, maintenance, blueprintData, criticalData] = await Promise.all([
     api('/api/quality'),
     api('/api/audit?limit=30'),
     api('/api/retention'),
@@ -2717,6 +2717,7 @@ async function viewQuality() {
     canManageUsers ? api('/api/users') : Promise.resolve({ users: [] }),
     api('/api/rubric/maintenance'),
     api('/api/blueprint'),
+    api('/api/quality/critical-misses'),
   ]);
   const backups = backupsData.backups || [];
   const stationQuality = stationData.stations || [];
@@ -2876,6 +2877,27 @@ async function viewQuality() {
       <td class="tiny">${esc(item.suggested_action || '—')}</td>
       <td>${item.needs_review ? '<span class="pill red">优先维护</span>' : '<span class="pill teal">观察</span>'}</td>
     </tr>`).join('');
+  const critical = criticalData || { items: [], root_causes: [], actions: [] };
+  const criticalRootLabels = Object.fromEntries((critical.root_causes || []).map((x) => [x.key, x.label]));
+  const criticalActionLabels = Object.fromEntries((critical.actions || []).map((x) => [x.key, x.label]));
+  const criticalRows = (critical.items || []).map((miss) => {
+    const review = miss.review;
+    const form = (review || !canManageBlueprint) ? '' : `<form class="btn-row critical-miss-form" data-record="${dataAttr(miss.record_id)}" style="flex-wrap:wrap;gap:6px;margin-top:6px">
+      <select class="input" name="root_cause" aria-label="根因分类" style="max-width:180px">
+        ${(critical.root_causes || []).map((x) => `<option value="${dataAttr(x.key)}">${esc(x.label)}</option>`).join('')}
+      </select>
+      <select class="input" name="action" aria-label="纠正动作" style="max-width:170px">
+        ${(critical.actions || []).map((x) => `<option value="${dataAttr(x.key)}">${esc(x.label)}</option>`).join('')}
+      </select>
+      <input class="input" name="note" placeholder="根因说明（不少于 6 字）" minlength="6" maxlength="500" required style="max-width:260px">
+      <button class="btn small primary" type="submit">记录归因</button>
+    </form>`;
+    return `<div class="version-row">
+      <span class="k">${esc(miss.item_id)} · ${esc(miss.item_title)} ${miss.risk_level === 'L3' ? '<span class="pill red">L3</span>' : ''}</span>
+      <span class="v">${esc(miss.candidate)} · AI 0 → ${miss.reference_source === 'gold' ? '金标准' : '人工'} ${miss.reference_score} · ${fmtTime(miss.created_at)} ${review ? '<span class="pill teal">已归因</span>' : '<span class="pill red">待归因</span>'}</span>
+      ${review ? `<div class="tiny muted">${esc(criticalRootLabels[review.root_cause] || review.root_cause)} · ${esc(criticalActionLabels[review.action] || review.action)} · ${esc(review.note)} · ${esc(review.actor)}</div>` : form}
+    </div>`;
+  }).join('');
   const gateCards = gates.map((gate) => `
     <div class="gate-card ${gate.is_current ? 'current' : ''} ${gate.is_locked ? 'locked' : ''}">
       <div class="gate-head">
@@ -3061,6 +3083,17 @@ async function viewQuality() {
         </table>
       </div>
       <div class="tiny muted" style="margin-top:6px">${esc(maint.note || '')} 判定：拒绝 ≥2 次，或复核 ≥3 次且分歧率 ≥50%。</div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">关键项漏判根因分析<span class="sub">AI 判阴性但金标准/人工判阳性 · 待归因 ${critical.unresolved || 0} 条</span></div>
+      <div class="attempt-strip" style="margin-bottom:8px">
+        <span>漏判 <b>${critical.total || 0}</b></span>
+        <span>待归因 <b>${critical.unresolved || 0}</b></span>
+        <span>已归因 <b>${critical.resolved || 0}</b></span>
+      </div>
+      ${criticalRows || '<div class="tiny muted">当前没有关键项漏判记录。</div>'}
+      <div class="tiny muted" style="margin-top:6px">${esc(critical.note || '')}</div>
     </div>
 
     ${canManageUsers ? usersSectionHtml(users) : ''}
@@ -3260,6 +3293,27 @@ async function viewQuality() {
       }
     });
   }
+  $$('.critical-miss-form').forEach((form) => {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const payload = new FormData(form);
+      try {
+        await api('/api/quality/critical-miss-review', {
+          method: 'POST',
+          body: {
+            record_id: form.dataset.record,
+            root_cause: payload.get('root_cause'),
+            action: payload.get('action'),
+            note: String(payload.get('note') || '').trim(),
+          },
+        });
+        toast('已记录关键项漏判根因与纠正动作');
+        await viewQuality();
+      } catch (err) {
+        toast(err.message, true);
+      }
+    });
+  });
   const blueprintForm = $('#blueprint-form');
   if (blueprintForm) {
     blueprintForm.addEventListener('submit', async (e) => {

@@ -134,6 +134,16 @@ CREATE TABLE IF NOT EXISTS audit_events (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS critical_miss_reviews (
+    record_id TEXT PRIMARY KEY,
+    root_cause TEXT NOT NULL,
+    action TEXT NOT NULL,
+    note TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS authority_overrides (
     bundle_id TEXT NOT NULL,
     item_id TEXT NOT NULL,

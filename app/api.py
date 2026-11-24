@@ -84,6 +84,7 @@ from .domain.calibration import calibration_report, import_gold_scores, parse_go
 from .domain.consent import consent_status, record_consent
 from .domain.cost import ai_cost_summary
 from .domain.coverage import blueprint_coverage
+from .domain.critical_miss import critical_misses, record_critical_miss_review
 from .domain.content_audit import run_content_audit
 from .domain.drafting import (
     DRAFT_DISCLOSURE,
@@ -1758,6 +1759,36 @@ def feedback_survey(
 @app.get("/api/quality/stations")
 def quality_stations(conn=Depends(get_conn)):
     return {"stations": station_quality_report(conn)}
+
+
+@app.get("/api/quality/critical-misses")
+def quality_critical_misses(conn=Depends(get_conn), limit: int = Query(50, ge=1, le=200)):
+    return critical_misses(conn, limit)
+
+
+class CriticalMissReviewBody(BaseModel):
+    record_id: str = Field(min_length=1, max_length=80)
+    root_cause: str
+    action: str
+    note: str = Field(min_length=6, max_length=500)
+
+
+@app.post("/api/quality/critical-miss-review")
+def quality_critical_miss_review(
+    body: CriticalMissReviewBody, request: Request, conn=Depends(get_conn)
+):
+    try:
+        review = record_critical_miss_review(
+            conn,
+            body.record_id,
+            root_cause=body.root_cause,
+            action=body.action,
+            note=body.note,
+            actor=request.state.user["display_name"],
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "review": review, "state": critical_misses(conn)}
 
 
 @app.get("/api/quality/station-reviews")
