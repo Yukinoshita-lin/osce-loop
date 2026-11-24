@@ -1501,6 +1501,7 @@ async function renderFeedback(attemptId) {
   body.innerHTML = '<div class="loading">正在生成反馈…</div>';
   const data = await api(`/api/feedback/${encodeURIComponent(attemptId)}`);
   const purgedNote = data.media_purged_at ? '媒体已按留存策略清理，' : '';
+  const history = data.history || {};
   const domainMax = Math.max(1, ...data.domains.map((d) => d.score || 0));
   const deductionHtml = data.deductions.length ? data.deductions.map((u) => {
     const ev = u.evidence;
@@ -1534,6 +1535,21 @@ async function renderFeedback(attemptId) {
       <div class="small">${esc(data.ai_disclosure.statement)}</div>
     </div>` : ''}
 
+    ${history.previous ? `<div class="card" style="margin-bottom:16px">
+      <div class="card-title">纵向趋势<span class="sub">同站上次 vs 本次 · 仅用于形成性反馈</span></div>
+      <div class="attempt-strip" style="margin-bottom:6px">
+        <span>上次 <b>${num(history.previous.total, 1)}</b>（v${esc(history.previous.version)} · ${fmtTime(history.previous.created_at)}）</span>
+        <span>本次 <b>${num(data.final_total, 1)}</b></span>
+        <span>变化 <span class="pill ${(history.delta_total || 0) >= 0 ? 'teal' : 'red'}">${history.delta_total > 0 ? '+' : ''}${num(history.delta_total, 1)}</span></span>
+      </div>
+      ${(history.domain_deltas || []).map((d) => `
+        <div class="version-row">
+          <span class="k">${esc(d.domain)}</span>
+          <span class="v">${num(d.previous, 1)} → ${num(d.current, 1)} <span class="pill ${d.delta >= 0 ? 'teal' : 'red'}">${d.delta > 0 ? '+' : ''}${num(d.delta, 1)}</span></span>
+        </div>`).join('')}
+      <div class="tiny muted" style="margin-top:6px">${esc(history.note || '')}</div>
+    </div>` : ''}
+
     <div class="grid c1-2" style="margin-bottom:16px">
       <div class="card">
         <div class="card-title">能力域画像<span class="sub">12 站可映射到 6 个能力域</span></div>
@@ -1550,6 +1566,7 @@ async function renderFeedback(attemptId) {
         <div class="strength-list">
           ${data.strengths.length ? data.strengths.map((s) => `<span class="pill teal">${esc(s.item_title)}</span>`).join('') : '<span class="tiny muted">暂无</span>'}
         </div>
+        <div class="tiny muted" style="margin-top:6px">纵向趋势：${history.previous ? `已对比上次同站场次（${fmtTime(history.previous.created_at)}）` : '暂无同站历史场次'}</div>
       </div>
       <div class="card">
         <div class="card-title">反馈纪律<span class="sub">三段式</span></div>

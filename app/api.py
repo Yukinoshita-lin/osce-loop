@@ -88,6 +88,7 @@ from .domain.governance import (
     set_release_stage,
 )
 from .domain.health import system_health
+from .domain.history import candidate_history
 from .domain.execution import (
     advance_run,
     get_run,
@@ -1408,6 +1409,7 @@ def feedback(attempt_id: str, request: Request, conn=Depends(get_conn)):
         "strengths": strengths,
         "feedback_quality": summarize_feedback(deductions),
         "survey": survey_for_attempt(conn, attempt_id),
+        "history": candidate_history(conn, attempt_id),
         "feedback_rule": "每条扣分项必须包含：可回放证据 + 对应评分项档位 + 可直接背诵的替代话术。",
     }
 
