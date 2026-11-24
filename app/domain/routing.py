@@ -67,8 +67,17 @@ def route_item(
         routing["dual_review"] = {"required": 2, "stage": 0, "status": "pending", "reviews": []}
         return routing
 
-    # 2b. L3 高利害：AI 建议分一律人工确认
+    # 2b. L3 高利害：AI 建议分一律人工确认；关键项需两位评分员独立确认
     if risk_level == "L3" and authority in ("suggest", "decide"):
+        if item.get("critical"):
+            routing = _route(
+                "dual_review",
+                "l3_human_confirmation",
+                requires_human=True,
+                reason_text="L3 关键项，AI 建议分必须由两位评分员独立确认",
+            )
+            routing["dual_review"] = {"required": 2, "stage": 0, "status": "pending", "reviews": []}
+            return routing
         return _route(
             "send_review",
             "l3_human_confirmation",

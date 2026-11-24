@@ -602,6 +602,17 @@ def test_l3_routing_requires_human_confirmation():
     )
     assert result["reason"] == "l3_human_confirmation"
     assert result["requires_human"] is True
+    critical_suggest = route_item(
+        record_id="rec_l3c_suggest",
+        item={**item, "critical": True},
+        authority="suggest",
+        ai_score=2,
+        confidence=0.95,
+        risk_level="L3",
+        release_stage="G3_limited",
+    )
+    assert critical_suggest["route"] == "dual_review"
+    assert critical_suggest["dual_review"]["required"] == 2
     critical = {**item, "critical": True}
     result = route_item(
         record_id="rec_l3c",
