@@ -52,6 +52,8 @@ ASR_LANGUAGE = os.getenv("OSCELOOP_ASR_LANGUAGE", "zh").strip()
 ASR_PROMPT_VERSION = os.getenv("OSCELOOP_ASR_PROMPT_VERSION", "asr-transcribe-1.0").strip()
 ASR_TIMEOUT_SECONDS = float(os.getenv("OSCELOOP_ASR_TIMEOUT_SECONDS", "60"))
 ASR_MAX_RETRIES = int(os.getenv("OSCELOOP_ASR_MAX_RETRIES", "1"))
+# 转写平均置信度低于该阈值时，视为 ASR 在该条件下不可靠，整站转人工全量复核。
+ASR_LOW_CONFIDENCE = float(os.getenv("OSCELOOP_ASR_LOW_CONFIDENCE", "0.70"))
 
 # 当前能力闸门阶段。P0 为离线历史录像，尚未进入真实考生场景。
 RELEASE_STAGE = os.getenv("OSCELOOP_RELEASE_STAGE", "G0_offline")
@@ -64,6 +66,7 @@ PASS_LINE_MARGIN = 5.0  # 边缘案例：距及格线 ±5%
 
 REASON_LABELS = {
     "integrity_gap": "证据链不完整",
+    "asr_low_confidence": "ASR 置信度偏低，整站转人工",
     "critical_negative": "关键项 AI 判阴性",
     "near_cutoff": "总分处于及格线边缘",
     "confidence_below_floor": "置信度低于项阈值",

@@ -253,6 +253,57 @@ def test_degraded_scores_are_forced_to_human_review(conn):
         assert row["model_version"] == "mock-score-1.0"
 
 
+def test_low_asr_confidence_forces_full_station_review(conn):
+    bundle = freeze_bundle(conn, build_bundle_payload(), actor="test", version="1.0")
+    conn.execute(
+        "INSERT INTO attempts(attempt_id, bundle_id, candidate_code, candidate_name, session_id, "
+        "risk_level, duration_ms, integrity_gap, appeal, status, ab_group, created_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            "att_low_asr", bundle["bundle_id"], "C2026-001", "考生", "SES", "L2",
+            60000, 0, 0, "scored", "ai_assisted", db.now_iso(),
+        ),
+    )
+    conn.commit()
+    gateway = CapabilityGateway(
+        conn, MockScoringProvider(), "mock-score-1.0", "score-prompt-1.0"
+    )
+    run_scoring(
+        conn,
+        gateway,
+        bundle=bundle,
+        attempt={
+            "attempt_id": "att_low_asr",
+            "risk_level": "L2",
+            "release_stage": "G0_offline",
+            "media_id": "media_test",
+            "duration_ms": 60000,
+            "asr_confidence": 0.42,
+            "integrity_gap": False,
+            "appeal": False,
+        },
+        transcript=TRANSCRIPT,
+        actor="test",
+    )
+    records = conn.execute(
+        "SELECT * FROM score_records WHERE attempt_id = 'att_low_asr'"
+    ).fetchall()
+    scored = [row for row in records if row["ai_score"] is not None]
+    assert scored
+    for row in scored:
+        routing = json.loads(row["routing"])
+        assert routing["reason"] == "asr_low_confidence"
+        assert routing["route"] == "full_station_human"
+        assert routing["requires_human"] is True
+        assert routing["detail"]["asr_confidence"] == 0.42
+        assert row["status"] == "pending_review"
+        assert row["final_score"] is None
+    attempt = conn.execute(
+        "SELECT status FROM attempts WHERE attempt_id = 'att_low_asr'"
+    ).fetchone()
+    assert attempt["status"] == "pending_review"
+
+
 def test_gateway_records_tokens_and_cost(fake_ai, conn, monkeypatch):
     monkeypatch.setattr("app.ai.base.AI_INPUT_PRICE_PER_1K", 0.01)
     monkeypatch.setattr("app.ai.base.AI_OUTPUT_PRICE_PER_1K", 0.02)

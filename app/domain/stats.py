@@ -5,7 +5,7 @@ import json
 from collections import Counter
 from typing import Any, Iterable
 
-from ..config import REASON_LABELS
+from ..config import ASR_LOW_CONFIDENCE, REASON_LABELS
 
 
 def quadratic_weighted_kappa(
@@ -143,6 +143,14 @@ def quality_report(conn, bundle_id: str | None = None) -> dict[str, Any]:
     qwk_near = quadratic_weighted_kappa([p[0] for p in near_pairs], [p[1] for p in near_pairs])
 
     integrity_attempts = sum(1 for a in attempts if a["integrity_gap"])
+    asr_values = [float(r["asr_confidence"]) for r in records if r["asr_confidence"] is not None]
+    asr_low_attempts = len(
+        {
+            r["attempt_id"]
+            for r in records
+            if r["asr_confidence"] is not None and float(r["asr_confidence"]) < ASR_LOW_CONFIDENCE
+        }
+    )
     item_disagreement: dict[str, float] = {}
     item_reviews: dict[str, list[str]] = {}
     record_by_id = {r["record_id"]: r for r in records}
@@ -187,6 +195,12 @@ def quality_report(conn, bundle_id: str | None = None) -> dict[str, Any]:
             for reason, count in reasons.most_common()
         ],
         "integrity_gap_rate": round(integrity_attempts / len(attempts), 4) if attempts else 0,
+        "asr": {
+            "avg_confidence": round(sum(asr_values) / len(asr_values), 3) if asr_values else None,
+            "low_confidence_attempts": asr_low_attempts,
+            "threshold": ASR_LOW_CONFIDENCE,
+            "records": len(asr_values),
+        },
         "item_disagreement": item_disagreement,
         "fairness": {
             "subgroup_gap_sd": None,

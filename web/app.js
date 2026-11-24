@@ -21,6 +21,7 @@ const STATUS = {
 
 const REASON_COLOR = {
   integrity_gap: 'red',
+  asr_low_confidence: 'amber',
   risk_escalation: 'red',
   critical_negative: 'red',
   near_cutoff: 'amber',
@@ -2175,6 +2176,7 @@ async function viewQuality() {
         </table>
       </div>
       <div class="tiny muted" style="margin-top:6px">判定规则：复核 ≥3 且编辑率 ≥30%，或金标准 ≥3 且一致率 ≤60%，标记为“建议改写”。</div>
+      ${(report.asr && report.asr.records) ? `<div class="tiny" style="margin-top:4px">ASR 平均置信度 <b>${num(report.asr.avg_confidence, 3)}</b> · 低于阈值 ${num(report.asr.threshold, 2)} 的场次 <b>${report.asr.low_confidence_attempts}</b>（评分时已整站转人工）</div>` : ''}
     </div>
 
     ${canManageUsers ? usersSectionHtml(users) : ''}

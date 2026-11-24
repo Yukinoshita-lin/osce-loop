@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from statistics import mean
 from typing import Any
 
 from .. import db
@@ -57,6 +58,22 @@ def _weighted_total(items: list[dict[str, Any]], scores: dict[str, int | None]) 
     if total_weight <= 0:
         return None
     return round(earned / total_weight * 100, 2)
+
+
+def _item_asr_confidence(
+    transcript: list[dict[str, Any]], item: dict[str, Any], default: float | None
+) -> float | None:
+    """项级 ASR 置信度：优先取该项对应阶段内发言的平均置信度。"""
+    phase = item.get("phase")
+    if phase:
+        values = [
+            float(u["asr_confidence"])
+            for u in transcript
+            if u.get("phase") == phase and u.get("asr_confidence") is not None
+        ]
+        if values:
+            return round(mean(values), 3)
+    return default
 
 
 def run_scoring(
@@ -124,6 +141,7 @@ def run_scoring(
         authority = entry["authority"]
         suggestion = entry["suggestion"]
         record_id = f"rec_{attempt_id}_{item_id}"
+        item_asr = _item_asr_confidence(transcript, item, attempt.get("asr_confidence"))
 
         if authority == "none":
             routing = route_item(
@@ -142,7 +160,7 @@ def run_scoring(
                 (
                     record_id, attempt_id, item_id, None, None, "[]", "该项为全局/人工保留项，AI 不参与。",
                     json.dumps(routing, ensure_ascii=False), None, status, final_score, None, None,
-                    None, None, bundle["bundle_hash"], attempt.get("asr_confidence"), db.now_iso(),
+                    None, None, bundle["bundle_hash"], item_asr, db.now_iso(),
                 ),
             )
             continue
@@ -173,7 +191,7 @@ def run_scoring(
                     evidence_json, rationale, json.dumps(routing, ensure_ascii=False), None,
                     "manual_pending", None, None, None,
                     response["model_version"], response["prompt_version"], bundle["bundle_hash"],
-                    attempt.get("asr_confidence"), db.now_iso(),
+                    item_asr, db.now_iso(),
                 ),
             )
             continue
@@ -201,7 +219,7 @@ def run_scoring(
                     record_id, attempt_id, item_id, None, suggestion.confidence if suggestion else None,
                     evidence_json, rationale, json.dumps(routing, ensure_ascii=False), None, status, None, None, None,
                     response["model_version"], response["prompt_version"], bundle["bundle_hash"],
-                    attempt.get("asr_confidence"), db.now_iso(),
+                    item_asr, db.now_iso(),
                 ),
             )
             continue
@@ -218,6 +236,7 @@ def run_scoring(
             integrity_gap=integrity_gap,
             appeal=bool(attempt.get("appeal")),
             item_disagreement_rate=disagreement.get(item_id, 0.0),
+            asr_confidence=item_asr,
         )
         _mark_degraded(routing, response)
         evidence_json = evidence_to_json(suggestion.evidence)
@@ -232,7 +251,7 @@ def run_scoring(
                 evidence_json, suggestion.rationale, json.dumps(routing, ensure_ascii=False), None,
                 status, final_score, "AI" if auto else None, db.now_iso() if auto else None,
                 response["model_version"], response["prompt_version"], bundle["bundle_hash"],
-                attempt.get("asr_confidence"), db.now_iso(),
+                item_asr, db.now_iso(),
             ),
         )
 

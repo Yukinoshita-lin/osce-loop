@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-from ..config import PASS_LINE_MARGIN, SAMPLE_RATES
+from ..config import ASR_LOW_CONFIDENCE, PASS_LINE_MARGIN, SAMPLE_RATES
 from .rubric import AUTHORITY_ORDER
 
 
@@ -34,6 +34,7 @@ def route_item(
     integrity_gap: bool = False,
     appeal: bool = False,
     item_disagreement_rate: float = 0.0,
+    asr_confidence: float | None = None,
 ) -> dict[str, Any]:
     floor = float(item.get("confidence_floor", 0.55))
     rate = SAMPLE_RATES.get(risk_level, 0.2)
@@ -49,6 +50,16 @@ def route_item(
     # 1. 证据链不完整：全站人工
     if integrity_gap:
         return _route("full_station_human", "integrity_gap", requires_human=True)
+
+    # 1b. 转写置信度显著偏低：工具在该条件下不可靠，整站人工全量复核
+    if asr_confidence is not None and float(asr_confidence) < ASR_LOW_CONFIDENCE:
+        return _route(
+            "full_station_human",
+            "asr_low_confidence",
+            requires_human=True,
+            reason_text=f"转写平均置信度 {float(asr_confidence):.2f} 低于阈值 {ASR_LOW_CONFIDENCE:.2f}，整站转人工复核",
+            detail={"asr_confidence": round(float(asr_confidence), 3), "threshold": ASR_LOW_CONFIDENCE},
+        )
 
     # 2. 关键项 AI 判阴性：双人复核
     if item.get("critical") and ai_score == 0:

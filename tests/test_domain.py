@@ -192,6 +192,9 @@ def test_routing_priority_and_sampling():
         release_stage="G0_offline",
     )
     assert route_item(**{**common, "integrity_gap": True, "near_cutoff": True})["reason"] == "integrity_gap"
+    assert route_item(**{**common, "asr_confidence": 0.4})["reason"] == "asr_low_confidence"
+    assert route_item(**{**common, "asr_confidence": 0.4})["route"] == "full_station_human"
+    assert route_item(**{**common, "asr_confidence": 0.95, "integrity_gap": True})["reason"] == "integrity_gap"
     assert route_item(**{**common, "ai_score": None, "authority": "none"})["reason"] == "manual_only"
     assert route_item(**{**common, "item": {**item, "critical": True}, "ai_score": 0})["reason"] == "critical_negative"
     assert route_item(**{**common, "near_cutoff": True})["reason"] == "near_cutoff"
