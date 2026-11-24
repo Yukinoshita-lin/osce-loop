@@ -1350,7 +1350,8 @@ function executionHtml(run, emergencyStop) {
         ${execPill(slot.status)}
       </div>
       <div class="tiny muted">${esc(slot.room)} · ${esc(slot.sp)} · ${esc(slot.examiner)} · ${slot.start_min}–${slot.end_min}′</div>
-      ${run.hints_enabled ? `<ul class="tiny muted" style="margin:6px 0 0;padding-left:16px">${(slot.hints || []).map((h) => `<li>${esc(h)}</li>`).join('')}</ul>` : '<div class="tiny muted" style="margin-top:5px">事实层提示已关闭</div>'}
+      ${slot.hints_enabled !== false ? `<ul class="tiny muted" style="margin:6px 0 0;padding-left:16px">${(slot.hints || []).map((h) => `<li>${esc(h)}</li>`).join('')}</ul>` : `<div class="tiny muted" style="margin-top:5px">${run.hints_enabled ? '本站事实层提示已单独关闭' : '事实层提示已关闭'}</div>`}
+      ${(slot.hints || []).length ? `<button class="link-btn tiny" data-action="exec-slot-hints" data-station-id="${dataAttr(slot.station_id)}" data-enabled="${slot.hints_enabled !== false ? 'false' : 'true'}">${slot.hints_enabled !== false ? '关闭本站提示' : '开启本站提示'}</button>` : ''}
       ${slot.note ? `<div class="violation">${esc(slot.note)}</div>` : ''}
       ${slot.compensation ? `<div class="tiny"><span class="pill amber">补偿</span> ${esc(compLabels[slot.compensation] || slot.compensation)}</div>` : ''}
       ${['anomaly', 'terminated'].includes(slot.status) ? `<div class="btn-row" style="margin-top:6px">
@@ -3921,6 +3922,24 @@ document.addEventListener('click', async (e) => {
         body: { enabled, actor: state.reviewer || '考务' },
       });
       toast(enabled ? '事实层提示已开启' : '事实层提示已关闭，操作已留痕');
+      await viewExecution();
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'exec-slot-hints') {
+    try {
+      const enabled = el.dataset.enabled === 'true';
+      await api(`/api/execution/${encodeURIComponent(state.executionRunId)}/hints`, {
+        method: 'POST',
+        body: {
+          enabled,
+          station_id: el.dataset.stationId,
+          actor: state.reviewer || '考务',
+        },
+      });
+      toast(enabled ? '本站事实层提示已开启' : '本站事实层提示已关闭，操作已留痕');
       await viewExecution();
     } catch (err) {
       toast(err.message, true);

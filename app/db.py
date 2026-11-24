@@ -416,6 +416,15 @@ CREATE TABLE IF NOT EXISTS exam_run_slots (
     PRIMARY KEY (run_id, slot_key)
 );
 
+CREATE TABLE IF NOT EXISTS exam_run_hint_overrides (
+    run_id TEXT NOT NULL,
+    station_id TEXT NOT NULL,
+    enabled INTEGER NOT NULL,
+    actor TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (run_id, station_id)
+);
+
 CREATE TABLE IF NOT EXISTS exam_events (
     event_id TEXT PRIMARY KEY,
     run_id TEXT NOT NULL,

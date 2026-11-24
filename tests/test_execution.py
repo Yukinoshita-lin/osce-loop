@@ -11,6 +11,7 @@ from app.domain.execution import (
     start_run,
     stop_run,
     toggle_hints,
+    toggle_station_hints,
 )
 from app.domain.scheduling import ensure_schedule_inputs, generate_schedule
 
@@ -74,6 +75,32 @@ def test_hints_toggle_and_stop(conn):
     latest = latest_run(conn)
     assert latest["run_id"] == run["run_id"]
     assert latest["status"] == "stopped"
+
+
+def test_station_hints_toggle_is_scoped(conn):
+    run = start_run(conn, actor="test")
+    station_id = run["slots"][0]["station_id"]
+    updated = toggle_station_hints(conn, run["run_id"], station_id, enabled=False, actor="test")
+    scoped = [slot for slot in updated["slots"] if slot["station_id"] == station_id]
+    others = [slot for slot in updated["slots"] if slot["station_id"] != station_id]
+    assert scoped and all(slot["hints_enabled"] is False for slot in scoped)
+    assert others and all(slot["hints_enabled"] is True for slot in others)
+    assert updated["hint_overrides"][station_id] is False
+    assert any(ev["event_type"] == "hints_station_toggled" for ev in updated["events"])
+
+    global_off = toggle_hints(conn, run["run_id"], enabled=False, actor="test")
+    assert all(slot["hints_enabled"] is False for slot in global_off["slots"])
+
+    global_on = toggle_hints(conn, run["run_id"], enabled=True, actor="test")
+    scoped = [slot for slot in global_on["slots"] if slot["station_id"] == station_id]
+    assert scoped and all(slot["hints_enabled"] is False for slot in scoped)
+
+    reenabled = toggle_station_hints(conn, run["run_id"], station_id, enabled=True, actor="test")
+    scoped = [slot for slot in reenabled["slots"] if slot["station_id"] == station_id]
+    assert scoped and all(slot["hints_enabled"] is True for slot in scoped)
+
+    with pytest.raises(ValueError, match="不在本次考试"):
+        toggle_station_hints(conn, run["run_id"], "ST-NONE", enabled=False, actor="test")
 
 
 def test_slot_compensation_requires_choice_and_note(conn):

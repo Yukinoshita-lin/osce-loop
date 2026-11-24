@@ -162,6 +162,12 @@ def get_run(conn, run_id: str) -> dict[str, Any]:
         raise ValueError("考试执行不存在")
     run = dict(row)
     slots = []
+    overrides = {
+        row["station_id"]: bool(row["enabled"])
+        for row in conn.execute(
+            "SELECT * FROM exam_run_hint_overrides WHERE run_id = ?", (run_id,)
+        ).fetchall()
+    }
     for slot in conn.execute(
         "SELECT * FROM exam_run_slots WHERE run_id = ? ORDER BY round, candidate_id", (run_id,)
     ).fetchall():
@@ -170,6 +176,10 @@ def get_run(conn, run_id: str) -> dict[str, Any]:
             data["hints"] = json.loads(data.get("hints") or "[]")
         except (TypeError, ValueError):
             data["hints"] = []
+        data["hints_override"] = overrides.get(data.get("station_id"))
+        data["hints_enabled"] = bool(run["hints_enabled"]) and overrides.get(
+            data.get("station_id"), True
+        )
         slots.append(data)
 
     attempt_rows = {
@@ -242,6 +252,7 @@ def get_run(conn, run_id: str) -> dict[str, Any]:
     return {
         **run,
         "hints_enabled": bool(run["hints_enabled"]),
+        "hint_overrides": overrides,
         "max_round": max_round,
         "slots": slots,
         "events": events,
@@ -457,6 +468,46 @@ def toggle_hints(conn, run_id: str, *, enabled: bool, actor: str = "考务") -> 
         object_type="ExamRun",
         object_id=run_id,
         after={"enabled": enabled},
+    )
+    return get_run(conn, run_id)
+
+
+def toggle_station_hints(
+    conn, run_id: str, station_id: str, *, enabled: bool, actor: str = "考务"
+) -> dict[str, Any]:
+    """按站开关事实层提示；全局关闭优先，分站设置保留以便恢复。"""
+    run = conn.execute("SELECT * FROM exam_runs WHERE run_id = ?", (run_id,)).fetchone()
+    if not run:
+        raise ValueError("考试执行不存在")
+    station = conn.execute(
+        "SELECT station_name FROM exam_run_slots WHERE run_id = ? AND station_id = ? LIMIT 1",
+        (run_id, station_id),
+    ).fetchone()
+    if not station:
+        raise ValueError("该考站不在本次考试中")
+    timestamp = db.now_iso()
+    conn.execute(
+        "INSERT INTO exam_run_hint_overrides(run_id, station_id, enabled, actor, updated_at) "
+        "VALUES(?,?,?,?,?) ON CONFLICT(run_id, station_id) DO UPDATE SET "
+        "enabled = excluded.enabled, actor = excluded.actor, updated_at = excluded.updated_at",
+        (run_id, station_id, 1 if enabled else 0, actor, timestamp),
+    )
+    _event(
+        conn,
+        run_id,
+        "hints_station_toggled",
+        f"{station['station_name']} 事实层提示已{'开启' if enabled else '关闭'}（操作者：{actor}）",
+        severity="info",
+        payload={"station_id": station_id, "enabled": enabled, "actor": actor},
+    )
+    conn.commit()
+    db.append_audit(
+        conn,
+        actor=actor,
+        action="exam.hints_station_toggle",
+        object_type="ExamRun",
+        object_id=run_id,
+        after={"station_id": station_id, "enabled": enabled},
     )
     return get_run(conn, run_id)
 

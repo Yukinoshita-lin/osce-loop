@@ -121,6 +121,7 @@ from .domain.execution import (
     start_run,
     stop_run,
     toggle_hints,
+    toggle_station_hints,
 )
 from .domain.ingest import create_ingested_attempt
 from .domain.integrity import backfill_transcript_hashes, transcript_integrity, verify_evidence
@@ -2142,13 +2143,23 @@ def execution_slot_action(run_id: str, slot_key: str, body: SlotActionBody, conn
 
 class HintsBody(BaseModel):
     enabled: bool
+    station_id: str | None = None
     actor: str = "考务"
 
 
 @app.post("/api/execution/{run_id}/hints")
 def execution_hints(run_id: str, body: HintsBody, conn=Depends(get_conn)):
     try:
-        run = toggle_hints(conn, run_id, enabled=body.enabled, actor=body.actor)
+        if body.station_id:
+            run = toggle_station_hints(
+                conn,
+                run_id,
+                body.station_id,
+                enabled=body.enabled,
+                actor=body.actor,
+            )
+        else:
+            run = toggle_hints(conn, run_id, enabled=body.enabled, actor=body.actor)
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
     return {"ok": True, "run": run}
