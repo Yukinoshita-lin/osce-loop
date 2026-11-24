@@ -188,6 +188,37 @@ def test_ingest_with_notes_produces_note_evidence(conn, bundle):
     assert "笔记" in (evidence[0].get("note") or "")
 
 
+def test_ingest_records_automatic_anomalies(conn, bundle):
+    transcript = [
+        {"speaker": "patient", "start_ms": 0, "end_ms": 3000, "text": "大夫，我胸痛。"},
+        {"speaker": "candidate", "start_ms": 6000, "end_ms": 9000, "text": "疼多久了？"},
+        {"speaker": "patient", "start_ms": 75000, "end_ms": 78000, "text": "疼死了，受不了。"},
+    ]
+    gateway = CapabilityGateway(conn, MockScoringProvider(), MODEL_VERSION, PROMPT_VERSION)
+    attempt_id = create_ingested_attempt(
+        conn,
+        gateway,
+        bundle=bundle,
+        transcript=transcript,
+        candidate_code="C-ANOMALY-001",
+        candidate_name="异常考生",
+        risk_level="L2",
+        release_stage="G0_offline",
+        media_id="media_anomaly",
+        media_url="/media/uploads/anomaly.wav",
+        media_filename="anomaly.wav",
+        actor="test",
+    )
+    attempt = conn.execute(
+        "SELECT anomalies FROM attempts WHERE attempt_id = ?", (attempt_id,)
+    ).fetchone()
+    anomalies = json.loads(attempt["anomalies"])
+    types = {entry["type"] for entry in anomalies}
+    assert {"silence", "emotion"} <= types
+    assert any("沉默" in entry["label"] for entry in anomalies)
+    assert any("情绪" in entry["label"] for entry in anomalies)
+
+
 def test_ingest_creates_scored_attempt(conn, bundle):
     parsed = parse_transcript("sample.json", json.dumps(SAMPLE_JSON, ensure_ascii=False).encode("utf-8"))
     gateway = CapabilityGateway(conn, MockScoringProvider(), MODEL_VERSION, PROMPT_VERSION)

@@ -644,6 +644,7 @@ def _attempt_summary(conn, attempt: dict[str, Any]) -> dict[str, Any]:
         "near_cutoff": bool(attempt.get("near_cutoff")),
         "integrity_gap": bool(attempt.get("integrity_gap")),
         "integrity_note": attempt.get("integrity_note"),
+        "anomalies": json.loads(attempt.get("anomalies") or "[]"),
         "appeal": bool(attempt.get("appeal")),
         "media_url": attempt.get("media_url"),
         "media_sha256": attempt.get("media_sha256"),

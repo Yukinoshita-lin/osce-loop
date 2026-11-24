@@ -559,6 +559,7 @@ function renderWorkbench(data) {
       <span>最终分 <b>${attempt.final_total === null ? '—' : num(attempt.final_total, 1)}</b></span>
       <span>待复核 <b>${attempt.pending ?? '—'}</b></span>
       ${attempt.integrity_gap ? '<span class="pill red">integrity_gap</span>' : ''}
+      ${(attempt.anomalies || []).map((item) => `<span class="pill ${item.severity === 'high' ? 'red' : item.severity === 'medium' ? 'amber' : 'muted'}" title="${dataAttr(item.detail)}">${esc(item.label)}</span>`).join('')}
       ${attempt.near_cutoff ? '<span class="pill amber">near_cutoff</span>' : ''}
       ${attempt.risk_level !== 'L3' && attempt.status !== 'published' ? `<button class="btn small danger" data-action="risk-escalate" data-attempt="${dataAttr(attempt.attempt_id)}">升级为 L3</button>` : ''}
       ${attempt.risk_escalated_at ? `<span class="pill red">风险已上调 · ${esc(fmtTime(attempt.risk_escalated_at))}</span>` : ''}
@@ -938,6 +939,7 @@ function renderIngestResult(data) {
   if (!box) return;
   box.innerHTML = `
     <div class="sep"></div>
+    ${(a.anomalies || []).length ? `<div class="alert" style="margin-bottom:8px"><b>自动异常 ${a.anomalies.length} 项</b><p>${a.anomalies.map((item) => `${esc(item.label)}：${esc(item.detail)}`).join('；')}</p></div>` : ''}
     ${data.linked_slot ? `<div class="attempt-strip" style="margin-bottom:8px">
       <span class="pill teal">已回写执行槽位</span>
       <span>${esc(data.linked_slot.slot_key)}</span>

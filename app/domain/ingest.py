@@ -8,6 +8,7 @@ from typing import Any
 from .. import db
 from ..ai.base import CapabilityGateway
 from ..ai.pipeline import run_scoring
+from .anomaly import detect_anomalies
 from .execution import link_attempt_to_slot, slot_for_ingest
 from .integrity import transcript_digest
 from .retention import retention_plan
@@ -54,6 +55,13 @@ def create_ingested_attempt(
     integrity_note = None
     if integrity_gap:
         integrity_note = "未上传媒体文件：证据只能显示转写片段，无法回放，全部记录转人工复核。"
+    anomalies = detect_anomalies(
+        transcript,
+        duration_ms=duration_ms,
+        station_duration_min=bundle["payload"].get("duration_min"),
+        integrity_gap=bool(integrity_gap),
+        media_present=bool(media_url),
+    )
 
     conn.execute(
         "INSERT INTO attempts(attempt_id, bundle_id, candidate_code, candidate_name, session_id, risk_level, "
@@ -95,6 +103,11 @@ def create_ingested_attempt(
             db.now_iso(),
         ),
     )
+    if anomalies:
+        conn.execute(
+            "UPDATE attempts SET anomalies = ? WHERE attempt_id = ?",
+            (json.dumps(anomalies, ensure_ascii=False), attempt_id),
+        )
     conn.commit()
 
     attempt = {
@@ -121,6 +134,7 @@ def create_ingested_attempt(
             "risk_level": risk_level,
             "utterances": len(transcript),
             "notes": sum(1 for u in transcript if u.get("source") == "note"),
+            "anomalies": anomalies,
             "media_filename": media_filename,
             "media_sha256": media_sha256,
             "media_size_bytes": media_size_bytes,
