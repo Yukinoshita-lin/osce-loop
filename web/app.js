@@ -2216,6 +2216,22 @@ async function viewQuality() {
     if (p.floor_items.length) parts.push(`全员零分：${p.floor_items.map(esc).join('、')}`);
     return `<div class="version-row"><span class="k">${esc(p.station_id)}</span><span class="v">${parts.join(' · ')}</span></div>`;
   }).join('');
+  const coverage = data.coverage || {};
+  const coverageRows = (coverage.domains || []).map((d) => {
+    const statusLabel = { ok: ['达标', 'teal'], overrepresented: ['过度重复', 'amber'], single_station: ['单站覆盖', 'muted'] }[d.status] || [d.status, 'muted'];
+    return `<tr>
+      <td><div style="font-weight:600">${esc(d.label)}</div><div class="mono tiny muted">${esc(d.domain)}</div></td>
+      <td class="num">${d.stations}</td>
+      <td class="num">${d.items}</td>
+      <td class="num">${pct(d.share, 1)}</td>
+      <td class="num">${d.target === null ? '—' : pct(d.target, 0)}</td>
+      <td><span class="pill ${statusLabel[1]}">${esc(statusLabel[0])}</span></td>
+    </tr>`;
+  }).join('');
+  const uncovered = coverage.uncovered || [];
+  const coverageNote = uncovered.length
+    ? `<div class="alert" style="margin-top:8px"><b>未覆盖能力域</b><p>${uncovered.map((d) => `${esc(d.label)}（目标 ${pct(d.target, 0)}）`).join('、')} 尚无站包覆盖，建议下一年度命题补充。</p></div>`
+    : '<div class="tiny muted" style="margin-top:6px">六域蓝图均已覆盖。</div>';
   const itemRows = ((itemQuality && itemQuality.items) || []).map((item) => `
     <tr>
       <td><div class="mono tiny muted">${esc(item.item_id)}</div><div style="font-weight:600">${esc(item.title)}</div></td>
@@ -2319,6 +2335,18 @@ async function viewQuality() {
       </div>
       ${psychoNotes}
       <div class="tiny muted" style="margin-top:6px">α ≥ 0.7 视为可接受；项级区分度 < 0.2 或全员满分/零分提示评分表或 SP 可能有问题，需人工裁定。</div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">蓝图覆盖度<span class="sub">六域目标占比 · 空白域与过度重复</span></div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>能力域</th><th class="num">覆盖站数</th><th class="num">评分项</th><th class="num">权重占比</th><th class="num">目标</th><th>判定</th></tr></thead>
+          <tbody>${coverageRows || '<tr><td colspan="6" class="empty">暂无站包</td></tr>'}</tbody>
+        </table>
+      </div>
+      ${coverageNote}
+      <div class="tiny muted" style="margin-top:6px">${esc(coverage.note || '')}</div>
     </div>
 
     <div class="card" style="margin-bottom:16px">

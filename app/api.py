@@ -70,6 +70,7 @@ from .domain.bundle import (
 )
 from .domain.calibration import calibration_report, import_gold_scores, parse_gold_file
 from .domain.cost import ai_cost_summary
+from .domain.coverage import blueprint_coverage
 from .domain.export import build_attempt_package
 from .domain.fairness import fairness_report
 from .domain.feedback import ensure_feedback_units, summarize_feedback
@@ -1489,6 +1490,7 @@ def quality(conn=Depends(get_conn)):
         "model_cards": model_cards,
         "item_quality": item_quality,
         "psychometrics": station_psychometrics(conn),
+        "coverage": blueprint_coverage(conn),
         "ai_calls": {
             "count": len(calls),
             "p95_latency_ms": p95,
