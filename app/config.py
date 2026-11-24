@@ -65,6 +65,9 @@ ASR_LOW_CONFIDENCE = float(os.getenv("OSCELOOP_ASR_LOW_CONFIDENCE", "0.70"))
 ASR_COHORT_GAP = float(os.getenv("OSCELOOP_ASR_COHORT_GAP", "0.08"))
 ASR_COHORT_MIN_ATTEMPTS = int(os.getenv("OSCELOOP_ASR_COHORT_MIN_ATTEMPTS", "5"))
 
+# 能力网关限流：单能力每分钟最多调用次数；设为 0 关闭。超限时优先走兜底并强制人工确认。
+GATEWAY_RATE_LIMIT_PER_MINUTE = int(os.getenv("OSCELOOP_GATEWAY_RATE_LIMIT", "600"))
+
 # 当前能力闸门阶段。P0 为离线历史录像，尚未进入真实考生场景。
 RELEASE_STAGE = os.getenv("OSCELOOP_RELEASE_STAGE", "G0_offline")
 

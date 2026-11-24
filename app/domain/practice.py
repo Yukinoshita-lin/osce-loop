@@ -90,9 +90,29 @@ def build_practice_report(
         scores[item["item_id"]] = suggestion.score
         evidence = suggestion.evidence[0] if suggestion.evidence else None
         covered = bool(evidence and evidence.evidence_kind != "absence")
-        level = "positive" if suggestion.score == 2 else "partial" if suggestion.score == 1 else "negative"
+        if suggestion.score == 2:
+            level = "positive"
+        elif suggestion.score == 1:
+            level = "partial"
+        elif suggestion.score == 0:
+            level = "negative"
+        else:
+            level = "unscored"
         anchor = item.get("anchor") or {}
         alternative = (templates.get(item["item_id"]) or {}).get("alternative") or item.get("feedback_alt")
+        behavior = (
+            f"{item['item_id']}（{item.get('title')}）：AI 未给出判定（拒答或限流），需人工复核。"
+            if suggestion.score is None
+            else f"{item['item_id']}（{item.get('title')}）：{level}"
+            + "。对应行为锚："
+            + (
+                anchor.get("positive")
+                if suggestion.score == 2
+                else anchor.get("partial")
+                if suggestion.score == 1
+                else anchor.get("negative") or ""
+            )
+        )
         records.append(
             {
                 "item_id": item["item_id"],
@@ -112,17 +132,18 @@ def build_practice_report(
                     "evidence_kind": evidence.evidence_kind if evidence else "absence",
                     "note": evidence.note if evidence else None,
                 },
-                "behavior": f"{item['item_id']}（{item.get('title')}）：{level}"
-                + "。对应行为锚："
-                + (anchor.get("positive") if suggestion.score == 2 else anchor.get("partial") if suggestion.score == 1 else anchor.get("negative") or ""),
+                "behavior": behavior,
                 "alternative": alternative,
                 "rationale": suggestion.rationale,
             }
         )
 
     deductions = [
-        r for r in records if r["score"] < 2 and (r["covered"] or r["critical"])
+        r
+        for r in records
+        if r["score"] is not None and r["score"] < 2 and (r["covered"] or r["critical"])
     ]
+    unscored = [r for r in records if r["score"] is None]
     uncovered = [r for r in records if r["score"] == 0 and not r["covered"]]
     strengths = [r for r in records if r["score"] == 2]
     retry_items = [r for r in records if r["score"] is not None and r["score"] < 2]
@@ -173,6 +194,8 @@ def build_practice_report(
         "retry_plan": retry_plan,
         "uncovered": uncovered,
         "uncovered_count": len(uncovered),
+        "unscored": unscored,
+        "unscored_count": len(unscored),
         "feedback_quality": summarize_feedback(deductions),
         "disclaimer": "形成性练习反馈，不计入成绩；共情类全局项需教师观察，未纳入自动评分。",
         "feedback_rule": "每条扣分项包含：证据片段 + 对应评分项档位 + 可直接背诵的替代话术。",

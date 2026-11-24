@@ -5,10 +5,16 @@ import hashlib
 import json
 import time
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .. import db
-from ..config import AI_INPUT_PRICE_PER_1K, AI_OUTPUT_PRICE_PER_1K, ASR_PRICE_PER_MINUTE
+from ..config import (
+    AI_INPUT_PRICE_PER_1K,
+    AI_OUTPUT_PRICE_PER_1K,
+    ASR_PRICE_PER_MINUTE,
+    GATEWAY_RATE_LIMIT_PER_MINUTE,
+)
 
 _CACHE_MISS = object()
 
@@ -47,12 +53,29 @@ class CapabilityGateway:
         prompt_version: str,
         *,
         fallback_provider=None,
+        rate_limit_per_minute: int | None = None,
     ):
         self.conn = conn
         self.provider = provider
         self.model_version = model_version
         self.prompt_version = prompt_version
         self.fallback_provider = fallback_provider
+        self.rate_limit_per_minute = (
+            GATEWAY_RATE_LIMIT_PER_MINUTE
+            if rate_limit_per_minute is None
+            else max(0, int(rate_limit_per_minute))
+        )
+
+    def _recent_call_count(self, capability: str) -> int:
+        cutoff = (
+            datetime.now(timezone.utc).astimezone() - timedelta(minutes=1)
+        ).isoformat(timespec="seconds")
+        row = self.conn.execute(
+            "SELECT COUNT(*) AS n FROM ai_calls WHERE capability = ? AND created_at >= ? "
+            "AND status NOT IN ('cached', 'rate_limited')",
+            (capability, cutoff),
+        ).fetchone()
+        return int(row["n"] or 0)
 
     def score_item(
         self,
@@ -188,6 +211,90 @@ class CapabilityGateway:
                     "output_tokens": None,
                     "cost_usd": 0.0,
                 }
+        if self.rate_limit_per_minute and self._recent_call_count(capability) >= self.rate_limit_per_minute:
+            detail = {
+                "limit": self.rate_limit_per_minute,
+                "window_seconds": 60,
+                "status": "rate_limited",
+            }
+            fallback_started = time.perf_counter()
+            effective_fallback = fallback_fn
+            if (
+                effective_fallback is None
+                and capability.startswith("score.")
+            ):
+                effective_fallback = lambda: Suggestion(
+                    item_id="",
+                    score=None,
+                    confidence=None,
+                    refusal=True,
+                    refusal_reason="AI 评分触发限流，已转人工复核",
+                )
+            if effective_fallback is None:
+                db.log_ai_call(
+                    self.conn,
+                    capability=capability,
+                    model_version=self.model_version,
+                    prompt_version=self.prompt_version,
+                    subject_ref=subject_ref,
+                    latency_ms=(time.perf_counter() - fallback_started) * 1000,
+                    status="rate_limited",
+                    detail=detail,
+                )
+                raise RuntimeError(
+                    f"AI 能力 {capability} 触发限流（{self.rate_limit_per_minute}/分钟），请稍后重试或转人工"
+                )
+            output = effective_fallback()
+            latency_ms = (time.perf_counter() - fallback_started) * 1000
+            used_model = getattr(self.fallback_provider, "model_version", self.model_version)
+            used_prompt = getattr(self.fallback_provider, "prompt_version", self.prompt_version)
+            detail["fallback"] = getattr(
+                self.fallback_provider,
+                "name",
+                "rate_limit_refusal" if fallback_fn is None else "fallback",
+            )
+            if (
+                require_evidence
+                and isinstance(output, Suggestion)
+                and output.score is not None
+                and not output.evidence
+            ):
+                output.refusal = True
+                output.refusal_reason = "限流兜底无法定位证据，转人工"
+                output.score = None
+                output.confidence = None
+            if isinstance(output, Suggestion):
+                detail.update(
+                    {
+                        "item_id": output.item_id,
+                        "score": output.score,
+                        "confidence": output.confidence,
+                        "evidence_count": len(output.evidence),
+                    }
+                )
+            db.log_ai_call(
+                self.conn,
+                capability=capability,
+                model_version=used_model,
+                prompt_version=used_prompt,
+                subject_ref=subject_ref,
+                latency_ms=latency_ms,
+                status="rate_limited",
+                detail=detail,
+            )
+            return {
+                "status": "rate_limited",
+                "degraded": True,
+                "cached": False,
+                "rate_limited": True,
+                "output": output,
+                "model_version": used_model,
+                "prompt_version": used_prompt,
+                "latency_ms": round(latency_ms, 2),
+                "input_tokens": None,
+                "output_tokens": None,
+                "cost_usd": 0.0,
+            }
         started = time.perf_counter()
         status = "ok"
         used_model = self.model_version

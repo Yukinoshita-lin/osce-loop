@@ -799,6 +799,36 @@ def test_practice_report_scores_through_gateway(conn, bundle):
     assert report["ai_versions"]["rubric_version"] == bundle["bundle_hash"]
 
 
+def test_practice_report_handles_gateway_refusal_without_score(conn, bundle):
+    from app.ai.base import Suggestion
+
+    class RefusingGateway:
+        model_version = "mock-score-1.0"
+        prompt_version = "score-prompt-1.0"
+
+        def score_item(self, **_kwargs):
+            return {
+                "output": Suggestion(
+                    item_id="",
+                    score=None,
+                    confidence=None,
+                    refusal=True,
+                    refusal_reason="AI 评分触发限流，已转人工复核",
+                )
+            }
+
+    messages = [
+        {"role": "candidate", "text": "疼多久了？", "phase": "information_gathering", "at_ms": 6000},
+        {"role": "patient", "text": "两个多小时了。", "phase": "information_gathering", "at_ms": 10000},
+    ]
+    report = build_practice_report(bundle, messages, gateway=RefusingGateway())
+    assert report["unscored_count"] == report["items_scored"]
+    assert all(item["score"] is None for item in report["unscored"])
+    assert report["deductions"] == []
+    assert report["total"] is None
+    assert report["retry_plan"]["count"] == 0
+
+
 def test_gate_g1_uses_sp_certification(conn):
     bundle_row = conn.execute(
         "SELECT bundle_id FROM bundles ORDER BY frozen_at DESC, rowid DESC LIMIT 1"
