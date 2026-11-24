@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..ai.mock import MockScoringProvider
-from .feedback import ensure_feedback_units, summarize_feedback
+from .feedback import ensure_feedback_evidence, ensure_feedback_units, summarize_feedback
 from .stats import domain_scores
 
 SCORE_LABELS = {0: "negative", 1: "partial", 2: "positive"}
@@ -126,6 +126,7 @@ def build_practice_report(
     uncovered = [r for r in records if r["score"] == 0 and not r["covered"]]
     strengths = [r for r in records if r["score"] == 2]
     ensure_feedback_units(records, {item["item_id"]: item for item in items})
+    ensure_feedback_evidence(deductions, media_id="practice", duration_ms=duration_ms)
     total = _weighted_total(items, scores)
     covered_count = sum(1 for r in records if r["covered"])
     return {

@@ -1648,6 +1648,7 @@ async function renderFeedback(attemptId) {
           <span class="pill ${data.feedback_quality.all_have_alternative ? 'teal' : 'amber'}">替代话术 ${data.feedback_quality.with_alternative}/${data.feedback_quality.checked}</span>
           <span class="pill">时间戳 ${data.feedback_quality.with_timestamp}</span>
           ${data.feedback_quality.repaired ? `<span class="pill amber">兜底修复 ${data.feedback_quality.repaired}</span>` : ''}
+          ${data.feedback_quality.repaired_evidence ? `<span class="pill amber">证据兜底 ${data.feedback_quality.repaired_evidence}</span>` : ''}
         </div>` : ''}
         ${data.readability && data.readability.level !== 'unmeasured' ? `<div class="attempt-strip" style="margin-top:8px">
           <span>可读性 <span class="pill ${data.readability.level === 'easy' ? 'teal' : data.readability.level === 'hard' ? 'red' : 'amber'}">${esc(data.readability.level_label)}</span></span>
@@ -2029,6 +2030,7 @@ function practiceReportHtml(report) {
         <span class="pill ${report.feedback_quality.all_have_alternative ? 'teal' : 'amber'}">替代话术 ${report.feedback_quality.with_alternative}/${report.feedback_quality.checked}</span>
         <span class="pill">时间戳 ${report.feedback_quality.with_timestamp}</span>
         ${report.feedback_quality.repaired ? `<span class="pill amber">兜底修复 ${report.feedback_quality.repaired}</span>` : ''}
+        ${report.feedback_quality.repaired_evidence ? `<span class="pill amber">证据兜底 ${report.feedback_quality.repaired_evidence}</span>` : ''}
       </div>` : ''}
       <div class="tiny muted" style="margin-top:6px">${esc(report.disclaimer)}</div>
     </section>`;

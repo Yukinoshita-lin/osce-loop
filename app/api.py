@@ -90,7 +90,7 @@ from .domain.drafting import (
 )
 from .domain.export import build_attempt_package
 from .domain.fairness import fairness_report
-from .domain.feedback import ensure_feedback_units, summarize_feedback
+from .domain.feedback import ensure_feedback_evidence, ensure_feedback_units, summarize_feedback
 from .domain.gates import evaluate_gates
 from .domain.governance import (
     emergency_stop_active,
@@ -1581,6 +1581,11 @@ def feedback(attempt_id: str, request: Request, conn=Depends(get_conn)):
         else:
             deductions.append(unit)
     ensure_feedback_units(deductions + strengths, items)
+    ensure_feedback_evidence(
+        deductions,
+        media_id=attempt.get("media_id"),
+        duration_ms=int(attempt.get("duration_ms") or 0),
+    )
     readability = analyze_feedback_readability(
         [
             unit.get(field, "")

@@ -26,6 +26,32 @@ def ensure_feedback_units(
     return units
 
 
+def ensure_feedback_evidence(
+    units: list[dict[str, Any]],
+    *,
+    media_id: str | None,
+    duration_ms: int,
+) -> list[dict[str, Any]]:
+    """扣分项缺少时间戳时补全为“全段缺席”证据，保证反馈可回放且显式标注需人工确认。"""
+    for unit in units:
+        if unit.get("score") == 2:
+            continue
+        evidence = unit.get("evidence") or {}
+        if evidence.get("start_ms") is not None and evidence.get("end_ms") is not None:
+            continue
+        unit["evidence"] = {
+            "media_id": media_id,
+            "start_ms": 0,
+            "end_ms": max(0, int(duration_ms or 0)),
+            "speaker": "system",
+            "quote": "本场次未捕获与该项相关的可回放片段",
+            "evidence_kind": "absence",
+            "note": "系统补全的缺席证据：需人工确认整段录像后再判定。",
+        }
+        unit["evidence_repaired"] = True
+    return units
+
+
 def summarize_feedback(units: list[dict[str, Any]]) -> dict[str, Any]:
     checked = len(units)
     with_timestamp = sum(
@@ -33,11 +59,13 @@ def summarize_feedback(units: list[dict[str, Any]]) -> dict[str, Any]:
     )
     with_alternative = sum(1 for unit in units if str(unit.get("alternative") or "").strip())
     repaired = sum(1 for unit in units if unit.get("alternative_repaired"))
+    repaired_evidence = sum(1 for unit in units if unit.get("evidence_repaired"))
     return {
         "checked": checked,
         "with_timestamp": with_timestamp,
         "with_alternative": with_alternative,
         "repaired": repaired,
+        "repaired_evidence": repaired_evidence,
         "all_have_alternative": checked == with_alternative,
         "rule": FEEDBACK_RULE,
     }

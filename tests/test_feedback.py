@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from app.domain.feedback import (
+    ensure_feedback_evidence,
     ensure_feedback_units,
     fallback_alternative,
     summarize_feedback,
@@ -28,6 +29,23 @@ def test_ensure_feedback_units_repairs_only_missing_alternatives():
     assert units[0]["alternative_repaired"] is True
     assert "询问胸痛部位" in units[0]["alternative"]
     assert "alternative_repaired" not in units[1]
+
+
+def test_ensure_feedback_evidence_repairs_only_deductions():
+    units = [
+        {"item_id": "A", "score": 0, "evidence": None},
+        {"item_id": "B", "score": 1, "evidence": {"start_ms": 100, "end_ms": 200}},
+        {"item_id": "C", "score": 2, "evidence": None},
+    ]
+    ensure_feedback_evidence(units, media_id="media_1", duration_ms=60000)
+    assert units[0]["evidence_repaired"] is True
+    assert units[0]["evidence"]["evidence_kind"] == "absence"
+    assert units[0]["evidence"]["end_ms"] == 60000
+    assert "evidence_repaired" not in units[1]
+    assert units[2]["evidence"] is None
+    summary = summarize_feedback(units)
+    assert summary["with_timestamp"] == 2
+    assert summary["repaired_evidence"] == 1
 
 
 def test_summarize_feedback_counts_timestamps_and_alternatives():
