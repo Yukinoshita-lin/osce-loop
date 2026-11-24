@@ -262,6 +262,19 @@ def evaluate_gates(conn, report: dict[str, Any], current_stage: str) -> dict[str
                 "detail": f"integrity_gap 比例 {report['integrity_gap_rate']:.1%} > 2%，相关场次应全站人工复核。",
             }
         )
+    edit_rate = values.get("edit_rate")
+    reviewed = (report.get("review") or {}).get("reviewed") or 0
+    if edit_rate is not None and reviewed >= 20 and edit_rate < 0.05:
+        alerts.append(
+            {
+                "level": "warn",
+                "title": "人工编辑率过低，警惕“橡皮图章”",
+                "detail": (
+                    f"当前编辑率 {edit_rate:.1%}（复核 {reviewed} 条），低于 5%；"
+                    "人工复核可能已形式化，建议检查默认选中、一键通过或批量确认等界面诱导。"
+                ),
+            }
+        )
     if values.get("sp_cert_issue") == "missing":
         alerts.append(
             {
