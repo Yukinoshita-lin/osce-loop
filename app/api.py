@@ -1519,8 +1519,8 @@ def version_bump(body: VersionBody, conn=Depends(get_conn)):
 
 
 @app.get("/api/fairness")
-def fairness(conn=Depends(get_conn)):
-    return fairness_report(conn)
+def fairness(conn=Depends(get_conn), bundle_id: str | None = None):
+    return fairness_report(conn, bundle_id)
 
 
 @app.get("/api/ab")

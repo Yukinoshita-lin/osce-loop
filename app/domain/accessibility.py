@@ -54,12 +54,22 @@ def submit_feedback_survey(
     return {"survey_id": survey_id, "attempt_id": attempt_id, "rating": rating, "created_at": timestamp}
 
 
-def feedback_accessibility(conn) -> dict[str, Any]:
-    rows = db.rows_to_dicts(
-        conn.execute(
-            "SELECT * FROM feedback_surveys ORDER BY created_at DESC, rowid DESC"
-        ).fetchall()
-    )
+def feedback_accessibility(conn, bundle_id: str | None = None) -> dict[str, Any]:
+    if bundle_id:
+        rows = db.rows_to_dicts(
+            conn.execute(
+                "SELECT s.* FROM feedback_surveys s "
+                "JOIN attempts a ON a.attempt_id = s.attempt_id "
+                "WHERE a.bundle_id = ? ORDER BY s.created_at DESC, s.rowid DESC",
+                (bundle_id,),
+            ).fetchall()
+        )
+    else:
+        rows = db.rows_to_dicts(
+            conn.execute(
+                "SELECT * FROM feedback_surveys ORDER BY created_at DESC, rowid DESC"
+            ).fetchall()
+        )
     count = len(rows)
     helpful = sum(1 for row in rows if row["rating"] >= HELPFUL_RATING)
     helpful_rate = round(helpful / count, 3) if count else None

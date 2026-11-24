@@ -16,13 +16,26 @@ SCORE_GAP_THRESHOLD_SD = 0.15
 EDIT_GAP_THRESHOLD_PP = 5.0
 
 
-def _attempt_scores(conn) -> list[dict[str, Any]]:
+def _attempt_scores(conn, bundle_id: str | None = None) -> list[dict[str, Any]]:
     bundles = {
         row["bundle_id"]: json.loads(row["payload"])
         for row in conn.execute("SELECT bundle_id, payload FROM bundles").fetchall()
     }
-    attempts = [dict(r) for r in conn.execute("SELECT * FROM attempts").fetchall()]
-    records = [dict(r) for r in conn.execute("SELECT * FROM score_records").fetchall()]
+    if bundle_id:
+        attempts = [
+            dict(r)
+            for r in conn.execute(
+                "SELECT * FROM attempts WHERE bundle_id = ?", (bundle_id,)
+            ).fetchall()
+        ]
+    else:
+        attempts = [dict(r) for r in conn.execute("SELECT * FROM attempts").fetchall()]
+    attempt_ids = {attempt["attempt_id"] for attempt in attempts}
+    records = [
+        dict(r)
+        for r in conn.execute("SELECT * FROM score_records").fetchall()
+        if r["attempt_id"] in attempt_ids
+    ]
     by_attempt: dict[str, list[dict[str, Any]]] = {}
     for rec in records:
         by_attempt.setdefault(rec["attempt_id"], []).append(rec)
@@ -55,15 +68,25 @@ def _attempt_scores(conn) -> list[dict[str, Any]]:
     return results
 
 
-def _edit_rates(conn) -> list[dict[str, Any]]:
+def _edit_rates(conn, bundle_id: str | None = None) -> list[dict[str, Any]]:
     rows = conn.execute(
         "SELECT a.action, p.gender, p.origin, p.language, r.attempt_id "
         "FROM review_actions a "
         "JOIN score_records r ON r.record_id = a.record_id "
         "JOIN candidate_profiles p ON p.attempt_id = r.attempt_id"
     ).fetchall()
+    attempt_ids = None
+    if bundle_id:
+        attempt_ids = {
+            row["attempt_id"]
+            for row in conn.execute(
+                "SELECT attempt_id FROM attempts WHERE bundle_id = ?", (bundle_id,)
+            ).fetchall()
+        }
     buckets: dict[tuple[str, str], list[int]] = {}
     for row in rows:
+        if attempt_ids is not None and row["attempt_id"] not in attempt_ids:
+            continue
         edited = 1 if row["action"] in ("correct", "reject") else 0
         for key, _label in DIMENSIONS:
             group = row[key]
@@ -85,8 +108,8 @@ def _edit_rates(conn) -> list[dict[str, Any]]:
     return result
 
 
-def fairness_report(conn) -> dict[str, Any]:
-    attempt_scores = _attempt_scores(conn)
+def fairness_report(conn, bundle_id: str | None = None) -> dict[str, Any]:
+    attempt_scores = _attempt_scores(conn, bundle_id)
     profiles = {
         row["attempt_id"]: dict(row)
         for row in conn.execute("SELECT * FROM candidate_profiles").fetchall()
@@ -139,7 +162,7 @@ def fairness_report(conn) -> dict[str, Any]:
             }
         )
 
-    edit_rows = _edit_rates(conn)
+    edit_rows = _edit_rates(conn, bundle_id)
     edit_by_dimension: dict[str, list[dict[str, Any]]] = {}
     for row in edit_rows:
         edit_by_dimension.setdefault(row["dimension"], []).append(row)
@@ -185,7 +208,7 @@ def fairness_report(conn) -> dict[str, Any]:
             "gap_pp": edit_gap_pp,
             "threshold_pp": EDIT_GAP_THRESHOLD_PP,
         },
-        "feedback_accessibility": feedback_accessibility(conn),
+        "feedback_accessibility": feedback_accessibility(conn, bundle_id),
         "overall_gap_sd": max(measured_gaps) if measured_gaps else None,
         "sample": {
             "attempts": len(attempt_scores),

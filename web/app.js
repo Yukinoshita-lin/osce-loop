@@ -2032,6 +2032,7 @@ async function viewQuality() {
       <td class="num">${pct(s.evidence_rate, 1)}</td>
       <td class="num">${pct(s.edit_rate, 1)}</td>
       <td class="num">${pct(s.integrity_gap_rate, 1)}</td>
+      <td class="num">${s.fairness_gap_sd === null || s.fairness_gap_sd === undefined ? '—' : `<span class="pill ${s.fairness_gap_sd <= 0.15 ? 'teal' : 'red'}">${num(s.fairness_gap_sd, 2)} SD</span>`}</td>
     </tr>`).join('');
   const itemRows = ((itemQuality && itemQuality.items) || []).map((item) => `
     <tr>
@@ -2110,8 +2111,8 @@ async function viewQuality() {
       <div class="card-title">分站质量<span class="sub">按冻结版本 · 识别低区分度考站</span></div>
       <div class="tbl-wrap">
         <table>
-          <thead><tr><th>考站</th><th>版本</th><th class="num">场次</th><th class="num">评分项</th><th class="num">AI QWK</th><th class="num">人工 QWK</th><th class="num">证据定位</th><th class="num">编辑率</th><th class="num">完整性缺口</th></tr></thead>
-          <tbody>${stationRows || '<tr><td colspan="9" class="empty">暂无站包</td></tr>'}</tbody>
+          <thead><tr><th>考站</th><th>版本</th><th class="num">场次</th><th class="num">评分项</th><th class="num">AI QWK</th><th class="num">人工 QWK</th><th class="num">证据定位</th><th class="num">编辑率</th><th class="num">完整性缺口</th><th class="num">公平性差</th></tr></thead>
+          <tbody>${stationRows || '<tr><td colspan="10" class="empty">暂无站包</td></tr>'}</tbody>
         </table>
       </div>
       <div class="tiny muted" style="margin-top:6px">分站 QWK 仅统计该冻结版本下的场次；最新版本无场次时显示为 —。</div>
