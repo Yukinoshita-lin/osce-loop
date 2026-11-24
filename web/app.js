@@ -1575,6 +1575,14 @@ async function renderFeedback(attemptId) {
             <option value="2">2 不太清楚</option>
             <option value="1">1 完全没看懂</option>
           </select>
+          <select class="input" name="usefulness" style="max-width:140px">
+            <option value="">实用性（可选）</option>
+            ${Array.from({ length: 10 }, (_, i) => `<option value="${i + 1}">${i + 1} / 10</option>`).join('')}
+          </select>
+          <select class="input" name="realism" style="max-width:140px">
+            <option value="">真实感（可选）</option>
+            ${Array.from({ length: 10 }, (_, i) => `<option value="${i + 1}">${i + 1} / 10</option>`).join('')}
+          </select>
           <input class="input" name="participant_label" placeholder="标签（可选）" maxlength="40" style="max-width:180px">
           <button class="btn small primary" type="submit">提交自评</button>
         </form>
@@ -1605,6 +1613,8 @@ async function renderFeedback(attemptId) {
           method: 'POST',
           body: {
             rating: Number(formData.get('rating')),
+            usefulness: formData.get('usefulness') ? Number(formData.get('usefulness')) : null,
+            realism: formData.get('realism') ? Number(formData.get('realism')) : null,
             participant_label: String(formData.get('participant_label') || ''),
           },
         });
@@ -1924,6 +1934,13 @@ function fairnessSectionHtml(fairness) {
     unmeasured: '未采集',
   }[acc.status] || '未采集';
   const accClass = acc.status === 'pass' ? 'teal' : acc.status === 'fail' ? 'red' : acc.status === 'insufficient' ? 'amber' : 'muted';
+  const exp = acc.experience || {};
+  const expLine = [['usefulness', '学生实用性'], ['realism', '真实感']].map(([key, label]) => {
+    const item = exp[key];
+    if (!item) return '';
+    const cls = item.status === 'pass' ? 'teal' : item.status === 'fail' ? 'red' : item.status === 'insufficient' ? 'amber' : 'muted';
+    return `<span>${label} <b>${item.average === null ? '—' : num(item.average, 1)}</b> / 10 <span class="pill ${cls}">${item.count} 份 · 目标 ≥ ${num(item.target, 1)}</span></span>`;
+  }).join('');
   return `
     <div class="card">
       <div class="card-title">公平性监测<span class="sub">阈值 ≤0.15 SD · 编辑率 ≤5pp</span></div>
@@ -1941,6 +1958,7 @@ function fairnessSectionHtml(fairness) {
       `).join('')}
       <div class="sep"></div>
       <div class="tiny muted">反馈可及性：<span class="pill ${accClass}">${accLabel}</span> ${esc(acc.note || '')}</div>
+      ${expLine ? `<div class="attempt-strip" style="margin-top:6px">${expLine}</div>` : ''}
       <div class="tiny muted" style="margin-top:4px">${esc(fairness.note)}</div>
     </div>`;
 }

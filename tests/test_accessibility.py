@@ -41,24 +41,39 @@ def test_feedback_accessibility_starts_unmeasured(conn):
 def test_survey_submission_dedup_and_threshold(conn):
     attempts = _attempts(conn, 5)
     first = submit_feedback_survey(
-        conn, attempt_id=attempts[0], rating=5, participant_label="练习学生"
+        conn, attempt_id=attempts[0], rating=5, usefulness=9, realism=8,
+        participant_label="练习学生",
     )
     assert first["rating"] == 5
+    assert first["usefulness"] == 9
+    assert first["realism"] == 8
     assert survey_for_attempt(conn, attempts[0])["rating"] == 5
 
     with pytest.raises(ValueError, match="已提交"):
         submit_feedback_survey(conn, attempt_id=attempts[0], rating=4)
     with pytest.raises(ValueError, match="1–5"):
         submit_feedback_survey(conn, attempt_id=attempts[1], rating=6)
+    with pytest.raises(ValueError, match="1–10"):
+        submit_feedback_survey(conn, attempt_id=attempts[1], rating=5, usefulness=11)
     with pytest.raises(ValueError, match="不存在"):
         submit_feedback_survey(conn, attempt_id="att_missing", rating=5)
 
-    for attempt_id, rating in zip(attempts[1:], (5, 4, 4, 2)):
-        submit_feedback_survey(conn, attempt_id=attempt_id, rating=rating)
+    for attempt_id, rating, usefulness, realism in zip(
+        attempts[1:], (5, 4, 4, 2), (8, 7, 6, 5), (7, 8, 6, 4)
+    ):
+        submit_feedback_survey(
+            conn, attempt_id=attempt_id, rating=rating, usefulness=usefulness, realism=realism
+        )
 
     summary = feedback_accessibility(conn)
     assert summary["count"] == 5
     assert summary["helpful_count"] == 4
     assert summary["helpful_rate"] == 0.8
     assert summary["status"] == "pass"
+    experience = summary["experience"]
+    assert experience["usefulness"]["count"] == 5
+    assert experience["usefulness"]["average"] == 7.0
+    assert experience["usefulness"]["status"] == "pass"
+    assert experience["realism"]["average"] == 6.6
+    assert experience["realism"]["status"] == "fail"
     assert fairness_report(conn)["feedback_accessibility"]["status"] == "pass"

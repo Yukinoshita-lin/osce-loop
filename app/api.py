@@ -1396,6 +1396,8 @@ def feedback(attempt_id: str, request: Request, conn=Depends(get_conn)):
 
 class FeedbackSurveyBody(BaseModel):
     rating: int = Field(ge=1, le=5)
+    usefulness: int | None = Field(default=None, ge=1, le=10)
+    realism: int | None = Field(default=None, ge=1, le=10)
     participant_label: str = Field(default="", max_length=40)
 
 
@@ -1414,6 +1416,8 @@ def feedback_survey(
             conn,
             attempt_id=attempt_id,
             rating=body.rating,
+            usefulness=body.usefulness,
+            realism=body.realism,
             participant_label=body.participant_label,
             actor=request.state.user["display_name"],
         )

@@ -200,6 +200,8 @@ CREATE TABLE IF NOT EXISTS feedback_surveys (
     survey_id TEXT PRIMARY KEY,
     attempt_id TEXT NOT NULL UNIQUE,
     rating INTEGER NOT NULL,
+    usefulness INTEGER,
+    realism INTEGER,
     participant_label TEXT,
     created_at TEXT NOT NULL
 );
@@ -497,6 +499,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
             "UPDATE score_records SET routing = ? WHERE record_id = ?",
             (json.dumps(routing, ensure_ascii=False), row["record_id"]),
         )
+
+    survey_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(feedback_surveys)").fetchall()
+    }
+    if "usefulness" not in survey_columns:
+        conn.execute("ALTER TABLE feedback_surveys ADD COLUMN usefulness INTEGER")
+    if "realism" not in survey_columns:
+        conn.execute("ALTER TABLE feedback_surveys ADD COLUMN realism INTEGER")
 
 
 def rows_to_dicts(rows: Iterable[sqlite3.Row]) -> list[dict[str, Any]]:
