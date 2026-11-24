@@ -9,6 +9,7 @@ from typing import Any
 
 from .. import db
 from ..config import MODEL_VERSION, PROMPT_VERSION
+from .adjudication import adjudicate_diffs, record_adjudications
 from .rubric import AUTHORITY_ORDER, cap_authority, derive_assets, validate_bundle
 
 
@@ -83,17 +84,33 @@ def freeze_bundle(
     version: str = "1.0",
     supersedes: str | None = None,
     reason: str = "首次冻结",
+    adjudications: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """冻结即不可变：写入新行，绝不原地修改。"""
     validation = validate_bundle(payload)
     if not validation["can_freeze"]:
         raise ValueError("站包校验未通过，禁止冻结：" + "；".join(validation["blocking"][:5]))
 
+    diffs = (validation.get("consistency_details") or {}).get("diffs") or []
+    judgement = adjudicate_diffs(diffs, adjudications)
+    if judgement["invalid"]:
+        raise ValueError("差异裁决无效：" + "；".join(judgement["invalid"][:5]))
+    if judgement["pending"]:
+        raise ValueError(
+            "三方一致差异尚未逐条裁决：" + "、".join(judgement["pending"][:5])
+            + (f" 等 {len(judgement['pending'])} 条" if len(judgement["pending"]) > 5 else "")
+        )
+    if judgement["fix_required"]:
+        raise ValueError(
+            "以下差异被裁决为返回修改，请修改后重新提交：" + "、".join(judgement["fix_required"][:5])
+        )
+
     derived = derive_assets(payload)
     bundle_hash = compute_bundle_hash(payload, derived)
     bundle_id = f"bnd_{bundle_hash.split(':')[1][:12]}"
     existing = conn.execute("SELECT bundle_id FROM bundles WHERE bundle_hash = ?", (bundle_hash,)).fetchone()
     if existing:
+        record_adjudications(conn, existing["bundle_id"], judgement["results"], actor=actor)
         return get_bundle(conn, existing["bundle_id"])
 
     station_id = payload.get("station_id")
@@ -137,6 +154,7 @@ def freeze_bundle(
         ),
     )
     conn.commit()
+    record_adjudications(conn, bundle_id, judgement["results"], actor=actor)
     db.append_audit(
         conn,
         actor=actor,
@@ -150,6 +168,10 @@ def freeze_bundle(
             "supersedes": supersedes,
             "reason": reason,
             "derived_counts": derived["counts"],
+            "adjudications": [
+                {"diff_id": item["diff_id"], "decision": item["decision"], "note": item["note"]}
+                for item in judgement["results"]
+            ],
         },
         model_version=MODEL_VERSION,
         prompt_version=PROMPT_VERSION,

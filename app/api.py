@@ -65,6 +65,7 @@ from .domain.auth import (
     revoke_token,
     rbac_allowed,
 )
+from .domain.adjudication import list_adjudications
 from .domain.backup import create_backup, list_backups
 from .domain.bundle import (
     apply_authority_reset,
@@ -1458,6 +1459,7 @@ def bundle_detail(bundle_id: str, conn=Depends(get_conn)):
         "payload": bundle["payload"],
         "derived": bundle["derived"],
         "validation": bundle["validation"],
+        "adjudications": list_adjudications(conn, bundle_id),
         "items": items,
         "audit": db.rows_to_dicts(
             conn.execute(
@@ -1472,11 +1474,18 @@ class BundlePayloadBody(BaseModel):
     base_bundle_id: str | None = None
 
 
+class ConsistencyDecisionBody(BaseModel):
+    diff_id: str = Field(min_length=1, max_length=40)
+    decision: str = Field(pattern=r"^(accept|fix)$")
+    note: str = Field(default="", max_length=300)
+
+
 class BundleFreezeBody(BaseModel):
     payload: dict[str, Any]
     version: str = Field(default="1.0", pattern=r"^\d+\.\d+$")
     supersedes: str | None = None
     reason: str = Field(default="站包修订", min_length=1, max_length=200)
+    adjudications: list[ConsistencyDecisionBody] = Field(default_factory=list)
 
 
 @app.post("/api/bundles/validate")
@@ -1516,6 +1525,7 @@ def freeze_bundle_proposal(body: BundleFreezeBody, request: Request, conn=Depend
             version=body.version,
             supersedes=body.supersedes,
             reason=body.reason,
+            adjudications=[item.model_dump() for item in body.adjudications],
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -1534,6 +1544,7 @@ def freeze_bundle_proposal(body: BundleFreezeBody, request: Request, conn=Depend
         },
         "validation": bundle["validation"],
         "derived_counts": bundle["derived"]["counts"],
+        "adjudications": list_adjudications(conn, bundle["bundle_id"]),
     }
 
 

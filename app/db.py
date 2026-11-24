@@ -30,6 +30,19 @@ CREATE TABLE IF NOT EXISTS bundles (
     reason TEXT
 );
 
+CREATE TABLE IF NOT EXISTS consistency_adjudications (
+    adj_id TEXT PRIMARY KEY,
+    bundle_id TEXT NOT NULL,
+    diff_id TEXT NOT NULL,
+    diff_type TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    decision TEXT NOT NULL,
+    note TEXT,
+    actor TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(bundle_id, diff_id)
+);
+
 CREATE TABLE IF NOT EXISTS attempts (
     attempt_id TEXT PRIMARY KEY,
     bundle_id TEXT NOT NULL,

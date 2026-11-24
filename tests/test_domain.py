@@ -120,6 +120,88 @@ def test_three_way_consistency_flags_unpromised_and_orphan_slots():
     assert validation["can_freeze"] is False
 
 
+def test_consistency_diffs_are_sentence_level_and_stable():
+    payload = build_bundle_payload()
+    payload["instruction_item_refs"] = payload["instruction_item_refs"][:-1]
+    payload["extra_slots"][0].pop("purpose")
+    first = validate_bundle(payload)
+    second = validate_bundle(payload)
+    diffs = first["consistency_details"]["diffs"]
+    assert [d["diff_id"] for d in diffs] == [d["diff_id"] for d in second["consistency_details"]["diffs"]]
+    assert {d["type"] for d in diffs} == {"unpromised_item", "slot_without_purpose"}
+
+    unpromised = next(d for d in diffs if d["type"] == "unpromised_item")
+    assert unpromised["location"]["section"] == "rubric"
+    assert unpromised["location"]["sentence"]
+    assert unpromised["location"]["closest_instruction"]["sentence"]
+    assert unpromised["hint"]
+
+    orphan = next(d for d in diffs if d["type"] == "slot_without_purpose")
+    assert orphan["location"]["slot_index"] == 1
+    assert orphan["location"]["sentence"]
+    assert orphan["severity"] == "warn"
+
+
+def test_freeze_requires_per_diff_adjudication(seeded_path, tmp_path):
+    path = tmp_path / "adjudication.db"
+    shutil.copy(seeded_path, path)
+    conn = db.connect(path)
+    try:
+        payload = build_bundle_payload()
+        payload["station_id"] = "ST-ADJ-001"
+        payload["title"] = "三方一致裁决测试站"
+        payload["instruction_item_refs"] = payload["instruction_item_refs"][:-1]
+        payload["extra_slots"][0].pop("purpose")
+        validation = validate_bundle(payload)
+        assert validation["can_freeze"] is True
+        diffs = validation["consistency_details"]["diffs"]
+        assert diffs
+
+        with pytest.raises(ValueError, match="逐条裁决"):
+            freeze_bundle(conn, payload, actor="test", version="1.0")
+
+        accepted = [
+            {"diff_id": d["diff_id"], "decision": "accept", "note": "题干概括承诺且信息槽服务于评分，保留"}
+            for d in diffs
+        ]
+        bundle = freeze_bundle(conn, payload, actor="test", version="1.0", adjudications=accepted)
+        recorded = conn.execute(
+            "SELECT * FROM consistency_adjudications WHERE bundle_id = ?", (bundle["bundle_id"],)
+        ).fetchall()
+        assert len(recorded) == len(diffs)
+        assert {row["decision"] for row in recorded} == {"accept"}
+
+        fix_payload = copy.deepcopy(payload)
+        fix_payload["title"] = "三方一致裁决测试站（修改版）"
+        with pytest.raises(ValueError, match="返回修改"):
+            freeze_bundle(
+                conn,
+                fix_payload,
+                actor="test",
+                version="1.1",
+                supersedes=bundle["bundle_id"],
+                adjudications=[
+                    {"diff_id": d["diff_id"], "decision": "fix", "note": "需要补充题干承诺"}
+                    for d in diffs
+                ],
+            )
+
+        with pytest.raises(ValueError, match="理由"):
+            freeze_bundle(
+                conn,
+                fix_payload,
+                actor="test",
+                version="1.1",
+                supersedes=bundle["bundle_id"],
+                adjudications=[
+                    {"diff_id": d["diff_id"], "decision": "accept", "note": ""}
+                    for d in diffs
+                ],
+            )
+    finally:
+        conn.close()
+
+
 def test_vague_anchor_blocks_freeze():
     payload = build_bundle_payload()
     bad = copy.deepcopy(payload)

@@ -1,6 +1,7 @@
 """评分表即协议：校验、权限封顶与四类派生资产。"""
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import Any
 
@@ -113,6 +114,36 @@ def guideline_relevance(item: dict[str, Any], guideline_text: str) -> float:
     if not item_terms or not guideline_terms:
         return 0.0
     return round(len(item_terms & guideline_terms) / len(item_terms), 4)
+
+
+def _diff_id(kind: str, key: str) -> str:
+    """差异的稳定标识：同一 payload 重复校验得到同一 diff_id，供逐条裁决引用。"""
+    return "cd_" + hashlib.sha1(f"{kind}:{key}".encode("utf-8")).hexdigest()[:12]
+
+
+def _instruction_sentences(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    sentences: list[dict[str, Any]] = []
+    for block_index, block in enumerate(payload.get("candidate_instructions") or []):
+        for piece in re.split(r"(?<=[。！？；!?;])\s*", str(block or "")):
+            piece = piece.strip()
+            if piece:
+                sentences.append(
+                    {"sentence_index": len(sentences), "instruction_index": block_index, "sentence": piece}
+                )
+    return sentences
+
+
+def _closest_instruction(text: str, sentences: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """为未承诺的评分项定位最接近的题干句子，便于命题专家判断是否漏写承诺。"""
+    if not sentences:
+        return None
+    terms = _relevance_terms(text)
+    best = None
+    for entry in sentences:
+        overlap = len(terms & _relevance_terms(entry["sentence"]))
+        if best is None or overlap > best["overlap"]:
+            best = {**entry, "overlap": overlap}
+    return best
 
 
 def validate_rubric_item(item: dict[str, Any]) -> list[str]:
@@ -246,12 +277,104 @@ def validate_bundle(payload: dict[str, Any]) -> dict[str, Any]:
         if (missing_refs or required_issues or feedback_issues or broken_slot_links)
         else ("warn" if (slot_issues or consistency_pending) else "pass")
     )
+
+    # 差异清单精确到句子：每条差异带稳定 diff_id、严重度、定位与修改建议，供逐条裁决。
+    rubric_by_id = {item.get("item_id"): item for item in rubric}
+    item_index_by_id: dict[Any, int] = {}
+    for item_index, item in enumerate(rubric):
+        item_index_by_id.setdefault(item.get("item_id"), item_index)
+    instruction_sentences = _instruction_sentences(payload)
+    diffs: list[dict[str, Any]] = []
+
+    def add_diff(
+        kind: str,
+        key: str,
+        *,
+        severity: str,
+        message: str,
+        location: dict[str, Any],
+        hint: str,
+    ) -> None:
+        diffs.append(
+            {
+                "diff_id": _diff_id(kind, key),
+                "type": kind,
+                "severity": severity,
+                "message": message,
+                "location": location,
+                "hint": hint,
+            }
+        )
+
+    for ref_index, ref in enumerate(refs):
+        if ref in rubric_ids:
+            continue
+        add_diff(
+            "missing_ref",
+            f"{ref_index}:{ref}",
+            severity="fail",
+            message=f"考生指令引用了不存在的评分项 {ref}",
+            location={"section": "instruction_item_refs", "ref_index": ref_index, "item_id": ref},
+            hint="删除该引用，或在 rubric 中补充对应评分项",
+        )
+    for item_id in unpromised_items:
+        item = rubric_by_id.get(item_id) or {}
+        observable = _text((item.get("anchor") or {}).get("observable"))
+        add_diff(
+            "unpromised_item",
+            str(item_id),
+            severity="warn",
+            message=f"评分项 {item_id} 未被考生指令显式承诺",
+            location={
+                "section": "rubric",
+                "item_index": item_index_by_id.get(item_id, 0),
+                "item_id": item_id,
+                "sentence": observable,
+                "closest_instruction": _closest_instruction(
+                    f"{item.get('title') or ''} {observable}", instruction_sentences
+                ),
+            },
+            hint="在 candidate_instructions 中补充该考点，或从 rubric 中删除该项",
+        )
+    for index, slot in enumerate(extra_slots, start=1):
+        content = str(slot.get("content") or "").strip()
+        if index in orphan_extra_slots:
+            add_diff(
+                "slot_without_purpose",
+                str(index),
+                severity="warn",
+                message=f"附加信息槽 {index} 未标注 purpose",
+                location={"section": "extra_slots", "slot_index": index, "sentence": content},
+                hint="标注 purpose（chief_complaint/red_flag/comorbidity/unrelated_concern/ambiguity 等），供派生与质控识别",
+            )
+        for linked in slot.get("linked_items") or []:
+            if linked in rubric_ids:
+                continue
+            add_diff(
+                "broken_slot_link",
+                f"{index}:{linked}",
+                severity="fail",
+                message=f"附加信息槽 {index} 关联不存在的评分项 {linked}",
+                location={
+                    "section": "extra_slots",
+                    "slot_index": index,
+                    "sentence": content,
+                    "linked_item": linked,
+                },
+                hint="修正 linked_items，或补充对应评分项",
+            )
+
     consistency_details = {
         "promised_items": sorted(set(refs)),
         "unpromised_items": unpromised_items,
         "extra_slots": len(extra_slots),
         "extra_slots_without_purpose": orphan_extra_slots,
         "broken_slot_links": broken_slot_links,
+        "diffs": diffs,
+        "diff_counts": {
+            "fail": sum(1 for diff in diffs if diff["severity"] == "fail"),
+            "warn": sum(1 for diff in diffs if diff["severity"] == "warn"),
+        },
     }
 
     def status_of(entries: list[str]) -> str:
@@ -312,6 +435,7 @@ def validate_bundle(payload: dict[str, Any]) -> dict[str, Any]:
             "guideline_pending": len(guideline_pending),
             "unpromised_items": len(unpromised_items),
             "extra_slots_without_purpose": len(orphan_extra_slots),
+            "consistency_diffs": len(diffs),
         },
     }
 

@@ -1310,6 +1310,52 @@ async function viewBundle() {
     </tr>`).join('');
   const auditRows = data.audit.map((ev) => `
     <div class="audit-row"><div class="act">${esc(ev.action)}</div><div class="obj">${esc(ev.actor)}</div><div class="time">${fmtTime(ev.created_at)}</div></div>`).join('');
+  const adjudications = data.adjudications || [];
+  const consistencyDetails = (data.validation && data.validation.consistency_details) || {};
+  const consistencyDiffs = consistencyDetails.diffs || [];
+  const adjudicationByDiff = {};
+  adjudications.forEach((a) => { adjudicationByDiff[a.diff_id] = a; });
+  const diffLocate = (d) => {
+    const loc = d.location || {};
+    if (loc.section === 'rubric') {
+      let text = `评分项 ${esc(loc.item_id)}：${esc(loc.sentence)}`;
+      if (loc.closest_instruction) {
+        text += ` · 最接近题干句「${esc(loc.closest_instruction.sentence)}」`;
+      }
+      return text;
+    }
+    if (loc.section === 'extra_slots') {
+      return `附加信息槽 #${esc(loc.slot_index)}：${esc(loc.sentence)}`;
+    }
+    if (loc.section === 'instruction_item_refs') {
+      return `考生指令引用 #${esc(loc.ref_index)} → ${esc(loc.item_id)}`;
+    }
+    return '—';
+  };
+  const adjudicationCard = consistencyDiffs.length || adjudications.length ? `
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-title">三方一致差异与裁决<span class="sub">${consistencyDiffs.length} 条差异 · ${adjudications.length} 条留痕 · 冻结前逐条裁决</span></div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>差异</th><th>定位（精确到句子）</th><th>严重度</th><th>裁决</th><th>理由</th><th>裁决人</th><th>时间</th></tr></thead>
+          <tbody>${consistencyDiffs.map((d) => {
+            const a = adjudicationByDiff[d.diff_id];
+            return `
+            <tr>
+              <td class="tiny"><div class="mono tiny">${esc(d.diff_id)}</div>${esc(d.message)}<div class="tiny muted">建议：${esc(d.hint)}</div></td>
+              <td class="tiny">${diffLocate(d)}</td>
+              <td class="tiny">${d.severity === 'fail' ? '<span class="pill red">阻断</span>' : '<span class="pill amber">待核验</span>'}</td>
+              <td class="tiny">${a
+                ? (a.decision === 'accept' ? '<span class="pill teal">接受差异</span>' : '<span class="pill red">返回修改</span>')
+                : '<span class="pill muted">未裁决</span>'}</td>
+              <td class="tiny">${esc((a && a.note) || '—')}</td>
+              <td class="tiny">${esc((a && a.actor) || '—')}</td>
+              <td class="tiny">${a ? fmtTime(a.created_at) : '—'}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>
+      </div>
+    </div>` : '';
 
   $('#view').innerHTML = `
     <div class="view-head">
@@ -1370,6 +1416,8 @@ async function viewBundle() {
       </div>
       ${data.bundle_id !== list[0].bundle_id ? '<div class="btn-row" style="margin-top:8px"><button class="btn small" data-action="bundle-latest">回到最新版本</button></div>' : ''}
     </div>
+
+    ${adjudicationCard}
 
     <div class="grid c2" style="margin-bottom:14px">
       <div class="card">
@@ -3207,16 +3255,49 @@ document.addEventListener('click', async (e) => {
             <span class="tiny">${esc(r.reason)}</span> → <b>${esc(r.suggestion)}</b>
             <span class="tiny muted">${esc(r.rationale)}</span></div>`).join('')}
         </div>` : '';
+      const consistency = v.checks.find((c) => c.key === 'consistency');
+      const diffs = (consistency && consistency.details && consistency.details.diffs) || [];
+      const diffsHtml = diffs.length ? `
+        <div style="margin-top:6px">
+          <span class="pill amber">三方一致差异 ${diffs.length} 条</span>
+          <div class="tiny muted">冻结前必须逐条裁决；接受差异需填写理由，“返回修改”会阻断冻结。</div>
+          ${diffs.map((d) => {
+            const loc = d.location || {};
+            let where = '';
+            if (loc.section === 'rubric') {
+              where = `评分项 ${esc(loc.item_id)}：${esc(loc.sentence)}`;
+              if (loc.closest_instruction) {
+                where += ` · 最接近题干句「${esc(loc.closest_instruction.sentence)}」`;
+              }
+            } else if (loc.section === 'extra_slots') {
+              where = `附加信息槽 #${esc(loc.slot_index)}：${esc(loc.sentence)}`;
+            } else if (loc.section === 'instruction_item_refs') {
+              where = `考生指令引用 #${esc(loc.ref_index)} → ${esc(loc.item_id)}`;
+            }
+            return `<div class="tiny" data-diff-row="${esc(d.diff_id)}" style="margin-top:5px;padding:5px 0;border-top:1px dashed var(--line)">
+              <span class="pill ${d.severity === 'fail' ? 'red' : 'amber'}">${d.severity === 'fail' ? '阻断' : '待核验'}</span>
+              <b>${esc(d.message)}</b>
+              <div class="tiny muted">定位：${where}</div>
+              <div class="tiny muted">建议：${esc(d.hint)}</div>
+              <label class="tiny"><input type="radio" name="adj-${esc(d.diff_id)}" value="accept" checked> 接受差异</label>
+              <label class="tiny" style="margin-left:8px"><input type="radio" name="adj-${esc(d.diff_id)}" value="fix"> 返回修改</label>
+              <input class="input tiny" data-adj-note="${esc(d.diff_id)}" placeholder="裁决理由（接受必填）" style="max-width:320px;margin-left:8px">
+            </div>`;
+          }).join('')}
+        </div>` : '';
       box.className = 'tiny';
       box.innerHTML = `
         <div>${v.can_freeze ? '<span class="pill teal">可冻结</span>' : '<span class="pill red">存在阻断项</span>'}
           ${(v.counts || {}).items || counts.items || 0} 个评分项 · 派生 ${counts.slots || 0} 个信息槽 / ${counts.probes || 0} 个探针</div>
         ${checksHtml}
+        ${diffsHtml}
         ${rewriteHtml}
         ${similarHtml}
         ${changesHtml}
         ${v.blocking.length ? `<div style="margin-top:4px;color:var(--red)">${esc(v.blocking.slice(0, 3).join('；'))}</div>` : ''}`;
-      toast(v.can_freeze ? '校验通过，可签字冻结' : `校验未通过：${v.blocking.length} 个阻断项`, !v.can_freeze);
+      toast(v.can_freeze
+        ? `校验通过${diffs.length ? `，待逐条裁决 ${diffs.length} 条差异` : '，可签字冻结'}`
+        : `校验未通过：${v.blocking.length} 个阻断项`, !v.can_freeze);
     } catch (err) {
       toast(err.message, true);
     }
@@ -3233,6 +3314,12 @@ document.addEventListener('click', async (e) => {
       toast('版本号格式应为 主版本.次版本，例如 1.1', true);
       return;
     }
+    const adjudications = $$('[data-diff-row]').map((row) => {
+      const diffId = row.dataset.diffRow;
+      const checked = row.querySelector('input[type="radio"]:checked');
+      const note = row.querySelector('[data-adj-note]')?.value || '';
+      return { diff_id: diffId, decision: checked ? checked.value : 'accept', note };
+    });
     try {
       const result = await api('/api/bundles/freeze', {
         method: 'POST',
@@ -3241,6 +3328,7 @@ document.addEventListener('click', async (e) => {
           version,
           reason,
           supersedes: state.bundleCurrent && state.bundlePayload.station_id === state.bundleCurrent.station_id ? state.bundleCurrent.bundle_id : null,
+          adjudications,
         },
       });
       toast(result.created
