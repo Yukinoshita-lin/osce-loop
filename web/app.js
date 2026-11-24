@@ -2070,6 +2070,7 @@ async function viewQuality() {
   const users = usersData.users || [];
   const report = data.report;
   const appeals = report.appeals || {};
+  const reviewShares = (report.review_share || {}).by_risk || [];
   const gates = data.gates.gates;
   const stageLabels = {
     G0_offline: 'G0 离线副驾',
@@ -2172,6 +2173,7 @@ async function viewQuality() {
       <span>申诉率 <span class="pill ${(appeals.appeal_rate || 0) > 0.03 ? 'red' : 'teal'}">${pct(appeals.appeal_rate, 1)}</span> <span class="tiny muted">目标 &lt; 3%</span></span>
       <span>已重评 <b>${appeals.compared || 0}</b> · 改判 <b>${appeals.changed || 0}</b>${appeals.in_progress ? ` · 重评中 <b>${appeals.in_progress}</b>` : ''}</span>
       <span>改判率 <span class="pill ${appeals.change_rate === null || appeals.change_rate === undefined ? 'muted' : appeals.change_rate > 0.2 ? 'red' : 'teal'}">${appeals.change_rate === null || appeals.change_rate === undefined ? '—' : pct(appeals.change_rate, 1)}</span> <span class="tiny muted">目标 &lt; 20%</span></span>
+      ${reviewShares.filter((r) => r.target !== null).map((r) => `<span>${r.risk_level} 人工复核 <b>${pct(r.share, 0)}</b>（${r.reviewed}/${r.attempts}）<span class="pill ${r.share > r.target ? 'red' : 'teal'}">目标 ≤ ${pct(r.target, 0)}</span></span>`).join('')}
       ${appeals.missing_snapshot ? `<span class="tiny muted">${appeals.missing_snapshot} 场历史申诉缺少原始快照</span>` : ''}
     </div>
 

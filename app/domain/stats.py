@@ -144,6 +144,33 @@ def quality_report(conn, bundle_id: str | None = None) -> dict[str, Any]:
     qwk_near = quadratic_weighted_kappa([p[0] for p in near_pairs], [p[1] for p in near_pairs])
 
     integrity_attempts = sum(1 for a in attempts if a["integrity_gap"])
+    human_attempts: set[str] = set()
+    for rec in records:
+        if rec["status"] in ("pending_review", "manual_pending"):
+            human_attempts.add(rec["attempt_id"])
+            continue
+        try:
+            routing = json.loads(rec["routing"])
+        except (TypeError, ValueError):
+            continue
+        if (routing or {}).get("requires_human"):
+            human_attempts.add(rec["attempt_id"])
+    review_targets = {"L2": 0.35, "L3": 0.60}
+    review_share_by_risk = []
+    for level in ("L0", "L1", "L2", "L3"):
+        level_attempts = [a for a in attempts if a["risk_level"] == level]
+        if not level_attempts:
+            continue
+        reviewed_count = sum(1 for a in level_attempts if a["attempt_id"] in human_attempts)
+        review_share_by_risk.append(
+            {
+                "risk_level": level,
+                "attempts": len(level_attempts),
+                "reviewed": reviewed_count,
+                "share": round(reviewed_count / len(level_attempts), 4),
+                "target": review_targets.get(level),
+            }
+        )
     asr_values = [float(r["asr_confidence"]) for r in records if r["asr_confidence"] is not None]
     asr_low_attempts = len(
         {
@@ -203,6 +230,14 @@ def quality_report(conn, bundle_id: str | None = None) -> dict[str, Any]:
             "records": len(asr_values),
         },
         "appeals": appeal_metrics(attempts, records),
+        "review_share": {
+            "overall": {
+                "attempts": len(attempts),
+                "reviewed": len(human_attempts),
+                "share": round(len(human_attempts) / len(attempts), 4) if attempts else 0.0,
+            },
+            "by_risk": review_share_by_risk,
+        },
         "item_disagreement": item_disagreement,
         "fairness": {
             "subgroup_gap_sd": None,

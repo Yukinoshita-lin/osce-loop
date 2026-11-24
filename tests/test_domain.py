@@ -369,6 +369,9 @@ def test_seeded_attempts_and_quality(conn, bundle):
     assert report["evidence"]["rate"] >= 0.9
     reasons = {r["reason"] for r in report["routing"]}
     assert {"near_cutoff", "critical_negative", "integrity_gap", "appeal"} <= reasons
+    shares = {row["risk_level"]: row for row in report["review_share"]["by_risk"]}
+    assert shares["L2"]["target"] == 0.35
+    assert 0 <= report["review_share"]["overall"]["share"] <= 1
     assert bundle["derived"]["counts"]["slots"] == 16
 
 
