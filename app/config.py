@@ -68,6 +68,7 @@ REASON_LABELS = {
     "integrity_gap": "证据链不完整",
     "asr_low_confidence": "ASR 置信度偏低，整站转人工",
     "critical_negative": "关键项 AI 判阴性",
+    "review_disagreement": "双人复核不一致，待高年资裁决",
     "near_cutoff": "总分处于及格线边缘",
     "confidence_below_floor": "置信度低于项阈值",
     "item_disagreement": "该项历史人机分歧偏高",

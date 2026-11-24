@@ -482,6 +482,22 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if "attempt_id" not in slot_columns:
         conn.execute("ALTER TABLE exam_run_slots ADD COLUMN attempt_id TEXT")
 
+    # 历史双人复核记录补齐双人状态，避免旧数据无法进入第二位复核。
+    for row in conn.execute(
+        "SELECT record_id, routing FROM score_records WHERE status IN ('pending_review','manual_pending')"
+    ).fetchall():
+        try:
+            routing = json.loads(row["routing"] or "{}")
+        except (TypeError, ValueError):
+            continue
+        if routing.get("route") != "dual_review" or routing.get("dual_review"):
+            continue
+        routing["dual_review"] = {"required": 2, "stage": 0, "status": "pending", "reviews": []}
+        conn.execute(
+            "UPDATE score_records SET routing = ? WHERE record_id = ?",
+            (json.dumps(routing, ensure_ascii=False), row["record_id"]),
+        )
+
 
 def rows_to_dicts(rows: Iterable[sqlite3.Row]) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]

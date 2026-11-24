@@ -196,7 +196,10 @@ def test_routing_priority_and_sampling():
     assert route_item(**{**common, "asr_confidence": 0.4})["route"] == "full_station_human"
     assert route_item(**{**common, "asr_confidence": 0.95, "integrity_gap": True})["reason"] == "integrity_gap"
     assert route_item(**{**common, "ai_score": None, "authority": "none"})["reason"] == "manual_only"
-    assert route_item(**{**common, "item": {**item, "critical": True}, "ai_score": 0})["reason"] == "critical_negative"
+    dual = route_item(**{**common, "item": {**item, "critical": True}, "ai_score": 0})
+    assert dual["reason"] == "critical_negative"
+    assert dual["route"] == "dual_review"
+    assert dual["dual_review"]["required"] == 2
     assert route_item(**{**common, "near_cutoff": True})["reason"] == "near_cutoff"
     assert route_item(**{**common, "confidence": 0.3})["reason"] == "confidence_below_floor"
     assert route_item(**{**common, "item_disagreement_rate": 0.2})["reason"] == "item_disagreement"

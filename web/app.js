@@ -24,6 +24,7 @@ const REASON_COLOR = {
   asr_low_confidence: 'amber',
   risk_escalation: 'red',
   critical_negative: 'red',
+  review_disagreement: 'red',
   near_cutoff: 'amber',
   l3_human_confirmation: 'amber',
   confidence_below_floor: 'amber',
@@ -503,6 +504,22 @@ async function loadReview(recordId) {
   setupReviewAudio(data);
 }
 
+function dualReviewHtml(dual) {
+  if (!dual) return '';
+  const reviews = dual.reviews || [];
+  const status = dual.status || 'awaiting_second';
+  const title = status === 'disagreement'
+    ? '双人评分不一致，需高年资裁决'
+    : status === 'resolved'
+      ? '双人独立复核已完成'
+      : '等待第二位独立复核员';
+  return `<div class="alert ${status === 'disagreement' ? 'danger' : ''}" style="margin-top:10px">
+    <b>${title}</b>
+    <p>关键项要求 ${dual.required || 2} 位不同评分员独立给出档位；同一评分员不可重复提交。</p>
+    ${reviews.map((r, i) => `<div class="tiny">第 ${i + 1} 位 · ${esc(r.reviewer)} → ${r.score === null || r.score === undefined ? '—' : esc(r.score)} 档 · ${esc(r.action)} · ${fmtTime(r.at)}</div>`).join('')}
+  </div>`;
+}
+
 function renderWorkbench(data) {
   const wb = $('#workbench');
   if (!wb) return;
@@ -545,6 +562,7 @@ function renderWorkbench(data) {
       ${attempt.risk_escalated_at ? `<span class="pill red">风险已上调 · ${esc(fmtTime(attempt.risk_escalated_at))}</span>` : ''}
       <button class="btn small" data-action="export-attempt" data-attempt="${dataAttr(attempt.attempt_id)}">导出申诉包</button>
     </div>
+    ${dualReviewHtml(data.dual_review)}
 
     <div class="wb-grid">
       <section class="card clip-card">
@@ -727,6 +745,16 @@ async function submitReview(action, score, reason) {
       method: 'POST',
       body: { action, score, reason_code: reason || null, reviewer, seconds_spent: seconds },
     });
+    if (result.needs_second_review) {
+      toast('第一位复核已记录；需由另一位评分员独立复核同一项');
+      await loadReview(state.currentReview.record_id);
+      return;
+    }
+    if (result.needs_senior_review) {
+      toast('双人评分不一致，已转高年资裁决', true);
+      await loadReview(state.currentReview.record_id);
+      return;
+    }
     toast(`已记录：${action} → ${result.final_score} 档 · 场次待复核 ${result.attempt_pending}`);
     if (state.queue) {
       state.queue.items = state.queue.items.filter((x) => x.record_id !== state.currentReview.record_id);

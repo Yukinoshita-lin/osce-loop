@@ -63,7 +63,9 @@ def route_item(
 
     # 2. 关键项 AI 判阴性：双人复核
     if item.get("critical") and ai_score == 0:
-        return _route("dual_review", "critical_negative", requires_human=True)
+        routing = _route("dual_review", "critical_negative", requires_human=True)
+        routing["dual_review"] = {"required": 2, "stage": 0, "status": "pending", "reviews": []}
+        return routing
 
     # 2b. L3 高利害：AI 建议分一律人工确认
     if risk_level == "L3" and authority in ("suggest", "decide"):

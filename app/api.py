@@ -101,6 +101,7 @@ from .domain.maintenance import run_maintenance
 from .domain.media import backfill_media_hashes
 from .domain.practice import build_practice_report
 from .domain.retention import purge_expired, refresh_retention, retention_overview
+from .domain.review import apply_review
 from .domain.risk import RISK_ORDER, escalate_risk
 from .domain.rubric import AUTHORITY_LABELS, PHASE_LABELS, cap_authority, derive_assets, validate_bundle
 from .domain.run_export import build_run_package
@@ -580,6 +581,7 @@ def _record_public(conn, record: dict[str, Any], bundle: dict[str, Any], attempt
         "final_score": record["final_score"],
         "reviewer": record["reviewer"],
         "reviewed_at": record["reviewed_at"],
+        "dual_review": routing.get("dual_review"),
         "model_version": record["model_version"],
         "prompt_version": record["prompt_version"],
         "media_url": attempt.get("media_url"),
@@ -592,6 +594,7 @@ def _priority(routing: dict[str, Any]) -> int:
         "integrity_gap": 0,
         "ai_degraded": 1,
         "critical_negative": 1,
+        "review_disagreement": 0,
         "near_cutoff": 2,
         "l3_human_confirmation": 2,
         "appeal": 3,
@@ -1144,35 +1147,34 @@ def review_action(record_id: str, body: ReviewBody, conn=Depends(get_conn)):
         "manual_score": "manual_scored",
     }
     status = status_map[action]
-    conn.execute(
-        "INSERT INTO review_actions(action_id, record_id, reviewer, action, from_score, to_score, reason_code, "
-        "seconds_spent, created_at) VALUES(?,?,?,?,?,?,?,?,?)",
-        (
-            db.new_id("rv"),
-            record_id,
-            body.reviewer,
-            action,
-            record["ai_score"],
-            final_score,
-            body.reason_code,
-            body.seconds_spent,
-            db.now_iso(),
-        ),
-    )
-    conn.execute(
-        "UPDATE score_records SET status = ?, final_score = ?, reviewer = ?, reviewed_at = ? WHERE record_id = ?",
-        (status, final_score, body.reviewer, db.now_iso(), record_id),
-    )
-    conn.commit()
-    db.append_audit(
-        conn,
-        actor=body.reviewer,
-        action=f"record.{action}",
-        object_type="ScoreRecord",
-        object_id=record_id,
-        before={"ai_score": record["ai_score"], "status": record["status"]},
-        after={"final_score": final_score, "reason_code": body.reason_code},
-    )
+    try:
+        outcome = apply_review(
+            conn,
+            record,
+            action=action,
+            status=status,
+            final_score=final_score,
+            reviewer=body.reviewer,
+            reason_code=body.reason_code,
+            seconds_spent=body.seconds_spent,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not outcome["finalized"]:
+        pending = conn.execute(
+            "SELECT COUNT(*) AS n FROM score_records WHERE attempt_id = ? AND status IN ('pending_review','manual_pending')",
+            (attempt["attempt_id"],),
+        ).fetchone()["n"]
+        return {
+            "ok": True,
+            "record_status": record["status"],
+            "final_score": None,
+            "attempt_pending": pending,
+            "next_record_id": record_id,
+            "needs_second_review": bool(outcome.get("needs_second_review")),
+            "needs_senior_review": bool(outcome.get("needs_senior_review")),
+            "dual_review": outcome.get("dual_review"),
+        }
     pending = conn.execute(
         "SELECT COUNT(*) AS n FROM score_records WHERE attempt_id = ? AND status IN ('pending_review','manual_pending')",
         (attempt["attempt_id"],),
@@ -1190,6 +1192,9 @@ def review_action(record_id: str, body: ReviewBody, conn=Depends(get_conn)):
         "final_score": final_score,
         "attempt_pending": pending,
         "next_record_id": next_row["record_id"] if next_row else None,
+        "needs_second_review": False,
+        "needs_senior_review": False,
+        "dual_review": outcome.get("dual_review"),
     }
 
 
