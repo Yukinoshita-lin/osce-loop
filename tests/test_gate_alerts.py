@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from app import db
-from app.domain.gates import evaluate_gates
+from app.domain.gates import _technical_metric_issues, evaluate_gates
 
 
 def _conn(tmp_path):
@@ -235,3 +235,34 @@ def test_resolved_critical_misses_do_not_alert(tmp_path, monkeypatch):
     titles = [alert["title"] for alert in gates["alerts"]]
     assert not any("待根因分析" in title for title in titles)
     conn.close()
+
+
+def test_technical_metric_issues_flag_each_threshold():
+    issues = _technical_metric_issues(
+        {
+            "sp_fact_error": 0.03,
+            "persona_pass": 0.90,
+            "p95_latency": 2.0,
+            "sus": 65,
+            "evidence_rate": 0.90,
+        }
+    )
+    assert len(issues) == 5
+    assert any("SP 事实错误率" in issue for issue in issues)
+    assert any("人格首轮通过率" in issue for issue in issues)
+    assert any("语音延迟 P95" in issue for issue in issues)
+    assert any("SUS 65.0" in issue for issue in issues)
+    assert any("证据定位准确率" in issue for issue in issues)
+
+
+def test_technical_metric_issues_pass_within_targets():
+    issues = _technical_metric_issues(
+        {
+            "sp_fact_error": 0.01,
+            "persona_pass": 0.98,
+            "p95_latency": 1.2,
+            "sus": 80,
+            "evidence_rate": 1.0,
+        }
+    )
+    assert issues == []

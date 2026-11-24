@@ -259,6 +259,32 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _technical_metric_issues(values: dict[str, Any]) -> list[str]:
+    """G1 技术验收指标：SP 事实、人格、延迟、SUS 与证据定位。"""
+    issues: list[str] = []
+
+    def _as_float(key: str) -> float | None:
+        value = values.get(key)
+        return float(value) if value is not None else None
+
+    fact_error = _as_float("sp_fact_error")
+    if fact_error is not None and fact_error > 0.02:
+        issues.append(f"SP 事实错误率 {fact_error:.1%} > 2%")
+    persona = _as_float("persona_pass")
+    if persona is not None and persona < 0.95:
+        issues.append(f"人格首轮通过率 {persona:.0%} < 95%")
+    latency = _as_float("p95_latency")
+    if latency is not None and latency > 1.5:
+        issues.append(f"语音延迟 P95 {latency:.2f} 秒 > 1.5 秒")
+    sus = _as_float("sus")
+    if sus is not None and sus < 70:
+        issues.append(f"SUS {sus:.1f} < 70")
+    evidence = _as_float("evidence_rate")
+    if evidence is not None and evidence < 0.95:
+        issues.append(f"证据定位准确率 {evidence:.0%} < 95%")
+    return issues
+
+
 def evaluate_gates(conn, report: dict[str, Any], current_stage: str) -> dict[str, Any]:
     values = _metric_values(conn, report)
     gates: list[dict[str, Any]] = []
@@ -331,6 +357,15 @@ def evaluate_gates(conn, report: dict[str, Any], current_stage: str) -> dict[str
                 "level": "danger",
                 "title": "滚动 200 条 QWK 跌破降级线",
                 "detail": f"最近 200 条有金标准的记录 QWK {rolling_qwk}，低于 0.70 − 0.05，需立即降级。",
+            }
+        )
+    technical_issues = _technical_metric_issues(values)
+    if technical_issues:
+        alerts.append(
+            {
+                "level": "warn",
+                "title": "G1 技术验收指标未达标",
+                "detail": "；".join(technical_issues) + "。建议继续内测，不扩大 SP 使用范围。",
             }
         )
     subgroup_gap = values.get("subgroup_gap")
