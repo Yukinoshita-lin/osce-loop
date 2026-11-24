@@ -1921,6 +1921,7 @@ class SlotActionBody(BaseModel):
     action: str
     note: str = ""
     actor: str = "考务"
+    compensation: str | None = None
 
 
 @app.post("/api/execution/{run_id}/slots/{slot_key}/action")
@@ -1933,6 +1934,7 @@ def execution_slot_action(run_id: str, slot_key: str, body: SlotActionBody, conn
             action=body.action,
             note=body.note,
             actor=body.actor,
+            compensation=body.compensation,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

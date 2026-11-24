@@ -76,6 +76,41 @@ def test_hints_toggle_and_stop(conn):
     assert latest["status"] == "stopped"
 
 
+def test_slot_compensation_requires_choice_and_note(conn):
+    run = start_run(conn, actor="test")
+    slot_key = run["slots"][0]["slot_key"]
+    with pytest.raises(ValueError):
+        slot_action(
+            conn, run["run_id"], slot_key,
+            action="compensate", compensation="unknown", note="x", actor="test",
+        )
+    with pytest.raises(ValueError):
+        slot_action(
+            conn, run["run_id"], slot_key,
+            action="compensate", compensation="extend", note="  ", actor="test",
+        )
+    updated = slot_action(
+        conn,
+        run["run_id"],
+        slot_key,
+        action="compensate",
+        compensation="retake",
+        note="设备故障，另行安排重考",
+        actor="test",
+    )
+    slot = next(s for s in updated["slots"] if s["slot_key"] == slot_key)
+    assert slot["status"] == "compensated"
+    assert slot["compensation"] == "retake"
+    assert any(
+        ev["event_type"] == "slot_compensated" and "另行安排重考" in ev["message"]
+        for ev in updated["events"]
+    )
+    event = conn.execute(
+        "SELECT * FROM audit_events WHERE action = 'exam.slot_compensated'"
+    ).fetchone()
+    assert event is not None
+
+
 def test_cannot_start_two_active_runs(conn):
     start_run(conn, actor="test")
     with pytest.raises(ValueError):

@@ -320,12 +320,15 @@ def slot_action(
     action: str,
     note: str = "",
     actor: str = "考务",
+    compensation: str | None = None,
 ) -> dict[str, Any]:
     row = conn.execute(
         "SELECT * FROM exam_run_slots WHERE run_id = ? AND slot_key = ?", (run_id, slot_key)
     ).fetchone()
     if not row:
         raise ValueError("考站槽位不存在")
+    compensation = (compensation or "").strip() or None
+    compensation_labels = {"extend": "延时补时", "retake": "另行安排重考", "exclude": "不计入本次成绩"}
     if action == "complete":
         status = "completed"
         event_type = "slot_completed"
@@ -346,13 +349,34 @@ def slot_action(
         event_type = "slot_terminated"
         severity = "critical"
         message = f"{row['candidate_name']} · {row['station_name']} 被人工终止：{note or '未填写理由'}"
+    elif action == "compensate":
+        if compensation not in compensation_labels:
+            raise ValueError("补偿方式必须是 extend / retake / exclude")
+        if not note.strip():
+            raise ValueError("补偿判定必须填写说明")
+        status = "compensated"
+        event_type = "slot_compensated"
+        severity = "warn"
+        message = (
+            f"{row['candidate_name']} · {row['station_name']} 补偿判定："
+            f"{compensation_labels[compensation]}（{note}）"
+        )
     else:
         raise ValueError("非法槽位操作")
     conn.execute(
-        "UPDATE exam_run_slots SET status = ?, note = ?, updated_at = ? WHERE run_id = ? AND slot_key = ?",
-        (status, note, db.now_iso(), run_id, slot_key),
+        "UPDATE exam_run_slots SET status = ?, note = ?, compensation = ?, updated_at = ? "
+        "WHERE run_id = ? AND slot_key = ?",
+        (status, note, compensation, db.now_iso(), run_id, slot_key),
     )
-    _event(conn, run_id, event_type, message, severity=severity, slot_key=slot_key, payload={"note": note, "actor": actor})
+    _event(
+        conn,
+        run_id,
+        event_type,
+        message,
+        severity=severity,
+        slot_key=slot_key,
+        payload={"note": note, "actor": actor, "compensation": compensation},
+    )
     conn.commit()
     db.append_audit(
         conn,
@@ -360,7 +384,7 @@ def slot_action(
         action=f"exam.{event_type}",
         object_type="ExamRunSlot",
         object_id=f"{run_id}:{slot_key}",
-        after={"status": status, "note": note},
+        after={"status": status, "note": note, "compensation": compensation},
     )
     return get_run(conn, run_id)
 

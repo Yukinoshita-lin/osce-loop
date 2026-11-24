@@ -1154,6 +1154,7 @@ function executionHtml(run, emergencyStop) {
   const current = run.slots.filter((s) => s.round === run.current_round);
   const completed = ['completed', 'stopped'].includes(run.status);
   const roundNames = Array.from({ length: run.max_round }, (_, i) => i + 1);
+  const compLabels = { extend: '延时补时', retake: '另行安排重考', exclude: '不计入本次成绩' };
   const eventRows = (run.events || []).slice(0, 30).map((ev) => `
     <div class="audit-row">
       <div class="act" style="color:${ev.severity === 'critical' ? 'var(--red)' : ev.severity === 'warn' ? 'var(--amber)' : 'var(--teal)'}">${esc(ev.event_type)}</div>
@@ -1169,6 +1170,10 @@ function executionHtml(run, emergencyStop) {
       <div class="tiny muted">${esc(slot.room)} · ${esc(slot.sp)} · ${esc(slot.examiner)} · ${slot.start_min}–${slot.end_min}′</div>
       ${run.hints_enabled ? `<ul class="tiny muted" style="margin:6px 0 0;padding-left:16px">${(slot.hints || []).map((h) => `<li>${esc(h)}</li>`).join('')}</ul>` : '<div class="tiny muted" style="margin-top:5px">事实层提示已关闭</div>'}
       ${slot.note ? `<div class="violation">${esc(slot.note)}</div>` : ''}
+      ${slot.compensation ? `<div class="tiny"><span class="pill amber">补偿</span> ${esc(compLabels[slot.compensation] || slot.compensation)}</div>` : ''}
+      ${['anomaly', 'terminated'].includes(slot.status) ? `<div class="btn-row" style="margin-top:6px">
+        <button class="btn small" data-action="exec-slot-compensate" data-slot-key="${dataAttr(slot.slot_key)}">补偿判定</button>
+      </div>` : ''}
       ${slot.attempt ? `<div class="attempt-strip" style="margin-top:6px">
         <span class="pill teal">已录入场次</span>
         <span>待复核 ${slot.attempt.pending}</span>
@@ -3457,6 +3462,31 @@ document.addEventListener('click', async (e) => {
         body: { action: slotAction, note, actor: state.reviewer || '考务' },
       });
       toast(slotAction === 'complete' ? '该槽位已完成' : slotAction === 'terminate' ? '该站已终止' : '异常已记录');
+      await viewExecution();
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'exec-slot-compensate') {
+    const choice = (prompt('补偿方式：输入 1=延时补时，2=另行安排重考，3=不计入本次成绩') || '').trim();
+    const map = { '1': 'extend', '2': 'retake', '3': 'exclude', extend: 'extend', retake: 'retake', exclude: 'exclude' };
+    const compensation = map[choice];
+    if (!compensation) {
+      toast('未选择有效补偿方式', true);
+      return;
+    }
+    const note = (prompt('补偿说明（用于审计留痕）：') || '').trim();
+    if (!note) {
+      toast('补偿判定必须填写说明', true);
+      return;
+    }
+    try {
+      await api(`/api/execution/${encodeURIComponent(state.executionRunId)}/slots/${encodeURIComponent(el.dataset.slotKey)}/action`, {
+        method: 'POST',
+        body: { action: 'compensate', compensation, note, actor: state.reviewer || '考务' },
+      });
+      toast('补偿判定已记录');
       await viewExecution();
     } catch (err) {
       toast(err.message, true);

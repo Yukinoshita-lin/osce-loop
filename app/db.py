@@ -359,6 +359,7 @@ CREATE TABLE IF NOT EXISTS exam_run_slots (
     status TEXT NOT NULL DEFAULT 'waiting',
     note TEXT,
     hints TEXT,
+    compensation TEXT,
     updated_at TEXT NOT NULL,
     PRIMARY KEY (run_id, slot_key)
 );
@@ -516,6 +517,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
     }
     if "attempt_id" not in slot_columns:
         conn.execute("ALTER TABLE exam_run_slots ADD COLUMN attempt_id TEXT")
+    if "compensation" not in slot_columns:
+        conn.execute("ALTER TABLE exam_run_slots ADD COLUMN compensation TEXT")
 
     # 历史双人复核记录补齐双人状态，避免旧数据无法进入第二位复核。
     for row in conn.execute(
