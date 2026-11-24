@@ -35,6 +35,7 @@ from .config import (
     SP_PROMPT_VERSION,
     WEB_DIR,
 )
+from .domain.ai_check import check_scoring_provider
 from .domain.ab import ab_report
 from .domain.accessibility import (
     feedback_accessibility,
@@ -399,6 +400,13 @@ def ops_request_logs(
 def ops_signoff_audit(sample_size: int = Query(20, ge=1, le=200), conn=Depends(get_conn)):
     """抽查最近签字/发布场次，核对人工签字链与关键项确认。"""
     return audit_signoff_chain(conn, sample_size=sample_size)
+
+
+@app.post("/api/ops/ai-check")
+def ops_ai_check(request: Request, conn=Depends(get_conn)):
+    """对当前 AI 提供方做一次固定小样本连通性与证据结构自检。"""
+    _ensure_not_stopped(conn)
+    return check_scoring_provider(conn)
 
 
 class UserCreateBody(BaseModel):

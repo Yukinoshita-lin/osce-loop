@@ -2636,6 +2636,8 @@ async function viewQuality() {
         <div class="version-row"><span class="k">能力</span><span class="v">${data.ai_calls.by_capability.map((x) => `${esc(x.key)}:${x.count}`).join(' · ')}</span></div>
         <div class="version-row"><span class="k">状态</span><span class="v">${data.ai_calls.by_status.map((x) => `${esc(x.key)}:${x.count}`).join(' · ')}</span></div>
         <div class="sep"></div>
+        <div class="btn-row" style="margin-bottom:6px"><button class="btn small" data-action="ops-ai-check">测试 AI 连通性</button></div>
+        <div id="ai-check-result" class="tiny muted" style="margin-bottom:6px"></div>
         <div class="tiny muted">模型调用强制携带 model_version / prompt_version / rubric_version；缺任一项的记录视为无效。</div>
       </div>
     </div>
@@ -3256,6 +3258,25 @@ document.addEventListener('click', async (e) => {
       toast(result.failed ? `签字链抽查发现 ${result.failed} 份异常` : '签字链抽查通过', Boolean(result.failed));
     } catch (err) {
       if (box) box.innerHTML = `<span class="pill red">抽查失败</span> ${esc(err.message)}`;
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'ops-ai-check') {
+    const box = $('#ai-check-result');
+    try {
+      const result = await api('/api/ops/ai-check', { method: 'POST', body: {} });
+      if (box) {
+        box.innerHTML = result.mode === 'mock'
+          ? '<span class="pill muted">Mock 模式</span> 当前不会发起真实网络调用；配置真实提供方后可验证连通性。'
+          : `<span class="pill ${result.ok ? 'teal' : 'red'}">${result.ok ? (result.degraded ? '降级可用' : '连通正常') : '调用失败'}</span>
+             ${result.latency_ms === null ? '' : `延迟 ${num(result.latency_ms, 1)} ms`}
+             ${result.score === undefined ? '' : ` · 自检分 ${result.score === null ? '—' : result.score} · 证据 ${result.evidence_count}`}
+             ${result.error ? `<div style="color:var(--red)">${esc(result.error)}</div>` : `<div class="tiny muted">${esc(result.note)}</div>`}`;
+      }
+      toast(result.ok ? (result.mode === 'mock' ? '当前为 Mock 提供方' : 'AI 连通性自检通过') : 'AI 连通性自检失败', !result.ok);
+    } catch (err) {
+      if (box) box.innerHTML = `<span class="pill red">自检失败</span> ${esc(err.message)}`;
       toast(err.message, true);
     }
     return;
