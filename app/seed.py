@@ -27,6 +27,7 @@ from .domain.consent import record_consent
 from .domain.integrity import transcript_digest
 from .domain.media import file_sha256
 from .domain.rubric import PHASE_RANK
+from .domain.sp_approval import record_persona_approval
 from .domain.stats import quality_report
 from .domain.sus import compute_sus
 
@@ -970,6 +971,17 @@ def seed_if_empty(conn) -> bool:
         bundle_id=None,
         notes="演示数据；SP 级知情同意覆盖所有站包，真实部署必须由 SP 本人签署。",
         actor="演示种子",
+    )
+    record_persona_approval(
+        conn,
+        bundle,
+        decision="approved",
+        scope="L2",
+        disclosure_approved=True,
+        forbidden_approved=True,
+        trial_approved=True,
+        note="演示数据；人格卡、披露阈值与禁用话术已由考官试演确认。",
+        actor="考官 林岚",
     )
     for key, value in {
         "model_version": MODEL_VERSION,

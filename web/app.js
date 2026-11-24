@@ -1809,6 +1809,42 @@ function renderSP() {
       <div class="sep"></div>
       <div class="btn-row"><button class="btn small ${certValid ? '' : 'primary'}" data-action="sp-certify">运行红队认证</button><span class="tiny muted">${esc((persona.persona_version || '').slice(7, 19))}</span></div>
     </section>`;
+  const approval = persona.approval || {};
+  const approvalRecord = approval.approval || null;
+  const canApprove = Boolean(state.user && ['admin', 'exam_manager', 'examiner'].includes(state.user.role));
+  const approvalPill = approval.approved
+    ? '<span class="pill teal">已批准</span>'
+    : approval.stale
+      ? '<span class="pill red">版本已变更</span>'
+      : approvalRecord && approvalRecord.decision === 'rejected'
+        ? '<span class="pill red">已拒绝</span>'
+        : '<span class="pill red">待批准</span>';
+  const approvalHtml = `
+    <section class="card">
+      <div class="card-title">人格卡人工批准<span class="sub">披露阈值 · 禁用话术 · 真人试演</span></div>
+      <div class="attempt-strip" style="margin-bottom:6px">
+        ${approvalPill}
+        <span>${approvalRecord ? `${esc(approvalRecord.actor)} · ${esc(fmtTime(approvalRecord.created_at))}` : '尚无批准记录'}</span>
+        ${approvalRecord ? `<span>${esc(approval.scope_label || approval.scope || '')}</span>` : ''}
+      </div>
+      ${approvalRecord ? `
+        <div class="version-row"><span class="k">披露阈值</span><span class="v">${approvalRecord.disclosure_approved ? '<span class="pill teal">已确认</span>' : '<span class="pill red">未确认</span>'}</span></div>
+        <div class="version-row"><span class="k">禁用话术</span><span class="v">${approvalRecord.forbidden_approved ? '<span class="pill teal">已确认</span>' : '<span class="pill red">未确认</span>'}</span></div>
+        <div class="version-row"><span class="k">真人试演</span><span class="v">${approvalRecord.trial_approved ? '<span class="pill teal">已通过</span>' : '<span class="pill red">未通过</span>'}</span></div>
+        ${approvalRecord.note ? `<div class="tiny muted">${esc(approvalRecord.note)}</div>` : ''}
+      ` : '<div class="tiny muted">需考官确认披露阈值、禁用话术并完成真人试演后，才能开放 SP 练习。</div>'}
+      ${approval.stale ? '<div class="violation">批准绑定旧 persona_version，改版后需重新试演确认。</div>' : ''}
+      ${canApprove ? `<div class="sep"></div>
+      <form id="sp-approval-form" class="btn-row" style="flex-wrap:wrap;gap:6px">
+        <select class="input" name="decision" aria-label="批准结论" style="max-width:110px"><option value="approved">批准</option><option value="rejected">拒绝</option></select>
+        <select class="input" name="scope" aria-label="可用范围" style="max-width:135px"><option value="L1">仅练习</option><option value="L2">可进模拟考</option></select>
+        <label class="tiny"><input type="checkbox" name="disclosure_approved"> 披露阈值已确认</label>
+        <label class="tiny"><input type="checkbox" name="forbidden_approved"> 禁用话术已审定</label>
+        <label class="tiny"><input type="checkbox" name="trial_approved"> 真人试演通过</label>
+        <input class="input" name="note" placeholder="试演结论 / 修改意见" style="max-width:220px">
+        <button class="btn small primary" type="submit">记录批准</button>
+      </form>` : '<div class="tiny muted" style="margin-top:4px">人格卡批准由考官或考务记录。</div>'}
+    </section>`;
   const consent = state.spConsent || {};
   const consentValid = Boolean(consent.valid);
   const canManageConsent = Boolean(state.user && ['admin', 'exam_manager', 'examiner'].includes(state.user.role));
@@ -1882,6 +1918,7 @@ function renderSP() {
           <div class="tiny muted">禁用话术：${(p.forbidden || []).map(esc).join(' · ')}</div>
         </section>
         ${certHtml}
+        ${approvalHtml}
         ${consentHtml}
         <section class="card">
           <div class="card-title">阶段<span class="sub">状态机驱动</span></div>
@@ -1947,6 +1984,32 @@ function renderSP() {
       state.spBundleId = e.target.value;
       state.sp = null;
       await viewSP(e.target.value);
+    });
+  }
+  const approvalForm = $('#sp-approval-form');
+  if (approvalForm) {
+    approvalForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const data = new FormData(approvalForm);
+      try {
+        const result = await api('/api/sp/persona-approval', {
+          method: 'POST',
+          body: {
+            bundle_id: state.sp && state.sp.persona ? state.sp.persona.bundle_id : null,
+            decision: data.get('decision'),
+            scope: data.get('scope'),
+            disclosure_approved: data.get('disclosure_approved') === 'on',
+            forbidden_approved: data.get('forbidden_approved') === 'on',
+            trial_approved: data.get('trial_approved') === 'on',
+            note: String(data.get('note') || '').trim(),
+            actor: state.reviewer || '考官',
+          },
+        });
+        toast(result.status && result.status.approved ? '人格卡已批准，可开放 SP 练习' : '已记录人格卡批准结论');
+        await viewSP(state.spBundleId);
+      } catch (err) {
+        toast(err.message, true);
+      }
     });
   }
   const consentForm = $('#sp-consent-form');

@@ -42,6 +42,7 @@ from app.domain.governance import (
     set_release_stage,
 )
 from app.domain.practice import build_practice_report
+from app.domain.sp_approval import record_persona_approval
 from app.domain.risk import escalate_risk
 from app.domain.routing import is_near_cutoff, route_item, sampling_hit
 from app.domain.slots import DialogueStateMachine, SPController, scan_leaks
@@ -813,7 +814,18 @@ def test_p3_readiness_and_release(seeded_path, tmp_path):
     bundle_row = conn.execute(
         "SELECT bundle_id FROM bundles ORDER BY frozen_at DESC, rowid DESC LIMIT 1"
     ).fetchone()
-    certify_bundle(conn, get_bundle(conn, bundle_row["bundle_id"]), actor="test")
+    p3_bundle = get_bundle(conn, bundle_row["bundle_id"])
+    certify_bundle(conn, p3_bundle, actor="test")
+    record_persona_approval(
+        conn,
+        p3_bundle,
+        decision="approved",
+        scope="L2",
+        disclosure_approved=True,
+        forbidden_approved=True,
+        trial_approved=True,
+        actor="test",
+    )
     report = quality_report(conn)
     gates = evaluate_gates(conn, report, "G0_offline")
     g3 = next(g for g in gates["gates"] if g["id"] == "G3")

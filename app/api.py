@@ -141,6 +141,11 @@ from .domain.scheduling import (
 )
 from .domain.signoff_audit import audit_signoff_chain
 from .domain.slots import DialogueStateMachine, SPController
+from .domain.sp_approval import (
+    list_persona_approvals,
+    persona_approval_status,
+    record_persona_approval,
+)
 from .domain.spqa import (
     certification_for_bundle,
     certify_bundle,
@@ -2253,6 +2258,54 @@ def retention_purge(body: RetentionPurgeBody, request: Request, conn=Depends(get
         raise HTTPException(400, str(exc)) from exc
 
 
+class SpPersonaApprovalBody(BaseModel):
+    bundle_id: str | None = None
+    decision: str = Field(default="approved", pattern=r"^(approved|rejected)$")
+    scope: str = Field(default="L1", pattern=r"^(L1|L2)$")
+    disclosure_approved: bool = False
+    forbidden_approved: bool = False
+    trial_approved: bool = False
+    note: str = Field(default="", max_length=500)
+    actor: str = Field(default="考官", max_length=40)
+
+
+@app.post("/api/sp/persona-approval")
+def sp_persona_approval(body: SpPersonaApprovalBody, conn=Depends(get_conn)):
+    bundle = _resolve_bundle(conn, body.bundle_id)
+    try:
+        approval = record_persona_approval(
+            conn,
+            bundle,
+            decision=body.decision,
+            scope=body.scope,
+            disclosure_approved=body.disclosure_approved,
+            forbidden_approved=body.forbidden_approved,
+            trial_approved=body.trial_approved,
+            note=body.note,
+            actor=body.actor,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {
+        "ok": True,
+        "approval": approval,
+        "status": persona_approval_status(conn, bundle),
+        "session_ready": sp_session_ready(conn, bundle),
+    }
+
+
+@app.get("/api/sp/persona-approvals")
+def sp_persona_approvals(
+    bundle_id: str | None = None,
+    limit: int = Query(20, ge=1, le=100),
+    conn=Depends(get_conn),
+):
+    return {
+        "approvals": list_persona_approvals(conn, bundle_id=bundle_id, limit=limit),
+        "status": persona_approval_status(conn, _resolve_bundle(conn, bundle_id)),
+    }
+
+
 @app.get("/api/sp/persona")
 def sp_persona(bundle_id: str | None = None, conn=Depends(get_conn)):
     bundle = _resolve_bundle(conn, bundle_id)
@@ -2279,6 +2332,7 @@ def sp_persona(bundle_id: str | None = None, conn=Depends(get_conn)):
         ],
         "slots": masked_slots,
         "certification": certification_for_bundle(conn, bundle),
+        "approval": persona_approval_status(conn, bundle),
     }
 
 
@@ -2291,7 +2345,7 @@ class SpSessionBody(BaseModel):
 def create_sp_session(body: SpSessionBody, conn=Depends(get_conn)):
     bundle = _resolve_bundle(conn, body.bundle_id)
     if not sp_session_ready(conn, bundle)["ready"]:
-        raise HTTPException(409, "当前站包 SP 认证缺失、过期或未覆盖最新版本，请先完成红队认证")
+        raise HTTPException(409, "当前站包 SP 认证失效或人格卡未获人工批准，请先完成红队认证与考官试演")
     machine = DialogueStateMachine(bundle["payload"], bundle["derived"])
     controller = SPController(machine)
     state = machine.start()
@@ -2340,7 +2394,7 @@ def sp_message(session_id: str, body: SpMessageBody, conn=Depends(get_conn)):
     session = dict(row)
     bundle = _bundle_or_404(conn, session["bundle_id"])
     if not sp_session_ready(conn, bundle)["ready"]:
-        raise HTTPException(409, "当前站包 SP 认证已失效，练习已暂停；请考务重新认证后再继续")
+        raise HTTPException(409, "当前站包 SP 认证或人格卡批准已失效，练习已暂停；请重新认证并试演后再继续")
     machine = DialogueStateMachine(bundle["payload"], bundle["derived"])
     controller = SPController(machine)
     state = json.loads(session["state"])

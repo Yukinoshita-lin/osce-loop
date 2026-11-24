@@ -10,6 +10,7 @@ from .ab import ab_report
 from .bundle import list_bundles
 from .consent import consent_status
 from .fairness import fairness_report
+from .sp_approval import persona_approval_status
 from .stats import quadratic_weighted_kappa
 from .sus import sus_summary
 
@@ -36,6 +37,7 @@ GATES = [
             ("p95_latency", "语音延迟 P95", "≤ 1.5 秒", 1.5, "le"),
             ("sus", "SUS 可用性", "≥ 70", 70, "ge"),
             ("sp_consent", "SP 知情同意", "= 已签署", 1.0, "ge"),
+            ("sp_persona_approval", "SP 人格卡人工批准", "= 已批准", 1.0, "ge"),
             ("p0_incidents", "P0 安全事故", "= 0", 0, "eq"),
         ],
     },
@@ -154,6 +156,10 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
     current_bundle = bundles[0] if bundles else None
     sp_consent = consent_status(conn, current_bundle["bundle_id"]) if current_bundle else None
     sp_consent_value = None if sp_consent is None else (1.0 if sp_consent["valid"] else 0.0)
+    persona_approval = persona_approval_status(conn, current_bundle) if current_bundle else None
+    persona_approval_value = (
+        None if persona_approval is None else (1.0 if persona_approval["approved"] else 0.0)
+    )
     sp_cert_issue = None
     cert_row = None
     if current_bundle:
@@ -230,6 +236,7 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
         "sus": sus_score,
         "sus_source": sus_source,
         "sp_consent": sp_consent_value,
+        "sp_persona_approval": persona_approval_value,
         "p0_incidents": sp_p0,
         "sp_cert_issue": sp_cert_issue,
         "near_improvement": ab.get("comparison", {}).get("near_improvement"),
@@ -388,6 +395,19 @@ def evaluate_gates(conn, report: dict[str, Any], current_stage: str) -> dict[str
                 "detail": "缺少或过期：" + "、".join(missing_labels) + "；签署后才能开放 G1 练习场景。",
             }
         )
+    if values.get("sp_persona_approval") == 0.0:
+        bundles_now = list_bundles(conn)
+        approval_status = persona_approval_status(conn, bundles_now[0]) if bundles_now else None
+        if approval_status and approval_status["stale"]:
+            title = "SP 人格卡批准未覆盖当前 persona_version"
+            detail = "最新批准绑定旧人格卡版本；改版后必须重新确认披露阈值、禁用话术与试演结论。"
+        elif approval_status and (approval_status.get("approval") or {}).get("decision") == "rejected":
+            title = "SP 人格卡被考官拒绝"
+            detail = "当前人格卡未获批准，不得开放 SP 练习或模拟考；请按拒绝意见修改后重新试演。"
+        else:
+            title = "SP 人格卡尚未获得人工批准"
+            detail = "需要考官确认披露阈值、禁用话术并完成真人试演后才能开放 SP 练习。"
+        alerts.append({"level": "danger", "title": title, "detail": detail})
     if values.get("sus_source") == "legacy":
         alerts.append(
             {

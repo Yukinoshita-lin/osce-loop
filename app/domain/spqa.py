@@ -12,6 +12,7 @@ from .. import db
 from ..config import SP_CERT_VALID_DAYS
 from .bundle import list_bundles
 from .slots import DialogueStateMachine, SPController, scan_leaks
+from .sp_approval import persona_approval_status
 
 RED_TEAM_CASES: list[dict[str, Any]] = [
     {
@@ -406,9 +407,14 @@ def certification_for_bundle(conn, bundle: dict[str, Any]) -> dict[str, Any] | N
 
 
 def sp_session_ready(conn, bundle: dict[str, Any]) -> dict[str, Any]:
-    """AI SP 只允许在认证有效的站包上运行；返回认证详情供接口与界面复用。"""
+    """AI SP 需要技术认证有效且人格卡已获人工批准，二者缺一不可。"""
     cert = certification_for_bundle(conn, bundle)
-    return {"ready": bool(cert and cert.get("valid")), "certification": cert}
+    approval = persona_approval_status(conn, bundle)
+    return {
+        "ready": bool(cert and cert.get("valid") and approval["approved"]),
+        "certification": cert,
+        "approval": approval,
+    }
 
 
 def ensure_certification(conn) -> dict[str, Any] | None:

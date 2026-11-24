@@ -195,6 +195,20 @@ CREATE TABLE IF NOT EXISTS sp_consents (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS sp_persona_approvals (
+    approval_id TEXT PRIMARY KEY,
+    bundle_id TEXT NOT NULL,
+    persona_version TEXT NOT NULL,
+    decision TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    disclosure_approved INTEGER NOT NULL DEFAULT 0,
+    forbidden_approved INTEGER NOT NULL DEFAULT 0,
+    trial_approved INTEGER NOT NULL DEFAULT 0,
+    note TEXT,
+    actor TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS station_reviews (
     review_id TEXT PRIMARY KEY,
     station_id TEXT NOT NULL,

@@ -109,6 +109,10 @@ def test_rbac_write_matrix():
     assert rbac_allowed("GET", "/api/asr/benchmarks", "student") is False
     assert rbac_allowed("POST", "/api/asr/benchmarks", "exam_manager") is True
     assert rbac_allowed("POST", "/api/asr/benchmarks", "auditor") is False
+    assert rbac_allowed("POST", "/api/sp/persona-approval", "examiner") is True
+    assert rbac_allowed("POST", "/api/sp/persona-approval", "student") is False
+    assert rbac_allowed("GET", "/api/sp/persona-approvals", "auditor") is True
+    assert rbac_allowed("GET", "/api/sp/persona-approvals", "student") is False
     assert rbac_allowed("POST", "/api/auth/logout", "auditor") is True
 
 

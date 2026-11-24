@@ -8,6 +8,7 @@ import pytest
 from app import db
 from app.domain.bundle import freeze_bundle
 from app.domain.gates import evaluate_gates
+from app.domain.sp_approval import persona_approval_status, record_persona_approval
 from app.domain.spqa import (
     certification_for_bundle,
     certify_bundle,
@@ -65,13 +66,58 @@ def _expire(conn, cert_id: str) -> None:
     conn.commit()
 
 
-def test_sp_session_requires_valid_certification(conn):
+def test_sp_session_requires_valid_certification_and_persona_approval(conn):
     bundle = _freeze(conn)
     assert sp_session_ready(conn, bundle)["ready"] is False
     report = certify_bundle(conn, bundle, actor="test")
+    assert sp_session_ready(conn, bundle)["ready"] is False
+    with pytest.raises(ValueError, match="披露阈值"):
+        record_persona_approval(
+            conn,
+            bundle,
+            decision="approved",
+            scope="L1",
+            disclosure_approved=True,
+            forbidden_approved=False,
+            trial_approved=True,
+        )
+    record_persona_approval(
+        conn,
+        bundle,
+        decision="approved",
+        scope="L1",
+        disclosure_approved=True,
+        forbidden_approved=True,
+        trial_approved=True,
+        actor="考官",
+    )
     assert sp_session_ready(conn, bundle)["ready"] is True
     _expire(conn, report["cert_id"])
     assert sp_session_ready(conn, bundle)["ready"] is False
+
+
+def test_persona_approval_is_bound_to_persona_version(conn):
+    bundle = _freeze(conn)
+    approval = record_persona_approval(
+        conn,
+        bundle,
+        decision="approved",
+        scope="L2",
+        disclosure_approved=True,
+        forbidden_approved=True,
+        trial_approved=True,
+    )
+    status = persona_approval_status(conn, bundle)
+    assert status["approved"] is True
+    assert status["scope"] == "L2"
+    assert approval["persona_version"] == bundle["bundle_hash"]
+
+    new_bundle = _freeze(
+        conn, version="1.1", title_suffix="（改版）", supersedes=bundle["bundle_id"]
+    )
+    stale = persona_approval_status(conn, new_bundle)
+    assert stale["approved"] is False
+    assert stale["stale"] is True
 
 
 def test_expired_certification_does_not_feed_g1_metrics(conn):
