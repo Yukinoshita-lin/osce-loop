@@ -141,3 +141,39 @@ def test_cost_over_target_alerts(tmp_path, monkeypatch):
     titles = [alert["title"] for alert in gates["alerts"]]
     assert any("考试单站成本 ¥72.00 超过目标 ¥60" in title for title in titles)
     conn.close()
+
+
+def test_feedback_ready_latency_over_target_alerts(tmp_path, monkeypatch):
+    conn = _conn(tmp_path)
+    monkeypatch.setattr(
+        "app.domain.gates.feedback_ack_latency",
+        lambda conn: {
+            "ready": {
+                "practice": {"count": 5, "within_target": 2, "within_rate": 0.4, "status": "fail"},
+                "exam": {"count": 3, "within_target": 1, "within_rate": 0.333, "status": "fail"},
+            }
+        },
+    )
+    gates = evaluate_gates(conn, _report(0.2, 40), "G0_offline")
+    titles = [alert["title"] for alert in gates["alerts"]]
+    assert any("练习反馈生成 60 秒内仅 40%" in title for title in titles)
+    assert any("考试反馈生成 72 小时内仅 33%" in title for title in titles)
+    conn.close()
+
+
+def test_feedback_ready_latency_within_target_does_not_alert(tmp_path, monkeypatch):
+    conn = _conn(tmp_path)
+    monkeypatch.setattr(
+        "app.domain.gates.feedback_ack_latency",
+        lambda conn: {
+            "ready": {
+                "practice": {"count": 5, "within_target": 5, "within_rate": 1.0, "status": "pass"},
+                "exam": {"count": 3, "within_target": 3, "within_rate": 1.0, "status": "pass"},
+            }
+        },
+    )
+    gates = evaluate_gates(conn, _report(0.2, 40), "G0_offline")
+    titles = [alert["title"] for alert in gates["alerts"]]
+    assert not any("练习反馈生成" in title for title in titles)
+    assert not any("考试反馈生成" in title for title in titles)
+    conn.close()

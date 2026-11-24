@@ -11,6 +11,7 @@ from .bundle import list_bundles
 from .consent import consent_status
 from .cost import ai_cost_summary
 from .fairness import fairness_report
+from .latency import feedback_ack_latency
 from .sp_approval import persona_approval_status
 from .spqa import RED_TEAM_VERSION
 from .stats import quadratic_weighted_kappa
@@ -416,6 +417,37 @@ def evaluate_gates(conn, report: dict[str, Any], current_stage: str) -> dict[str
                     "detail": "建议核对模型/ASR 单价、缓存命中率与提示词长度，优先压缩重复调用。",
                 }
             )
+    ready = (feedback_ack_latency(conn) or {}).get("ready") or {}
+    practice_ready = ready.get("practice") or {}
+    if practice_ready.get("status") == "fail":
+        alerts.append(
+            {
+                "level": "warn",
+                "title": (
+                    f"练习反馈生成 60 秒内仅 {practice_ready.get('within_rate', 0):.0%}"
+                ),
+                "detail": (
+                    f"{practice_ready.get('count', 0)} 份练习报告中 "
+                    f"{practice_ready.get('within_target', 0)} 份在 60 秒内生成；"
+                    "建议检查评分队列积压、ASR 转写耗时与模型超时重试。"
+                ),
+            }
+        )
+    exam_ready = ready.get("exam") or {}
+    if exam_ready.get("status") == "fail":
+        alerts.append(
+            {
+                "level": "warn",
+                "title": (
+                    f"考试反馈生成 72 小时内仅 {exam_ready.get('within_rate', 0):.0%}"
+                ),
+                "detail": (
+                    f"{exam_ready.get('count', 0)} 份已发布成绩中 "
+                    f"{exam_ready.get('within_target', 0)} 份在 72 小时内发布；"
+                    "建议检查复核排队、签字确认与人工复核 SLA。"
+                ),
+            }
+        )
     if values.get("sp_cert_issue") == "missing":
         alerts.append(
             {
