@@ -34,6 +34,13 @@ def build_run_package(conn, run_id: str, *, exported_by: str) -> dict[str, Any]:
     }
     for attempt in attempts:
         attempt["transcript_sha256"] = transcript_hashes.get(attempt["attempt_id"])
+    live_segments = db.rows_to_dicts(
+        conn.execute(
+            "SELECT * FROM exam_run_live_segments WHERE run_id = ? "
+            "ORDER BY slot_key, start_ms, rowid",
+            (run_id,),
+        ).fetchall()
+    )
 
     object_ids = [run_id, *(f"{run_id}:{slot['slot_key']}" for slot in run["slots"])]
     placeholders = ",".join("?" * len(object_ids))
@@ -58,10 +65,12 @@ def build_run_package(conn, run_id: str, *, exported_by: str) -> dict[str, Any]:
             "ended_at": run["ended_at"],
             "counts": run["counts"],
             "integrity": run["integrity"],
+            "live_segments": len(live_segments),
         },
         "schedule": schedule,
         "slots": run["slots"],
         "attempts": attempts,
+        "live_segments": live_segments,
         "events": run["events"],
         "audit_events": audit_events,
     }
@@ -77,6 +86,7 @@ def build_run_package(conn, run_id: str, *, exported_by: str) -> dict[str, Any]:
             "package_hash": digest,
             "slots": run["counts"]["total"],
             "attempts": len(attempts),
+            "live_segments": len(live_segments),
             "missing_attempts": run["integrity"]["missing"],
         },
     )
