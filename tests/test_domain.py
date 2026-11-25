@@ -1103,6 +1103,31 @@ def test_governance_subgroup_requires_two_consecutive_weeks(tmp_path, monkeypatc
     conn.close()
 
 
+def test_self_check_skips_recording_clean_run(tmp_path):
+    connection = db.connect(tmp_path / "selfcheck_clean.db")
+    db.init_db(connection)
+    connection.execute(
+        "INSERT INTO score_records(record_id, attempt_id, item_id, ai_score, gold_score, status, "
+        "routing, model_version, prompt_version, rubric_version, created_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        ("rec_clean", "att_clean", "HX.01", 2, 2, "scored", "{}", "m1", "p1", "h1", db.now_iso()),
+    )
+    connection.commit()
+    before = connection.execute("SELECT COUNT(*) AS n FROM governance_checks").fetchone()["n"]
+
+    quiet = run_self_check(connection, actor="test", apply=True, record_pass=False)
+    assert quiet["recorded"] is False
+    assert quiet["trigger_summary"] == "全部通过"
+    unchanged = connection.execute("SELECT COUNT(*) AS n FROM governance_checks").fetchone()["n"]
+    assert unchanged == before
+
+    recorded = run_self_check(connection, actor="test", apply=True, record_pass=True)
+    assert recorded["recorded"] is True
+    after = connection.execute("SELECT COUNT(*) AS n FROM governance_checks").fetchone()["n"]
+    assert after == before + 1
+    connection.close()
+
+
 def test_authority_reset_can_be_scoped_to_bundle(tmp_path):
     conn = _fresh_seed_conn(tmp_path, "governance_scope_reset.db")
     changes = apply_authority_reset(

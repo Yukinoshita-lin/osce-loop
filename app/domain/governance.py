@@ -128,6 +128,7 @@ def run_self_check(
     actor: str = "系统",
     apply: bool = True,
     now: datetime | None = None,
+    record_pass: bool = True,
 ) -> dict[str, Any]:
     report = quality_report(conn)
     fairness = fairness_report(conn)
@@ -304,6 +305,18 @@ def run_self_check(
         "station_integrity": stations,
         "week": week,
     }
+    if not failing and not record_pass:
+        return {
+            "check_id": None,
+            "trigger_summary": trigger_summary,
+            "checks": checks,
+            "applied_changes": changes,
+            "applied": False,
+            "detail": detail,
+            "week": week,
+            "subgroup_streak_weeks": streak_weeks,
+            "recorded": False,
+        }
     check_id = db.new_id("gcheck")
     conn.execute(
         "INSERT INTO governance_checks(check_id, actor, trigger_summary, applied, detail, created_at) "
@@ -346,6 +359,7 @@ def run_self_check(
         "detail": detail,
         "week": week,
         "subgroup_streak_weeks": streak_weeks,
+        "recorded": True,
     }
 
 

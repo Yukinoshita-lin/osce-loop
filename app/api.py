@@ -576,6 +576,33 @@ def _stage(conn) -> str:
     return db.get_state(conn, "release_stage", "G0_offline") or "G0_offline"
 
 
+def _auto_governance(conn, actor: str) -> dict[str, Any]:
+    """评分或金标准变化后立即执行治理自检；全部通过时不写检查记录，避免审计噪声。"""
+    try:
+        result = run_self_check(conn, actor=actor, apply=True, record_pass=False)
+    except Exception as exc:  # 自动检查失败不阻断评分主流程，但必须留痕
+        try:
+            db.append_audit(
+                conn,
+                actor=actor,
+                action="governance.auto_check_failed",
+                object_type="System",
+                object_id="auto_self_check",
+                before=None,
+                after={"error": str(exc)},
+            )
+        except Exception:
+            pass
+        return {"checked": False, "error": str(exc)}
+    return {
+        "checked": True,
+        "recorded": bool(result.get("recorded")),
+        "applied": bool(result.get("applied")),
+        "changes": len(result.get("applied_changes") or []),
+        "trigger_summary": result.get("trigger_summary"),
+    }
+
+
 def _ensure_not_stopped(conn) -> None:
     if emergency_stop_active(conn):
         raise HTTPException(423, "终止开关已激活，当前写操作被阻断")
@@ -1145,6 +1172,7 @@ async def ingest_attempt(
         },
         "media": media,
         "integrity_gap": not bool(media),
+        "auto_governance": _auto_governance(conn, actor) if not media else None,
     }
 
 
@@ -1289,6 +1317,7 @@ def rescore_attempt_endpoint(attempt_id: str, request: Request, conn=Depends(get
         "ok": True,
         "rescore": result,
         "attempt": _attempt_summary(conn, _attempt_row(conn, attempt_id)),
+        "auto_governance": _auto_governance(conn, request.state.user["display_name"]),
     }
 
 
@@ -1313,7 +1342,11 @@ def rescore_batch(
         bundle_id=bundle_id,
         actor=request.state.user["display_name"],
     )
-    return {"ok": True, **result}
+    return {
+        "ok": True,
+        **result,
+        "auto_governance": _auto_governance(conn, request.state.user["display_name"]),
+    }
 
 
 class RiskBody(BaseModel):
@@ -2217,7 +2250,12 @@ async def calibration_import(
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    return {"ok": True, **summary, "report": calibration_report(conn)}
+    return {
+        "ok": True,
+        **summary,
+        "report": calibration_report(conn),
+        "auto_governance": _auto_governance(conn, request.state.user["display_name"]),
+    }
 
 
 @app.get("/api/calibration/report")

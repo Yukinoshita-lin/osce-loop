@@ -167,6 +167,16 @@ function setTitle(title) {
   $('#page-title').textContent = title;
   document.title = 'OSCE·Loop · ' + title;
 }
+function governanceNotice(result) {
+  if (!result) return;
+  if (result.checked === false) {
+    toast(`自动治理检查失败：${result.error || '未知错误'}`, true);
+    return;
+  }
+  if (result.applied) {
+    toast(`自动治理已生效：${result.trigger_summary || '触发降级'}（${result.changes || 0} 项）`);
+  }
+}
 function setActiveNav(view) {
   $$('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.view === view));
 }
@@ -946,6 +956,7 @@ async function viewIngest() {
       button.textContent = '解析/转写并运行评分';
       renderBatchIngestResult(results, failures);
       toast(`批量导入完成：成功 ${results.length} 场，失败 ${failures.length} 场`, failures.length > 0);
+      governanceNotice(results.map((item) => item.auto_governance).find((item) => item && (item.applied || item.checked === false)));
       return;
     }
     button.disabled = true;
@@ -959,6 +970,7 @@ async function viewIngest() {
       } else {
         toast(`已录入 ${data.attempt.candidate_code}，待复核 ${data.attempt.pending} 项`);
       }
+      governanceNotice(data.auto_governance);
     } catch (err) {
       toast(err.message, true);
     } finally {
@@ -3664,6 +3676,7 @@ async function viewQuality() {
       try {
         const result = await apiForm('/api/calibration/import', new FormData(calibrationForm));
         toast(`金标准已导入 ${result.updated} 条；AI QWK ${num(result.report.qwk_ai, 3)}`);
+        governanceNotice(result.auto_governance);
         await viewQuality();
       } catch (err) {
         toast(err.message, true);
@@ -4540,6 +4553,7 @@ document.addEventListener('click', async (e) => {
     try {
       const result = await api('/api/attempts/rescore-batch', { method: 'POST' });
       toast(`批量重跑完成：${result.rescored.length}/${result.considered} 场，跳过 ${result.skipped.length} 场`);
+      governanceNotice(result.auto_governance);
       await viewQuality();
     } catch (err) {
       toast(err.message, true);
@@ -4878,6 +4892,7 @@ document.addEventListener('click', async (e) => {
     try {
       const result = await api(`/api/attempts/${encodeURIComponent(el.dataset.attempt)}/rescore`, { method: 'POST' });
       toast(`已重跑评分：${result.rescore.records} 条记录，AI 总分 ${num(result.rescore.ai_total, 1)}`);
+      governanceNotice(result.auto_governance);
       await viewOverview();
     } catch (err) {
       toast(err.message, true);
