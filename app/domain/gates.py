@@ -16,7 +16,7 @@ from .critical_miss import critical_misses
 from .fairness import fairness_report
 from .latency import feedback_ack_latency
 from .sp_approval import persona_approval_status
-from .spqa import RED_TEAM_VERSION
+from .spqa import RED_TEAM_VERSION, sp_runtime_summary
 from .stats import quadratic_weighted_kappa
 from .sus import sus_summary
 
@@ -397,6 +397,18 @@ def evaluate_gates(conn, report: dict[str, Any], current_stage: str) -> dict[str
                 "level": "warn",
                 "title": "G1 技术验收指标未达标",
                 "detail": "；".join(technical_issues) + "。建议继续内测，不扩大 SP 使用范围。",
+            }
+        )
+    sp_runtime = sp_runtime_summary(conn)
+    if sp_runtime.get("degraded"):
+        alerts.append(
+            {
+                "level": "warn",
+                "title": f"SP 运行时发生 {sp_runtime['degraded']} 次安全回退",
+                "detail": (
+                    f"共 {sp_runtime.get('turns', 0)} 轮 SP 生成中 {sp_runtime['degraded']} 轮"
+                    "未通过独立验证器并回退安全模板；建议复盘触发话术，并补充红队回归用例。"
+                ),
             }
         )
     g2_issues = _g2_metric_issues(values)

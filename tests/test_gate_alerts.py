@@ -82,6 +82,30 @@ def test_rolling_qwk_and_subgroup_gap_alerts(tmp_path, monkeypatch):
     conn.close()
 
 
+def test_sp_runtime_degraded_alerts(tmp_path, monkeypatch):
+    conn = _conn(tmp_path)
+    monkeypatch.setattr(
+        "app.domain.gates.sp_runtime_summary",
+        lambda conn: {"turns": 12, "degraded": 2, "degradation_rate": 0.1667},
+    )
+    gates = evaluate_gates(conn, _report(0.2, 40), "G0_offline")
+    titles = [alert["title"] for alert in gates["alerts"]]
+    assert any("SP 运行时发生 2 次安全回退" in title for title in titles)
+    conn.close()
+
+
+def test_sp_runtime_without_degraded_does_not_alert(tmp_path, monkeypatch):
+    conn = _conn(tmp_path)
+    monkeypatch.setattr(
+        "app.domain.gates.sp_runtime_summary",
+        lambda conn: {"turns": 12, "degraded": 0, "degradation_rate": 0.0},
+    )
+    gates = evaluate_gates(conn, _report(0.2, 40), "G0_offline")
+    titles = [alert["title"] for alert in gates["alerts"]]
+    assert not any("SP 运行时发生" in title for title in titles)
+    conn.close()
+
+
 def test_sus_between_gate_and_experience_target_warns(tmp_path, monkeypatch):
     conn = _conn(tmp_path)
     monkeypatch.setattr(
