@@ -3674,7 +3674,7 @@ async function viewQuality() {
         <div id="ops-health-result" class="tiny muted" style="margin-bottom:8px"></div>
         <div id="request-log-result" class="tiny muted" style="margin-bottom:8px"></div>
         <div id="content-audit-result" class="tiny muted" style="margin-bottom:8px"></div>
-        <div class="tiny muted" style="margin-bottom:6px">自动内容审计：累计 ${contentAudit.finding_count || 0} 条线索 · 未处置 ${contentAudit.open_count || 0} 条（高风险 ${contentAudit.high_count || 0}）${contentAudit.confirmed_count ? ` · 已确认 ${contentAudit.confirmed_count}` : ''}${contentAudit.last_at ? ` · 最近 ${fmtTime(contentAudit.last_at)}` : ''}</div>
+        <div class="tiny muted" style="margin-bottom:6px">自动内容审计：累计 ${contentAudit.finding_count || 0} 条线索 · 未处置 ${contentAudit.open_count || 0} 条（高风险 ${contentAudit.high_count || 0}）${contentAudit.confirmed_count ? ` · 已确认 ${contentAudit.confirmed_count}（高风险 ${contentAudit.confirmed_high_count || 0}）` : ''}${contentAudit.last_at ? ` · 最近 ${fmtTime(contentAudit.last_at)}` : ''}</div>
         ${contentAuditRows ? `<div class="audit-list" style="max-height:180px;margin-bottom:8px">${contentAuditRows}</div>` : ''}
         <div id="signoff-audit-result" class="tiny muted" style="margin-bottom:8px"></div>
         <div class="audit-list">${auditRows || '<div class="empty">暂无审计</div>'}</div>

@@ -95,6 +95,38 @@ def test_external_model_endpoint_alerts_at_g3(tmp_path, monkeypatch):
     conn.close()
 
 
+def test_confirmed_content_finding_counts_as_p0(tmp_path):
+    conn = _conn(tmp_path)
+    conn.execute(
+        "INSERT INTO content_audit_findings(finding_id, attempt_id, rule, severity, role, label, "
+        "quote, start_ms, status, reviewed_by, reviewed_at, review_note, created_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            "caf_p0",
+            "att_p0",
+            "sp_diagnosis",
+            "high",
+            "patient",
+            "SP 给出诊断或病情结论",
+            "你得了心梗。",
+            0,
+            "confirmed",
+            "auditor",
+            db.now_iso(),
+            "确认越界，回写红队用例",
+            db.now_iso(),
+        ),
+    )
+    conn.commit()
+    gates = evaluate_gates(conn, _report(0.2, 40), "G1_practice")
+    g1 = next(gate for gate in gates["gates"] if gate["id"] == "G1")
+    p0 = next(row for row in g1["criteria"] if row["key"] == "p0_incidents")
+    assert p0["value"] == 1
+    assert p0["status"] == "fail"
+    assert any("P0 安全事件" in alert["title"] for alert in gates["alerts"])
+    conn.close()
+
+
 def test_missing_data_flow_review_alerts_until_recorded(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "app.domain.gates.data_flow_status",

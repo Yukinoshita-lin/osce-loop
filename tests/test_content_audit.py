@@ -101,6 +101,7 @@ def test_content_findings_can_be_reviewed_and_summary_updates(tmp_path):
     assert updated["open_count"] == 1
     assert updated["high_count"] == 1
     assert updated["confirmed_count"] == 1
+    assert updated["confirmed_high_count"] == 1
     with pytest.raises(ValueError, match="已处置"):
         review_finding(
             conn,

@@ -186,6 +186,12 @@ def content_audit_summary(conn, *, recent_limit: int = 20) -> dict[str, Any]:
         "high_count": sum(1 for row in open_rows if row["severity"] == "high"),
         "medium_count": sum(1 for row in open_rows if row["severity"] == "medium"),
         "confirmed_count": sum(1 for row in rows if row.get("status") == "confirmed"),
+        "confirmed_high_count": sum(
+            1 for row in rows if row.get("status") == "confirmed" and row["severity"] == "high"
+        ),
+        "confirmed_medium_count": sum(
+            1 for row in rows if row.get("status") == "confirmed" and row["severity"] == "medium"
+        ),
         "dismissed_count": sum(1 for row in rows if row.get("status") == "dismissed"),
         "by_rule": sorted(by_rule.values(), key=lambda item: (-item["count"], item["rule"])),
         "recent": rows[: max(1, min(recent_limit, 100))],

@@ -227,6 +227,10 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
         p95_ms = red_team.get("p95_latency_ms")
         sp_p95_latency = round(p95_ms / 1000, 3) if p95_ms is not None else None
         sp_p0 = red_team.get("p0_incidents")
+    audit = content_audit_summary(conn)
+    confirmed_p0 = int(audit.get("confirmed_high_count") or 0)
+    if confirmed_p0:
+        sp_p0 = confirmed_p0 if sp_p0 is None else int(sp_p0) + confirmed_p0
     ab = ab_report(conn)
     fairness = fairness_report(conn)
     chain = db.verify_audit_chain(conn)
@@ -679,6 +683,17 @@ def evaluate_gates(conn, report: dict[str, Any], current_stage: str) -> dict[str
                 "level": "warn",
                 "title": f"内容审计命中 {content_audit['medium_count']} 条中风险线索",
                 "detail": "建议抽查对应场次，确认 SP 或考生表述是否越界，并评估是否需要补充培训。",
+            }
+        )
+    if content_audit.get("confirmed_high_count"):
+        alerts.append(
+            {
+                "level": "danger",
+                "title": f"已确认 {content_audit['confirmed_high_count']} 条 P0 安全事件",
+                "detail": (
+                    "内容审计确认的 SP 诊断/用药越界按 P0 安全事故处理；G1 零 P0 指标将不通过，"
+                    "需完成根因分析、红队回归用例更新与人格卡修订。"
+                ),
             }
         )
     ready = (feedback_ack_latency(conn) or {}).get("ready") or {}
