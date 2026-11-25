@@ -11,7 +11,7 @@ from typing import Any
 from .. import db
 from ..config import SP_CERT_VALID_DAYS
 from .bundle import list_bundles
-from .content_audit import build_regression_cases
+from .content_audit import build_leak_terms, build_regression_cases, regression_signature
 from .slots import DialogueStateMachine, SPController, scan_leaks
 from .sp_approval import persona_approval_status
 
@@ -114,7 +114,11 @@ def _p95(values: list[float]) -> float | None:
     return round(ordered[index], 2)
 
 
-def run_red_team(bundle: dict[str, Any], extra_cases: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def run_red_team(
+    bundle: dict[str, Any],
+    extra_cases: list[dict[str, Any]] | None = None,
+    extra_forbidden: list[str] | None = None,
+) -> dict[str, Any]:
     payload = bundle["payload"]
     derived = bundle["derived"]
     cases: list[dict[str, Any]] = []
@@ -128,7 +132,7 @@ def run_red_team(bundle: dict[str, Any], extra_cases: list[dict[str, Any]] | Non
     regression_cases = list(extra_cases or [])
     for case in RED_TEAM_CASES + regression_cases:
         machine = DialogueStateMachine(payload, derived)
-        controller = SPController(machine)
+        controller = SPController(machine, extra_forbidden=extra_forbidden)
         state = machine.start()
         case_leaks: list[dict[str, Any]] = []
         case_forbidden_hits: list[str] = []
@@ -207,6 +211,7 @@ def run_red_team(bundle: dict[str, Any], extra_cases: list[dict[str, Any]] | Non
         "p95_latency_ms": _p95(latencies),
         "regression_case_count": len(regression_cases),
         "regression_case_ids": [case["case_id"] for case in regression_cases],
+        "dynamic_forbidden_count": len(extra_forbidden or []),
     }
 
 
@@ -291,9 +296,14 @@ def sp_runtime_summary(conn, *, recent_limit: int = 5) -> dict[str, Any]:
 
 
 def run_certification(
-    bundle: dict[str, Any], extra_cases: list[dict[str, Any]] | None = None
+    bundle: dict[str, Any],
+    extra_cases: list[dict[str, Any]] | None = None,
+    extra_forbidden: list[str] | None = None,
+    signature: str = "",
 ) -> dict[str, Any]:
-    red_team = run_red_team(bundle, extra_cases=extra_cases)
+    red_team = run_red_team(
+        bundle, extra_cases=extra_cases, extra_forbidden=extra_forbidden
+    )
     consistency = run_consistency(bundle, runs=20)
     checks = [
         {
@@ -353,6 +363,8 @@ def run_certification(
         "case_stale": False,
         "regression_case_count": red_team.get("regression_case_count", 0),
         "regression_case_ids": red_team.get("regression_case_ids", []),
+        "regression_signature": signature,
+        "dynamic_forbidden_count": red_team.get("dynamic_forbidden_count", 0),
         "checks": checks,
         "red_team": red_team,
         "consistency": consistency,
@@ -365,11 +377,19 @@ def certify_bundle(
     bundle: dict[str, Any],
     actor: str = "SP 认证员",
     extra_cases: list[dict[str, Any]] | None = None,
+    extra_forbidden: list[str] | None = None,
 ) -> dict[str, Any]:
     regression_cases = (
         build_regression_cases(conn) if extra_cases is None else extra_cases
     )
-    report = run_certification(bundle, extra_cases=regression_cases)
+    forbidden_terms = build_leak_terms(conn) if extra_forbidden is None else extra_forbidden
+    signature = regression_signature(conn) if extra_cases is None else ""
+    report = run_certification(
+        bundle,
+        extra_cases=regression_cases,
+        extra_forbidden=forbidden_terms,
+        signature=signature,
+    )
     cert_id = db.new_id("cert")
     created = datetime.fromisoformat(report["created_at"])
     valid_until = (created + timedelta(days=SP_CERT_VALID_DAYS)).isoformat(timespec="seconds")
@@ -405,6 +425,8 @@ def certify_bundle(
             "checks": {c["key"]: c["value"] for c in report["checks"]},
             "case_count": report["red_team"]["case_count"],
             "regression_case_count": report.get("regression_case_count", 0),
+            "regression_signature": report.get("regression_signature"),
+            "dynamic_forbidden_count": report.get("dynamic_forbidden_count", 0),
             "consistency": report["consistency"]["rate"],
         },
         model_version=db.get_state(conn, "sp_model_version"),
@@ -429,6 +451,16 @@ def _attach_persona_state(conn, row) -> dict[str, Any]:
     data["red_team_version"] = data.get("red_team_version")
     data["current_red_team_version"] = RED_TEAM_VERSION
     data["case_stale"] = data.get("red_team_version") != RED_TEAM_VERSION
+    current_cases = build_regression_cases(conn)
+    current_signature = regression_signature(conn)
+    stored_signature = data.get("regression_signature")
+    if not current_cases:
+        data["regression_stale"] = False
+    else:
+        data["regression_stale"] = stored_signature is None or (
+            stored_signature != current_signature
+        )
+    data["current_regression_signature"] = current_signature
     data["valid_until"] = row["valid_until"]
     expires = None
     if row["valid_until"]:
@@ -449,6 +481,7 @@ def _attach_persona_state(conn, row) -> dict[str, Any]:
         data["status"] == "certified"
         and not data["stale"]
         and not data["case_stale"]
+        and not data["regression_stale"]
         and not data["expired"]
     )
     return data
@@ -480,6 +513,7 @@ def certification_for_bundle(conn, bundle: dict[str, Any]) -> dict[str, Any] | N
         cert["status"] == "certified"
         and not cert["stale"]
         and not cert["case_stale"]
+        and not cert.get("regression_stale")
         and not cert["expired"]
     )
     return cert

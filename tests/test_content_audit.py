@@ -8,8 +8,10 @@ import pytest
 from app import db
 from app.domain.content_audit import (
     audit_utterances,
+    build_leak_terms,
     build_regression_cases,
     content_audit_summary,
+    regression_signature,
     review_finding,
     run_content_audit,
     scan_attempt,
@@ -119,6 +121,10 @@ def test_content_findings_can_be_reviewed_and_summary_updates(tmp_path):
     assert cases
     assert cases[0]["source_finding_id"] == finding["finding_id"]
     assert cases[0]["turns"]
+    terms = build_leak_terms(conn)
+    assert terms
+    assert terms[0] in finding["match"]
+    assert regression_signature(conn)
     conn.close()
 
 

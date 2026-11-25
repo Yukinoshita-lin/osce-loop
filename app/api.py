@@ -92,7 +92,10 @@ from .domain.coverage import blueprint_coverage
 from .domain.critical_miss import critical_misses, record_critical_miss_review
 from .domain.content_audit import (
     attempt_audit_summary,
+    build_leak_terms,
+    build_regression_cases,
     content_audit_summary,
+    regression_signature,
     review_finding,
     run_content_audit,
 )
@@ -3048,7 +3051,7 @@ def create_sp_session(body: SpSessionBody, conn=Depends(get_conn)):
     if not sp_session_ready(conn, bundle)["ready"]:
         raise HTTPException(409, "当前站包 SP 认证失效或人格卡未获人工批准，请先完成红队认证与考官试演")
     machine = DialogueStateMachine(bundle["payload"], bundle["derived"])
-    controller = SPController(machine)
+    controller = SPController(machine, extra_forbidden=build_leak_terms(conn))
     state = machine.start()
     allowed = machine.slots_by_ids(state["released"])
     reply = controller.generate(allowed, machine.persona, 0)
@@ -3097,7 +3100,7 @@ def sp_message(session_id: str, body: SpMessageBody, conn=Depends(get_conn)):
     if not sp_session_ready(conn, bundle)["ready"]:
         raise HTTPException(409, "当前站包 SP 认证或人格卡批准已失效，练习已暂停；请重新认证并试演后再继续")
     machine = DialogueStateMachine(bundle["payload"], bundle["derived"])
-    controller = SPController(machine)
+    controller = SPController(machine, extra_forbidden=build_leak_terms(conn))
     state = json.loads(session["state"])
     messages = json.loads(session["transcript"])
     candidate_at = _next_at(messages)
@@ -3182,8 +3185,15 @@ def sp_certifications(conn=Depends(get_conn), bundle_id: str | None = None):
             "SELECT * FROM sp_certifications ORDER BY created_at DESC, rowid DESC"
         ).fetchall()
     result = []
+    current_cases = build_regression_cases(conn)
+    current_signature = regression_signature(conn)
     for row in rows:
         report = json.loads(row["report"])
+        stored_signature = report.get("regression_signature")
+        regression_stale = bool(
+            current_cases
+            and (stored_signature is None or stored_signature != current_signature)
+        )
         result.append(
             {
                 "cert_id": row["cert_id"],
@@ -3194,6 +3204,9 @@ def sp_certifications(conn=Depends(get_conn), bundle_id: str | None = None):
                 "created_at": row["created_at"],
                 "valid_until": row["valid_until"],
                 "checks": report.get("checks", []),
+                "regression_case_count": report.get("regression_case_count", 0),
+                "dynamic_forbidden_count": report.get("dynamic_forbidden_count", 0),
+                "regression_stale": regression_stale,
                 "red_team": {
                     "case_count": report.get("red_team", {}).get("case_count"),
                     "passed_cases": report.get("red_team", {}).get("passed_cases"),

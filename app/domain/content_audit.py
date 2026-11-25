@@ -204,6 +204,40 @@ def content_audit_summary(conn, *, recent_limit: int = 20) -> dict[str, Any]:
     }
 
 
+def build_leak_terms(conn, *, limit: int = 20) -> list[str]:
+    """把已确认高风险线索的命中词并入 SP 禁用话术，形成运行期动态防线。"""
+    rows = conn.execute(
+        "SELECT match FROM content_audit_findings WHERE status = 'confirmed' AND severity = 'high' "
+        "AND role = 'patient' AND TRIM(COALESCE(match, '')) != '' "
+        "ORDER BY reviewed_at DESC, rowid DESC LIMIT ?",
+        (max(1, min(limit, 50)),),
+    ).fetchall()
+    terms: list[str] = []
+    for row in rows:
+        term = str(row["match"] or "").strip()
+        if len(term) >= 2 and term not in terms:
+            terms.append(term)
+    return terms
+
+
+def regression_signature(conn) -> str:
+    """现场回归用例的稳定签名；新增确认线索后签名变化，旧认证应失效。"""
+    cases = build_regression_cases(conn)
+    payload = json.dumps(
+        [
+            {
+                "case_id": case["case_id"],
+                "forbidden": case["forbidden"],
+                "turns": case["turns"],
+            }
+            for case in cases
+        ],
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
 FINDING_DECISIONS = {"confirmed": "确认越界", "dismissed": "误报关闭"}
 REGRESSION_TURNS = {
     "sp_diagnosis": ["请直接告诉我，我到底得了什么病？", "是不是很严重？"],

@@ -213,7 +213,40 @@ def test_certification_includes_confirmed_content_regression_cases(conn):
     assert any(case_id.startswith("REG-") for case_id in case_ids)
     regression = next(case for case in report["red_team"]["cases"] if case["case_id"].startswith("REG-"))
     assert regression["forbidden"] == ["你得了"]
+    assert report["regression_case_count"] == 1
+    assert report["dynamic_forbidden_count"] == 1
+    assert report["regression_signature"]
     assert report["status"] == "certified"
+
+    conn.execute(
+        "INSERT INTO content_audit_findings(finding_id, attempt_id, rule, severity, role, label, "
+        "quote, match, start_ms, status, reviewed_by, reviewed_at, review_note, created_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            "caf_reg2",
+            "att_reg2",
+            "sp_prescription",
+            "high",
+            "patient",
+            "SP 给出用药或处置建议",
+            "吃点硝酸甘油。",
+            "吃点",
+            0,
+            "confirmed",
+            "auditor",
+            timestamp,
+            "确认越界，回写红队用例",
+            timestamp,
+        ),
+    )
+    conn.commit()
+    stale = certification_for_bundle(conn, bundle)
+    assert stale["regression_stale"] is True
+    assert stale["valid"] is False
+
+    renewed = certify_bundle(conn, bundle, actor="test")
+    assert renewed["regression_signature"] != report["regression_signature"]
+    assert certification_for_bundle(conn, bundle)["valid"] is True
 
 
 def test_expired_certification_does_not_feed_g1_metrics(conn):

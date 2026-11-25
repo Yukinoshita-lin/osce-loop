@@ -2323,15 +2323,10 @@ async function createSpSession() {
 function renderSP() {
   const persona = state.sp.persona;
   const session = state.sp.session;
-  if (state.sp.sessionError) {
-    $('#view').innerHTML = `
-      <div class="view-head">
-        <div><h2>SP 演练</h2><p>AI 模拟患者只允许在已完成认证的站包上运行。</p></div>
-      </div>
-      <div class="alert danger"><b>SP 演练不可用</b><p>${esc(state.sp.sessionError)}</p></div>
-      <div class="btn-row"><button class="btn amber" data-action="sp-certify">运行红队认证</button></div>`;
-    return;
-  }
+  const sessionError = state.sp.sessionError;
+  const sessionBanner = sessionError
+    ? `<div class="alert danger" style="margin-bottom:14px"><b>SP 演练暂不可用</b><p>${esc(sessionError)}</p></div>`
+    : '';
   const p = persona.persona || {};
   const dims = p.persona || {};
   const phaseOrder = persona.phases || [];
@@ -2365,11 +2360,13 @@ function renderSP() {
         <div class="version-row"><span class="k">人格首轮通过</span><span class="v">${pct(cert.red_team.persona_first_pass_rate, 0)}</span></div>
         <div class="version-row"><span class="k">跨会话一致性</span><span class="v">${pct(cert.consistency.rate, 0)}</span></div>
         ${cert.regression_case_count ? `<div class="version-row"><span class="k">现场回归用例</span><span class="v">${cert.regression_case_count} 条 <span class="tiny muted">来自已确认内容审计线索</span></span></div>` : ''}
+        ${cert.dynamic_forbidden_count ? `<div class="version-row"><span class="k">动态禁用词</span><span class="v">${cert.dynamic_forbidden_count} 条 <span class="tiny muted">已并入运行期拦截</span></span></div>` : ''}
         <div class="version-row"><span class="k">P95 单轮延迟</span><span class="v">${num(cert.red_team.p95_latency_ms, 0)} ms</span></div>
         <div class="version-row"><span class="k">认证有效期</span><span class="v">${cert.valid_until ? `${fmtTime(cert.valid_until)} · 剩余 ${cert.days_remaining} 天` : '未设置'}</span></div>
         ${cert.expired ? `<div class="violation">认证已于 ${esc(fmtTime(cert.valid_until))} 过期；G1 的 SP 指标按未采集处理，请按季度更新红队用例并复测。</div>` : ''}
         ${cert.stale ? `<div class="violation">认证绑定旧 persona_version ${esc((cert.persona_version || '').slice(7, 19))}，当前站包为 ${esc((persona.persona_version || '').slice(7, 19))}；G1 指标按未采集处理，请重新认证后再用于模拟考。</div>` : ''}
         ${cert.case_stale ? `<div class="violation">红队攻击用例已更新到 ${esc(cert.current_red_team_version || '—')}（旧认证 ${esc(cert.red_team_version || '—')}）；G1 指标按未采集处理，请重新运行红队认证。</div>` : ''}
+        ${cert.regression_stale ? '<div class="violation">现场回归用例已随新的已确认线索更新，旧认证不再有效；请重新运行红队认证后再使用 AI SP。</div>' : ''}
         ${(cert.checks || []).filter((c) => !c.passed).map((c) => `<div class="violation">${esc(c.label)}：${esc(c.value)}（目标 ${esc(c.target)}）</div>`).join('')}
       ` : '<div class="tiny muted">尚未认证。红队会尝试诱导泄露、编造病史、跨阶段索取诊断等 7 类攻击。</div>'}
       <div class="sep"></div>
@@ -2483,6 +2480,7 @@ function renderSP() {
         <button class="btn" data-action="sp-new">开始新会话</button>
       </div>
     </div>
+    ${sessionBanner}
     <div class="sp-layout">
       <div style="display:flex;flex-direction:column;gap:12px">
         <section class="card">
@@ -2535,7 +2533,7 @@ function renderSP() {
             ${messages.map((m) => `<div class="msg ${m.role}"><div class="who">${m.role === 'patient' ? 'SP' : '考生'}</div>${esc(m.text)}</div>`).join('')}
           </div>
           ${guidance ? `<div class="tiny" style="padding:8px 15px;border-top:1px solid var(--border-soft);color:var(--amber)">阶段末自然引导：本阶段仍有 ${(guidance.missing_items || []).length} 个关键评分项未被问及，SP 已提示；可继续追问，或再次尝试推进阶段。</div>` : ''}
-          ${finished ? '<div class="tiny muted" style="padding:12px 15px;border-top:1px solid var(--border-soft)">本次练习已生成反馈。开始新会话可再练一次。</div>' : `
+          ${!session ? '<div class="tiny muted" style="padding:12px 15px;border-top:1px solid var(--border-soft)">当前认证不可用，暂不能开始对话；请先完成红队认证。</div>' : finished ? '<div class="tiny muted" style="padding:12px 15px;border-top:1px solid var(--border-soft)">本次练习已生成反馈。开始新会话可再练一次。</div>' : `
           <div class="chat-suggestions">
             ${['您哪里不舒服？', '疼多久了？', '有没有高血压？', '我理解您很担心', '我要给您听诊一下'].map((t) => `<button class="btn small ghost" data-action="sp-suggest" data-text="${dataAttr(t)}">${esc(t)}</button>`).join('')}
           </div>
@@ -5126,6 +5124,14 @@ document.addEventListener('click', async (e) => {
         body: { bundle_id: state.sp.persona.bundle_id, actor: state.reviewer || 'SP 认证员' },
       });
       state.sp.persona.certification = data.certification;
+      if (data.certification.valid) {
+        try {
+          await createSpSession();
+          state.sp.sessionError = null;
+        } catch (err) {
+          state.sp.sessionError = err.message;
+        }
+      }
       renderSP();
       const cert = data.certification;
       toast(cert.status === 'certified' ? 'SP 认证通过：红队与一致性抽测达标' : '认证未通过：请查看失败项');

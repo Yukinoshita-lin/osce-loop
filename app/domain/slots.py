@@ -68,7 +68,11 @@ def _contains_any(text: str, needles: tuple[str, ...] | list[str]) -> str | None
     return None
 
 
-def scan_leaks(draft: str, unreleased_slots: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def scan_leaks(
+    draft: str,
+    unreleased_slots: list[dict[str, Any]],
+    extra_patterns: list[str] | None = None,
+) -> list[dict[str, Any]]:
     """对未释放槽的关键实体做字符串扫描；这是信息边界的最后一道闸。"""
     violations: list[dict[str, Any]] = []
     for slot in unreleased_slots:
@@ -84,6 +88,13 @@ def scan_leaks(draft: str, unreleased_slots: list[dict[str, Any]]) -> list[dict[
                     "kind": "information_boundary",
                 }
             )
+    dynamic_hit = next(
+        (str(term).strip() for term in (extra_patterns or []) if str(term).strip() and str(term) in draft),
+        None,
+    )
+    if dynamic_hit:
+        violations.append({"kind": "clinical_safety", "entities": [dynamic_hit]})
+        return violations
     forbidden_patterns = (
         r"你得了",
         r"确诊为",
@@ -319,8 +330,9 @@ class DialogueStateMachine:
 class SPController:
     """生成 → 独立校验 → 修正/回退，三步闭环。"""
 
-    def __init__(self, machine: DialogueStateMachine):
+    def __init__(self, machine: DialogueStateMachine, extra_forbidden: list[str] | None = None):
         self.machine = machine
+        self.extra_forbidden = [term for term in (extra_forbidden or []) if str(term).strip()]
 
     def generate(
         self,
@@ -380,7 +392,7 @@ class SPController:
         return lead + core
 
     def verify(self, draft: str, persona: dict[str, Any], unreleased: list[dict[str, Any]]) -> dict[str, Any]:
-        boundary_violations = scan_leaks(draft, unreleased)
+        boundary_violations = scan_leaks(draft, unreleased, self.extra_forbidden)
         boundary = 1.0
         if boundary_violations:
             boundary = 0.0

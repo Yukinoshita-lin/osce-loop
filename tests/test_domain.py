@@ -483,6 +483,13 @@ def test_scan_leaks_allows_neutral_patient_speech():
     assert not any(v["kind"] == "clinical_safety" for v in leaks)
 
 
+def test_scan_leaks_uses_dynamic_confirmed_terms():
+    violations = scan_leaks("医生，我回家吃点药就行吧", [], ["吃点"])
+    assert any(
+        v["kind"] == "clinical_safety" and v["entities"] == ["吃点"] for v in violations
+    )
+
+
 def test_sp_guides_when_key_items_unasked_at_phase_end():
     payload = build_bundle_payload()
     derived = derive_assets(payload)
