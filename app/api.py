@@ -117,6 +117,7 @@ from .domain.health import system_health
 from .domain.history import candidate_history
 from .domain.hint_impact import hint_impact
 from .domain.execution import (
+    acknowledge_live_anomalies,
     advance_run,
     append_live_segment,
     get_run,
@@ -2429,6 +2430,27 @@ def execution_slot_facts(run_id: str, slot_key: str, conn=Depends(get_conn)):
         return live_facts(conn, run_id, slot_key)
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
+
+
+class LiveAnomalyAckBody(BaseModel):
+    note: str = Field(min_length=4, max_length=200)
+    actor: str = Field(default="考务", max_length=40)
+
+
+@app.post("/api/execution/{run_id}/slots/{slot_key}/anomaly-ack")
+def execution_live_anomaly_ack(
+    run_id: str,
+    slot_key: str,
+    body: LiveAnomalyAckBody,
+    conn=Depends(get_conn),
+):
+    _ensure_not_stopped(conn)
+    try:
+        return acknowledge_live_anomalies(
+            conn, run_id, slot_key, note=body.note, actor=body.actor
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @app.get("/api/execution/{run_id}/export")

@@ -1506,6 +1506,7 @@ function executionHtml(run, emergencyStop) {
       ${slot.hints_enabled !== false ? `<ul class="tiny muted" style="margin:6px 0 0;padding-left:16px">${(slot.hints || []).map((h) => `<li>${esc(h)}</li>`).join('')}</ul>` : `<div class="tiny muted" style="margin-top:5px">${run.hints_enabled ? '本站事实层提示已单独关闭' : '事实层提示已关闭'}</div>`}
       ${slot.hints_enabled !== false && slot.evidence_facts ? `<div class="tiny muted" style="margin-top:4px">事实：已采集候选发言 ${slot.evidence_facts.utterances} 段 · 尚无证据 ${slot.evidence_facts.missing} 项${slot.evidence_facts.missing_critical ? `（其中关键项 ${slot.evidence_facts.missing_critical} 项）` : ''}</div>` : ''}
       ${(slot.live_anomalies || []).length ? `<div class="tiny" style="margin-top:4px;color:${slot.live_anomalies.some((a) => a.severity === 'high') ? 'var(--red)' : 'var(--amber)'}">实时异常：${slot.live_anomalies.map((a) => esc(a.label)).join(' · ')}</div>` : ''}
+      ${(slot.live_anomalies || []).length ? `<div class="btn-row" style="margin-top:6px"><button class="btn small amber" data-action="exec-live-ack" data-slot-key="${dataAttr(slot.slot_key)}">处置实时异常</button></div>` : ''}
       ${(slot.hints || []).length ? `<button class="link-btn tiny" data-action="exec-slot-hints" data-station-id="${dataAttr(slot.station_id)}" data-enabled="${slot.hints_enabled !== false ? 'false' : 'true'}">${slot.hints_enabled !== false ? '关闭本站提示' : '开启本站提示'}</button>` : ''}
       ${slot.note ? `<div class="violation">${esc(slot.note)}</div>` : ''}
       ${slot.compensation ? `<div class="tiny"><span class="pill amber">补偿</span> ${esc(compLabels[slot.compensation] || slot.compensation)}</div>` : ''}
@@ -4519,6 +4520,21 @@ document.addEventListener('click', async (e) => {
           ? `转写片段已回传；新增异常：${newAnomalies.map((a) => a.label || a.type).join('、')}`
           : `转写片段已回传；尚无证据 ${summary.missing === undefined ? '—' : summary.missing} 项`
       );
+      await viewExecution();
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'exec-live-ack') {
+    const note = (prompt('实时异常处置说明（用于审计留痕）：') || '').trim();
+    if (!note) return;
+    try {
+      await api(`/api/execution/${encodeURIComponent(state.executionRunId)}/slots/${encodeURIComponent(el.dataset.slotKey)}/anomaly-ack`, {
+        method: 'POST',
+        body: { note, actor: state.reviewer || '考务' },
+      });
+      toast('实时异常已处置并写入审计');
       await viewExecution();
     } catch (err) {
       toast(err.message, true);

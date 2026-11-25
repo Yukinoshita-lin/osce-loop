@@ -249,6 +249,21 @@ def _bundle_payload_for_station(
     return payload if isinstance(payload, dict) else None
 
 
+def _acknowledged_live_types(conn, run_id: str, slot_key: str) -> set[str]:
+    types: set[str] = set()
+    for row in conn.execute(
+        "SELECT payload FROM exam_events WHERE run_id = ? AND event_type = 'live_anomaly_ack' "
+        "AND slot_key = ?",
+        (run_id, slot_key),
+    ).fetchall():
+        try:
+            payload = json.loads(row["payload"] or "{}")
+        except (TypeError, ValueError):
+            continue
+        types.update(payload.get("types") or [])
+    return types
+
+
 def _record_live_anomalies(
     conn, run_id: str, slot: dict[str, Any], anomalies: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -309,6 +324,8 @@ def live_facts(conn, run_id: str, slot_key: str) -> dict[str, Any] | None:
         duration_ms=duration_ms,
         station_duration_min=(payload or {}).get("duration_min"),
     )
+    acknowledged = _acknowledged_live_types(conn, run_id, slot_key)
+    anomalies = [item for item in anomalies if item.get("type") not in acknowledged]
     return {
         "slot_key": slot_key,
         "segment_count": len(segments),
@@ -404,6 +421,53 @@ def append_live_segment(
     }
 
 
+def acknowledge_live_anomalies(
+    conn, run_id: str, slot_key: str, *, note: str, actor: str = "考务"
+) -> dict[str, Any]:
+    note = (note or "").strip()
+    if len(note) < 4:
+        raise ValueError("实时异常处置说明不少于 4 字")
+    if len(note) > 200:
+        raise ValueError("实时异常处置说明不能超过 200 字")
+    run = conn.execute("SELECT * FROM exam_runs WHERE run_id = ?", (run_id,)).fetchone()
+    if not run:
+        raise ValueError("考试执行不存在")
+    slot = conn.execute(
+        "SELECT * FROM exam_run_slots WHERE run_id = ? AND slot_key = ?", (run_id, slot_key)
+    ).fetchone()
+    if not slot:
+        raise ValueError("考站槽位不存在")
+    facts = live_facts(conn, run_id, slot_key) or {}
+    anomalies = facts.get("anomalies") or []
+    if not anomalies:
+        raise ValueError("当前没有待处置的实时异常")
+    types = sorted({item.get("type") for item in anomalies if item.get("type")})
+    _event(
+        conn,
+        run_id,
+        "live_anomaly_ack",
+        f"{slot['candidate_name']} · {slot['station_name']} 实时异常已处置：{note}",
+        severity="info",
+        slot_key=slot_key,
+        payload={"slot_key": slot_key, "types": types, "note": note, "actor": actor},
+    )
+    db.append_audit(
+        conn,
+        actor=actor,
+        action="exam.live_anomaly_ack",
+        object_type="ExamRunSlot",
+        object_id=f"{run_id}:{slot_key}",
+        before={"anomalies": anomalies},
+        after={"types": types, "note": note},
+    )
+    conn.commit()
+    return {
+        "ok": True,
+        "acknowledged": anomalies,
+        "facts": live_facts(conn, run_id, slot_key),
+    }
+
+
 def get_run(conn, run_id: str) -> dict[str, Any]:
     row = conn.execute("SELECT * FROM exam_runs WHERE run_id = ?", (run_id,)).fetchone()
     if not row:
@@ -494,6 +558,17 @@ def get_run(conn, run_id: str) -> dict[str, Any]:
         (run_id,),
     ).fetchall():
         live_by_slot.setdefault(row["slot_key"], []).append(dict(row))
+    ack_types_by_slot: dict[str, set[str]] = {}
+    for row in conn.execute(
+        "SELECT slot_key, payload FROM exam_events WHERE run_id = ? "
+        "AND event_type = 'live_anomaly_ack'",
+        (run_id,),
+    ).fetchall():
+        try:
+            payload = json.loads(row["payload"] or "{}")
+        except (TypeError, ValueError):
+            continue
+        ack_types_by_slot.setdefault(row["slot_key"], set()).update(payload.get("types") or [])
     for slot in slots:
         attempt = attempt_rows.get(slot.get("attempt_id") or "")
         slot["attempt"] = (
@@ -537,6 +612,10 @@ def get_run(conn, run_id: str) -> dict[str, Any]:
                 duration_ms=live_duration_ms,
                 station_duration_min=(station_payload or {}).get("duration_min"),
             )
+            acknowledged = ack_types_by_slot.get(slot["slot_key"], set())
+            slot["live_anomalies"] = [
+                item for item in slot["live_anomalies"] if item.get("type") not in acknowledged
+            ]
     events = []
     for event in conn.execute(
         "SELECT * FROM exam_events WHERE run_id = ? ORDER BY rowid DESC LIMIT 120", (run_id,)

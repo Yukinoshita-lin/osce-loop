@@ -10,7 +10,13 @@ from app.ai.base import CapabilityGateway
 from app.ai.mock import MockScoringProvider
 from app.config import MODEL_VERSION, PROMPT_VERSION
 from app.domain.bundle import list_bundles
-from app.domain.execution import append_live_segment, advance_run, get_run, start_run
+from app.domain.execution import (
+    acknowledge_live_anomalies,
+    append_live_segment,
+    advance_run,
+    get_run,
+    start_run,
+)
 from app.domain.ingest import create_ingested_attempt
 from app.domain.scheduling import ensure_schedule_inputs, generate_schedule
 from app.seed import seed_if_empty
@@ -222,3 +228,38 @@ def test_live_segments_update_evidence_facts(conn):
     ).fetchall()
     assert len(anomaly_events) == 2
     assert {json.loads(row["payload"])["type"] for row in anomaly_events} == {"silence", "emotion"}
+
+    ack = acknowledge_live_anomalies(
+        conn,
+        run["run_id"],
+        slot["slot_key"],
+        note="已提示考官安抚患者并检查设备",
+        actor="考务测试",
+    )
+    assert {item["type"] for item in ack["acknowledged"]} == {"silence", "emotion"}
+    assert ack["facts"]["anomalies"] == []
+    after_ack = get_run(conn, run["run_id"])
+    acked_slot = next(
+        s for s in after_ack["slots"] if s["slot_key"] == slot["slot_key"]
+    )
+    assert acked_slot["live_anomalies"] == []
+    assert conn.execute(
+        "SELECT COUNT(*) AS n FROM exam_events WHERE run_id = ? AND event_type = 'live_anomaly_ack'",
+        (run["run_id"],),
+    ).fetchone()["n"] == 1
+    assert conn.execute(
+        "SELECT COUNT(*) AS n FROM audit_events WHERE action = 'exam.live_anomaly_ack' "
+        "AND object_id = ?",
+        (f"{run['run_id']}:{slot['slot_key']}",),
+    ).fetchone()["n"] == 1
+
+    after_ack_segment = append_live_segment(
+        conn,
+        run["run_id"],
+        slot["slot_key"],
+        speaker="patient",
+        text="我还是很疼，受不了",
+        start_ms=90000,
+        end_ms=92000,
+    )
+    assert after_ack_segment["new_anomalies"] == []
