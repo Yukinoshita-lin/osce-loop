@@ -144,6 +144,7 @@ from .domain.maintenance import run_maintenance
 from .domain.media import backfill_media_hashes
 from .domain.practice import build_practice_report, practice_guidance_summary
 from .domain.profile import candidate_cross_station_profile
+from .domain.proposal_input import proposal_input
 from .domain.psychometrics import station_psychometrics
 from .domain.retention import purge_expired, refresh_retention, retention_overview
 from .domain.readability import analyze_feedback_readability
@@ -1917,6 +1918,11 @@ def quality_critical_miss_review(
 @app.get("/api/quality/station-reviews")
 def quality_station_reviews(conn=Depends(get_conn), station_id: str | None = None):
     return {"reviews": list_station_reviews(conn, station_id)}
+
+
+@app.get("/api/quality/proposal-input")
+def quality_proposal_input(conn=Depends(get_conn)):
+    return proposal_input(conn)
 
 
 @app.get("/api/rubric/maintenance")

@@ -2948,7 +2948,7 @@ function scorecardHtml(data) {
 async function viewQuality() {
   const canManageUsers = Boolean(state.user && state.user.role === 'admin');
   const canManageBlueprint = Boolean(state.user && state.user.role === 'exam_manager');
-  const [data, audit, retention, backupsData, stationData, usersData, maintenance, blueprintData, criticalData] = await Promise.all([
+  const [data, audit, retention, backupsData, stationData, usersData, maintenance, blueprintData, criticalData, proposalData] = await Promise.all([
     api('/api/quality'),
     api('/api/audit?limit=30'),
     api('/api/retention'),
@@ -2958,6 +2958,7 @@ async function viewQuality() {
     api('/api/rubric/maintenance'),
     api('/api/blueprint'),
     api('/api/quality/critical-misses'),
+    api('/api/quality/proposal-input'),
   ]);
   const backups = backupsData.backups || [];
   const stationQuality = stationData.stations || [];
@@ -3122,6 +3123,13 @@ async function viewQuality() {
       <td class="tiny">${esc(item.suggested_action || '—')}</td>
       <td>${item.needs_review ? '<span class="pill red">优先维护</span>' : '<span class="pill teal">观察</span>'}</td>
     </tr>`).join('');
+  const proposal = proposalData || { counts: {}, items: [] };
+  const proposalRows = (proposal.items || []).map((item) => `
+    <div class="version-row">
+      <span class="k">${item.severity === 'high' ? '<span class="pill red">优先</span>' : '<span class="pill amber">关注</span>'} ${esc(item.ref || '')} · ${esc(item.title || '')}</span>
+      <span class="v">${esc(item.finding)}${item.detail ? ` · ${esc(item.detail)}` : ''}</span>
+    </div>
+    ${item.recommended ? `<div class="tiny muted" style="margin:0 0 6px 0">建议：${esc(item.recommended)}</div>` : ''}`).join('');
   const critical = criticalData || { items: [], root_causes: [], actions: [] };
   const criticalRootLabels = Object.fromEntries((critical.root_causes || []).map((x) => [x.key, x.label]));
   const criticalActionLabels = Object.fromEntries((critical.actions || []).map((x) => [x.key, x.label]));
@@ -3334,6 +3342,17 @@ async function viewQuality() {
         </table>
       </div>
       <div class="tiny muted" style="margin-top:6px">${esc(maint.note || '')} 判定：拒绝 ≥2 次，或复核 ≥3 次且分歧率 ≥50%。</div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">下一年度命题输入<span class="sub">质量报告闭环回 S1 · 只作专家裁定依据</span></div>
+      <div class="attempt-strip" style="margin-bottom:8px">
+        <span>共 <b>${proposal.counts.total || 0}</b> 项</span>
+        <span>优先 <b>${proposal.counts.high || 0}</b></span>
+        <span>关注 <b>${proposal.counts.medium || 0}</b></span>
+      </div>
+      ${proposalRows || '<div class="tiny muted">当前没有需要转入下一年度命题的质量信号。</div>'}
+      <div class="tiny muted" style="margin-top:6px">${esc(proposal.note || '')}</div>
     </div>
 
     <div class="card" style="margin-bottom:16px">
