@@ -32,6 +32,14 @@ def test_healthy_edit_rate_does_not_alert(tmp_path):
     conn = _conn(tmp_path)
     gates = evaluate_gates(conn, _report(0.22, 40), "G0_offline")
     assert not any("橡皮图章" in alert["title"] for alert in gates["alerts"])
+    assert not any("超过 30%" in alert["title"] for alert in gates["alerts"])
+    conn.close()
+
+
+def test_high_edit_rate_alerts(tmp_path):
+    conn = _conn(tmp_path)
+    gates = evaluate_gates(conn, _report(0.35, 40), "G0_offline")
+    assert any("人工编辑率 35.0% 超过 30%" in alert["title"] for alert in gates["alerts"])
     conn.close()
 
 

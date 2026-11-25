@@ -428,6 +428,17 @@ def evaluate_gates(conn, report: dict[str, Any], current_stage: str) -> dict[str
                 ),
             }
         )
+    if edit_rate is not None and reviewed >= 20 and edit_rate > 0.30:
+        alerts.append(
+            {
+                "level": "warn",
+                "title": f"人工编辑率 {edit_rate:.1%} 超过 30%",
+                "detail": (
+                    f"复核 {reviewed} 条中人工改动比例偏高，说明 AI 建议与人工判断偏差较大；"
+                    "建议检查行为锚歧义、证据探针召回与模型校准，而不是继续扩大 AI 权限。"
+                ),
+            }
+        )
     review_share_rows = (report.get("review_share") or {}).get("by_risk") or []
     for row in review_share_rows:
         target = row.get("target")
