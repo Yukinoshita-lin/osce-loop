@@ -90,7 +90,12 @@ from .domain.dataflow import (
 )
 from .domain.coverage import blueprint_coverage
 from .domain.critical_miss import critical_misses, record_critical_miss_review
-from .domain.content_audit import attempt_audit_summary, content_audit_summary, run_content_audit
+from .domain.content_audit import (
+    attempt_audit_summary,
+    content_audit_summary,
+    review_finding,
+    run_content_audit,
+)
 from .domain.drafting import (
     DRAFT_DISCLOSURE,
     DRAFT_LEVEL,
@@ -2735,6 +2740,32 @@ def governance_data_flow_review(
         valid_days=body.valid_days,
     )
     return {"ok": True, "review": review, "latest": latest_data_flow_review(conn)}
+
+
+class ContentFindingReviewBody(BaseModel):
+    decision: str = Field(pattern=r"^(confirmed|dismissed)$")
+    note: str = Field(min_length=1, max_length=500)
+
+
+@app.post("/api/quality/content-audit/{finding_id}/review")
+def quality_content_finding_review(
+    finding_id: str,
+    body: ContentFindingReviewBody,
+    request: Request,
+    conn=Depends(get_conn),
+):
+    _ensure_not_stopped(conn)
+    try:
+        finding = review_finding(
+            conn,
+            finding_id,
+            decision=body.decision,
+            note=body.note,
+            actor=request.state.user["display_name"],
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "finding": finding, "summary": content_audit_summary(conn)}
 
 
 class TerminationBody(BaseModel):

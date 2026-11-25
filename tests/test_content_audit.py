@@ -3,8 +3,16 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from app import db
-from app.domain.content_audit import audit_utterances, run_content_audit
+from app.domain.content_audit import (
+    audit_utterances,
+    content_audit_summary,
+    review_finding,
+    run_content_audit,
+    scan_attempt,
+)
 
 
 def _attempt(conn, attempt_id, utterances):
@@ -63,6 +71,46 @@ def test_run_content_audit_scans_and_audits(tmp_path):
     assert result["by_severity"]["high"] == 1
     event = conn.execute(
         "SELECT * FROM audit_events WHERE action = 'content.audit_run'"
+    ).fetchone()
+    assert event is not None
+    conn.close()
+
+
+def test_content_findings_can_be_reviewed_and_summary_updates(tmp_path):
+    conn = db.connect(tmp_path / "audit_review.db")
+    db.init_db(conn)
+    _attempt(conn, "att_bad", [_utt("u1", "patient", "你得了冠心病，吃点阿司匹林。")])
+    conn.commit()
+    scan_attempt(conn, "att_bad", actor="test")
+
+    summary = content_audit_summary(conn)
+    assert summary["open_count"] == 2
+    assert summary["high_count"] == 2
+    finding = summary["recent"][0]
+    reviewed = review_finding(
+        conn,
+        finding["finding_id"],
+        decision="confirmed",
+        note="确认越界，回写红队用例",
+        actor="auditor",
+    )
+    assert reviewed["status"] == "confirmed"
+    assert reviewed["reviewed_by"] == "auditor"
+
+    updated = content_audit_summary(conn)
+    assert updated["open_count"] == 1
+    assert updated["high_count"] == 1
+    assert updated["confirmed_count"] == 1
+    with pytest.raises(ValueError, match="已处置"):
+        review_finding(
+            conn,
+            finding["finding_id"],
+            decision="dismissed",
+            note="重复处置",
+            actor="auditor",
+        )
+    event = conn.execute(
+        "SELECT * FROM audit_events WHERE action = 'content.finding_reviewed'"
     ).fetchone()
     assert event is not None
     conn.close()

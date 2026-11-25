@@ -3127,11 +3127,22 @@ async function viewQuality() {
   const spRuntime = data.sp_runtime || {};
   const dataFlow = data.data_flow || { flows: [], compliant: true };
   const contentAudit = data.content_audit || {};
-  const contentAuditRows = (contentAudit.recent || []).slice(0, 6).map((row) => `
+  const contentAuditRows = (contentAudit.recent || []).slice(0, 6).map((row) => {
+    const status = row.status || 'open';
+    const statusPill = status === 'confirmed'
+      ? '<span class="pill red">已确认越界</span>'
+      : status === 'dismissed'
+        ? '<span class="pill muted">误报</span>'
+        : row.severity === 'high' ? '<span class="pill red">高风险</span>' : '<span class="pill amber">中风险</span>';
+    const actions = status === 'open'
+      ? `<span class="btn-row" style="display:inline-flex;gap:4px;margin-left:6px"><button class="btn small" data-action="review-content-finding" data-finding="${esc(row.finding_id)}" data-decision="confirmed">确认越界</button><button class="btn small" data-action="review-content-finding" data-finding="${esc(row.finding_id)}" data-decision="dismissed">误报</button></span>`
+      : `<span class="tiny muted">${esc(row.reviewed_by || '')} · ${esc(row.review_note || '')}</span>`;
+    return `
     <div class="version-row">
       <span class="k">${esc(row.label)}</span>
-      <span class="v">${row.severity === 'high' ? '<span class="pill red">高风险</span>' : '<span class="pill amber">中风险</span>'} ${esc((row.quote || '').slice(0, 38))}${row.quote && row.quote.length > 38 ? '…' : ''} <span class="tiny muted">${esc(row.candidate_code || row.attempt_id)} · ${fmtTime(row.created_at)}</span></span>
-    </div>`).join('');
+      <span class="v">${statusPill} ${esc((row.quote || '').slice(0, 34))}${row.quote && row.quote.length > 34 ? '…' : ''} <span class="tiny muted">${esc(row.candidate_code || row.attempt_id)} · ${fmtTime(row.created_at)}</span>${actions}</span>
+    </div>`;
+  }).join('');
   const readyPractice = (feedbackLatency.ready || {}).practice || {};
   const readyExam = (feedbackLatency.ready || {}).exam || {};
   const gates = data.gates.gates;
@@ -3663,7 +3674,7 @@ async function viewQuality() {
         <div id="ops-health-result" class="tiny muted" style="margin-bottom:8px"></div>
         <div id="request-log-result" class="tiny muted" style="margin-bottom:8px"></div>
         <div id="content-audit-result" class="tiny muted" style="margin-bottom:8px"></div>
-        <div class="tiny muted" style="margin-bottom:6px">自动内容审计：累计 ${contentAudit.finding_count || 0} 条线索 · 高风险 ${contentAudit.high_count || 0} 条${contentAudit.last_at ? ` · 最近 ${fmtTime(contentAudit.last_at)}` : ''}</div>
+        <div class="tiny muted" style="margin-bottom:6px">自动内容审计：累计 ${contentAudit.finding_count || 0} 条线索 · 未处置 ${contentAudit.open_count || 0} 条（高风险 ${contentAudit.high_count || 0}）${contentAudit.confirmed_count ? ` · 已确认 ${contentAudit.confirmed_count}` : ''}${contentAudit.last_at ? ` · 最近 ${fmtTime(contentAudit.last_at)}` : ''}</div>
         ${contentAuditRows ? `<div class="audit-list" style="max-height:180px;margin-bottom:8px">${contentAuditRows}</div>` : ''}
         <div id="signoff-audit-result" class="tiny muted" style="margin-bottom:8px"></div>
         <div class="audit-list">${auditRows || '<div class="empty">暂无审计</div>'}</div>
@@ -4365,6 +4376,25 @@ document.addEventListener('click', async (e) => {
       toast('已加载 API 请求日志');
     } catch (err) {
       if (box) box.innerHTML = `<span class="pill red">加载失败</span> ${esc(err.message)}`;
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'review-content-finding') {
+    const decision = el.dataset.decision === 'confirmed' ? 'confirmed' : 'dismissed';
+    const note = (prompt(
+      decision === 'confirmed' ? '确认越界理由（将回写红队用例）：' : '判定误报的理由：',
+      decision === 'confirmed' ? '确认越界，回写红队用例' : '误报关闭',
+    ) || '').trim();
+    if (!note) return toast('必须填写处置理由', true);
+    try {
+      await api(`/api/quality/content-audit/${encodeURIComponent(el.dataset.finding)}/review`, {
+        method: 'POST',
+        body: { decision, note },
+      });
+      toast(decision === 'confirmed' ? '已确认越界并写入审计' : '已标记误报并写入审计');
+      await viewQuality();
+    } catch (err) {
       toast(err.message, true);
     }
     return;

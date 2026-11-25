@@ -172,8 +172,9 @@ def content_audit_summary(conn, *, recent_limit: int = 20) -> dict[str, Any]:
             "ORDER BY f.created_at DESC, f.rowid DESC"
         ).fetchall()
     )
+    open_rows = [row for row in rows if (row.get("status") or "open") == "open"]
     by_rule: dict[str, dict[str, Any]] = {}
-    for row in rows:
+    for row in open_rows:
         bucket = by_rule.setdefault(
             row["rule"],
             {"rule": row["rule"], "label": row["label"], "severity": row["severity"], "count": 0},
@@ -181,13 +182,71 @@ def content_audit_summary(conn, *, recent_limit: int = 20) -> dict[str, Any]:
         bucket["count"] += 1
     return {
         "finding_count": len(rows),
-        "high_count": sum(1 for row in rows if row["severity"] == "high"),
-        "medium_count": sum(1 for row in rows if row["severity"] == "medium"),
+        "open_count": len(open_rows),
+        "high_count": sum(1 for row in open_rows if row["severity"] == "high"),
+        "medium_count": sum(1 for row in open_rows if row["severity"] == "medium"),
+        "confirmed_count": sum(1 for row in rows if row.get("status") == "confirmed"),
+        "dismissed_count": sum(1 for row in rows if row.get("status") == "dismissed"),
         "by_rule": sorted(by_rule.values(), key=lambda item: (-item["count"], item["rule"])),
         "recent": rows[: max(1, min(recent_limit, 100))],
         "last_at": rows[0]["created_at"] if rows else None,
-        "note": "自动内容审计在每场次入库后运行；高风险线索应作为 P0 安全事件复核，并回写红队用例。",
+        "note": (
+            "自动内容审计在每场次入库后运行；高风险线索应逐条复核并记录结论，"
+            "确认越界后回写红队用例，未处置线索持续计入告警。"
+        ),
     }
+
+
+FINDING_DECISIONS = {"confirmed": "确认越界", "dismissed": "误报关闭"}
+
+
+def review_finding(
+    conn,
+    finding_id: str,
+    *,
+    decision: str,
+    note: str,
+    actor: str,
+) -> dict[str, Any]:
+    """处置内容审计线索：确认越界或判定误报，必须留理由并写入审计链。"""
+    if decision not in FINDING_DECISIONS:
+        raise ValueError(f"decision 必须是 {', '.join(FINDING_DECISIONS)}")
+    if not str(note or "").strip():
+        raise ValueError("处置理由不能为空")
+    row = conn.execute(
+        "SELECT * FROM content_audit_findings WHERE finding_id = ?", (finding_id,)
+    ).fetchone()
+    if not row:
+        raise ValueError("内容审计线索不存在")
+    if (row["status"] or "open") != "open":
+        raise ValueError("该线索已处置，不能重复复核")
+    timestamp = db.now_iso()
+    conn.execute(
+        "UPDATE content_audit_findings SET status = ?, reviewed_by = ?, reviewed_at = ?, "
+        "review_note = ? WHERE finding_id = ?",
+        (decision, actor, timestamp, note.strip(), finding_id),
+    )
+    conn.commit()
+    db.append_audit(
+        conn,
+        actor=actor,
+        action="content.finding_reviewed",
+        object_type="ContentAuditFinding",
+        object_id=finding_id,
+        before={"status": "open"},
+        after={
+            "status": decision,
+            "decision_label": FINDING_DECISIONS[decision],
+            "note": note.strip(),
+            "attempt_id": row["attempt_id"],
+            "rule": row["rule"],
+            "severity": row["severity"],
+        },
+    )
+    updated = conn.execute(
+        "SELECT * FROM content_audit_findings WHERE finding_id = ?", (finding_id,)
+    ).fetchone()
+    return dict(updated)
 
 
 def run_content_audit(

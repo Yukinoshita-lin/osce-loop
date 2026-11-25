@@ -368,6 +368,10 @@ CREATE TABLE IF NOT EXISTS content_audit_findings (
     label TEXT NOT NULL,
     quote TEXT NOT NULL,
     start_ms INTEGER NOT NULL DEFAULT -1,
+    status TEXT NOT NULL DEFAULT 'open',
+    reviewed_by TEXT,
+    reviewed_at TEXT,
+    review_note TEXT,
     created_at TEXT NOT NULL,
     UNIQUE(attempt_id, rule, start_ms, quote)
 );
@@ -741,6 +745,18 @@ def _migrate(conn: sqlite3.Connection) -> None:
             "UPDATE score_records SET routing = ? WHERE record_id = ?",
             (json.dumps(routing, ensure_ascii=False), row["record_id"]),
         )
+
+    finding_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(content_audit_findings)").fetchall()
+    }
+    for column, ddl in (
+        ("status", "TEXT NOT NULL DEFAULT 'open'"),
+        ("reviewed_by", "TEXT"),
+        ("reviewed_at", "TEXT"),
+        ("review_note", "TEXT"),
+    ):
+        if column not in finding_columns:
+            conn.execute(f"ALTER TABLE content_audit_findings ADD COLUMN {column} {ddl}")
 
     survey_columns = {
         row["name"] for row in conn.execute("PRAGMA table_info(feedback_surveys)").fetchall()
