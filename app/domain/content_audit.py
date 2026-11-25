@@ -88,6 +88,108 @@ def _sampled(attempt_id: str, sample_rate: float) -> bool:
     return bucket < int(sample_rate * 1000)
 
 
+def scan_attempt(conn, attempt_id: str, *, actor: str = "系统") -> dict[str, Any]:
+    """每场次入库后自动扫描转写并把线索落库；重复扫描按唯一键幂等。"""
+    row = conn.execute(
+        "SELECT payload FROM transcripts WHERE attempt_id = ?", (attempt_id,)
+    ).fetchone()
+    if not row:
+        return {"attempt_id": attempt_id, "finding_count": 0, "new_findings": 0, "high": 0, "findings": []}
+    try:
+        data = json.loads(row["payload"])
+    except (TypeError, ValueError):
+        return {"attempt_id": attempt_id, "finding_count": 0, "new_findings": 0, "high": 0, "findings": []}
+    utterances = data.get("utterances") if isinstance(data, dict) else data
+    if not isinstance(utterances, list):
+        return {"attempt_id": attempt_id, "finding_count": 0, "new_findings": 0, "high": 0, "findings": []}
+    findings = audit_utterances(utterances)
+    timestamp = db.now_iso()
+    inserted = 0
+    for finding in findings:
+        start = finding.get("start_ms")
+        start_ms = int(start) if isinstance(start, (int, float)) else -1
+        cursor = conn.execute(
+            "INSERT OR IGNORE INTO content_audit_findings(finding_id, attempt_id, rule, severity, role, "
+            "label, quote, start_ms, created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            (
+                db.new_id("caf"),
+                attempt_id,
+                finding["rule"],
+                finding["severity"],
+                finding["role"],
+                finding["label"],
+                finding.get("quote") or "",
+                start_ms,
+                timestamp,
+            ),
+        )
+        if cursor.rowcount and cursor.rowcount > 0:
+            inserted += 1
+    conn.commit()
+    high = sum(1 for finding in findings if finding["severity"] == "high")
+    if inserted:
+        db.append_audit(
+            conn,
+            actor=actor,
+            action="content.audit_findings",
+            object_type="StationAttempt",
+            object_id=attempt_id,
+            before=None,
+            after={
+                "new_findings": inserted,
+                "high": high,
+                "rules": sorted({finding["rule"] for finding in findings}),
+            },
+        )
+    return {
+        "attempt_id": attempt_id,
+        "finding_count": len(findings),
+        "new_findings": inserted,
+        "high": high,
+        "findings": findings[:20],
+    }
+
+
+def attempt_audit_summary(conn, attempt_id: str) -> dict[str, Any]:
+    rows = conn.execute(
+        "SELECT * FROM content_audit_findings WHERE attempt_id = ? ORDER BY start_ms, rowid",
+        (attempt_id,),
+    ).fetchall()
+    findings = [dict(row) for row in rows]
+    return {
+        "attempt_id": attempt_id,
+        "finding_count": len(findings),
+        "high": sum(1 for finding in findings if finding["severity"] == "high"),
+        "findings": findings[:20],
+    }
+
+
+def content_audit_summary(conn, *, recent_limit: int = 20) -> dict[str, Any]:
+    rows = db.rows_to_dicts(
+        conn.execute(
+            "SELECT f.*, a.candidate_code FROM content_audit_findings f "
+            "LEFT JOIN attempts a ON a.attempt_id = f.attempt_id "
+            "ORDER BY f.created_at DESC, f.rowid DESC"
+        ).fetchall()
+    )
+    by_rule: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        bucket = by_rule.setdefault(
+            row["rule"],
+            {"rule": row["rule"], "label": row["label"], "severity": row["severity"], "count": 0},
+        )
+        bucket["count"] += 1
+    return {
+        "finding_count": len(rows),
+        "high_count": sum(1 for row in rows if row["severity"] == "high"),
+        "medium_count": sum(1 for row in rows if row["severity"] == "medium"),
+        "by_rule": sorted(by_rule.values(), key=lambda item: (-item["count"], item["rule"])),
+        "recent": rows[: max(1, min(recent_limit, 100))],
+        "last_at": rows[0]["created_at"] if rows else None,
+        "note": "自动内容审计在每场次入库后运行；高风险线索应作为 P0 安全事件复核，并回写红队用例。",
+    }
+
+
 def run_content_audit(
     conn,
     *,

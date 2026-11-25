@@ -10,6 +10,7 @@ from app.ai.base import CapabilityGateway
 from app.ai.mock import MockScoringProvider
 from app.config import MODEL_VERSION, PROMPT_VERSION
 from app.domain.bundle import freeze_bundle
+from app.domain.content_audit import attempt_audit_summary, scan_attempt
 from app.domain.ingest import create_ingested_attempt, find_duplicate_attempt
 from app.domain.integrity import transcript_digest
 from app.domain.transcript import parse_notes, parse_transcript
@@ -187,6 +188,44 @@ def test_ingest_with_notes_produces_note_evidence(conn, bundle):
     assert evidence
     assert evidence[0]["speaker"] == "candidate"
     assert "笔记" in (evidence[0].get("note") or "")
+
+
+def test_ingest_runs_content_audit_and_dedupes(conn, bundle):
+    transcript = [
+        {"speaker": "patient", "start_ms": 0, "end_ms": 3000, "text": "你得了心梗，吃点硝酸甘油。"},
+        {"speaker": "candidate", "start_ms": 5000, "end_ms": 8000, "text": "我先给您听诊一下。"},
+    ]
+    gateway = CapabilityGateway(conn, MockScoringProvider(), MODEL_VERSION, PROMPT_VERSION)
+    attempt_id = create_ingested_attempt(
+        conn,
+        gateway,
+        bundle=bundle,
+        transcript=transcript,
+        candidate_code="C-AUDIT-001",
+        candidate_name="审计考生",
+        risk_level="L2",
+        release_stage="G0_offline",
+        media_id="media_audit",
+        media_url="/media/uploads/audit.wav",
+        media_filename="audit.wav",
+        actor="test",
+    )
+    summary = attempt_audit_summary(conn, attempt_id)
+    assert summary["high"] >= 2
+    rules = {row["rule"] for row in summary["findings"]}
+    assert {"sp_diagnosis", "sp_prescription"} <= rules
+
+    scan_attempt(conn, attempt_id, actor="test")
+    stored = conn.execute(
+        "SELECT COUNT(*) AS n FROM content_audit_findings WHERE attempt_id = ?", (attempt_id,)
+    ).fetchone()["n"]
+    assert stored == summary["finding_count"]
+    audit_count = conn.execute(
+        "SELECT COUNT(*) AS n FROM audit_events WHERE action = 'content.audit_findings' "
+        "AND object_id = ?",
+        (attempt_id,),
+    ).fetchone()["n"]
+    assert audit_count == 1
 
 
 def test_ingest_records_automatic_anomalies(conn, bundle):

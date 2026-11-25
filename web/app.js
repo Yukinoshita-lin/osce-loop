@@ -956,6 +956,8 @@ async function viewIngest() {
       button.textContent = '解析/转写并运行评分';
       renderBatchIngestResult(results, failures);
       toast(`批量导入完成：成功 ${results.length} 场，失败 ${failures.length} 场`, failures.length > 0);
+      const auditHigh = results.reduce((sum, item) => sum + (((item.content_audit || {}).high) || 0), 0);
+      if (auditHigh) toast(`内容审计命中 ${auditHigh} 条高风险话术，请到质量页复核`, true);
       governanceNotice(results.map((item) => item.auto_governance).find((item) => item && (item.applied || item.checked === false)));
       return;
     }
@@ -971,6 +973,9 @@ async function viewIngest() {
         toast(`已录入 ${data.attempt.candidate_code}，待复核 ${data.attempt.pending} 项`);
       }
       governanceNotice(data.auto_governance);
+      if (data.content_audit && data.content_audit.high) {
+        toast(`内容审计命中 ${data.content_audit.high} 条高风险话术，请到质量页复核`, true);
+      }
     } catch (err) {
       toast(err.message, true);
     } finally {
@@ -3121,6 +3126,12 @@ async function viewQuality() {
   const spGuidance = data.sp_guidance || {};
   const spRuntime = data.sp_runtime || {};
   const dataFlow = data.data_flow || { flows: [], compliant: true };
+  const contentAudit = data.content_audit || {};
+  const contentAuditRows = (contentAudit.recent || []).slice(0, 6).map((row) => `
+    <div class="version-row">
+      <span class="k">${esc(row.label)}</span>
+      <span class="v">${row.severity === 'high' ? '<span class="pill red">高风险</span>' : '<span class="pill amber">中风险</span>'} ${esc((row.quote || '').slice(0, 38))}${row.quote && row.quote.length > 38 ? '…' : ''} <span class="tiny muted">${esc(row.candidate_code || row.attempt_id)} · ${fmtTime(row.created_at)}</span></span>
+    </div>`).join('');
   const readyPractice = (feedbackLatency.ready || {}).practice || {};
   const readyExam = (feedbackLatency.ready || {}).exam || {};
   const gates = data.gates.gates;
@@ -3652,6 +3663,8 @@ async function viewQuality() {
         <div id="ops-health-result" class="tiny muted" style="margin-bottom:8px"></div>
         <div id="request-log-result" class="tiny muted" style="margin-bottom:8px"></div>
         <div id="content-audit-result" class="tiny muted" style="margin-bottom:8px"></div>
+        <div class="tiny muted" style="margin-bottom:6px">自动内容审计：累计 ${contentAudit.finding_count || 0} 条线索 · 高风险 ${contentAudit.high_count || 0} 条${contentAudit.last_at ? ` · 最近 ${fmtTime(contentAudit.last_at)}` : ''}</div>
+        ${contentAuditRows ? `<div class="audit-list" style="max-height:180px;margin-bottom:8px">${contentAuditRows}</div>` : ''}
         <div id="signoff-audit-result" class="tiny muted" style="margin-bottom:8px"></div>
         <div class="audit-list">${auditRows || '<div class="empty">暂无审计</div>'}</div>
         <div class="sep"></div>

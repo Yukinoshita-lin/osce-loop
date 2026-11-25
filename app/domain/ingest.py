@@ -9,6 +9,7 @@ from .. import db
 from ..ai.base import CapabilityGateway
 from ..ai.pipeline import run_scoring
 from .anomaly import detect_anomalies
+from .content_audit import scan_attempt
 from .execution import link_attempt_to_slot, slot_for_ingest
 from .integrity import transcript_digest
 from .retention import retention_plan
@@ -139,6 +140,7 @@ def create_ingested_attempt(
             (json.dumps(anomalies, ensure_ascii=False), attempt_id),
         )
     conn.commit()
+    scan_attempt(conn, attempt_id, actor=actor)
 
     attempt = {
         "attempt_id": attempt_id,

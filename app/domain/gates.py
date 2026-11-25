@@ -11,6 +11,7 @@ from .accessibility import feedback_accessibility
 from .asr_benchmark import benchmark_summary
 from .bundle import list_bundles
 from .consent import consent_status
+from .content_audit import content_audit_summary
 from .cost import ai_cost_summary
 from .critical_miss import critical_misses
 from .dataflow import data_flow_status, latest_data_flow_review
@@ -660,6 +661,26 @@ def evaluate_gates(conn, report: dict[str, Any], current_stage: str) -> dict[str
                     ),
                 }
             )
+    content_audit = content_audit_summary(conn)
+    if content_audit["high_count"]:
+        alerts.append(
+            {
+                "level": "danger",
+                "title": f"内容审计命中 {content_audit['high_count']} 条高风险线索",
+                "detail": (
+                    "自动内容审计在 SP 转写中发现诊断、用药建议等高风险表述；"
+                    "应按 P0 安全事件逐条复核，回写红队用例与禁用话术清单。"
+                ),
+            }
+        )
+    elif content_audit["medium_count"]:
+        alerts.append(
+            {
+                "level": "warn",
+                "title": f"内容审计命中 {content_audit['medium_count']} 条中风险线索",
+                "detail": "建议抽查对应场次，确认 SP 或考生表述是否越界，并评估是否需要补充培训。",
+            }
+        )
     ready = (feedback_ack_latency(conn) or {}).get("ready") or {}
     practice_ready = ready.get("practice") or {}
     if practice_ready.get("status") == "fail":

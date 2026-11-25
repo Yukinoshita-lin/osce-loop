@@ -90,7 +90,7 @@ from .domain.dataflow import (
 )
 from .domain.coverage import blueprint_coverage
 from .domain.critical_miss import critical_misses, record_critical_miss_review
-from .domain.content_audit import run_content_audit
+from .domain.content_audit import attempt_audit_summary, content_audit_summary, run_content_audit
 from .domain.drafting import (
     DRAFT_DISCLOSURE,
     DRAFT_LEVEL,
@@ -1176,6 +1176,7 @@ async def ingest_attempt(
         },
         "media": media,
         "integrity_gap": not bool(media),
+        "content_audit": attempt_audit_summary(conn, attempt_id),
         "auto_governance": _auto_governance(conn, actor) if not media else None,
     }
 
@@ -2211,6 +2212,7 @@ def quality(conn=Depends(get_conn)):
         "asr_provider": build_asr_provider().info,
         "data_flow": data_flow_status(),
         "data_flow_review": latest_data_flow_review(conn),
+        "content_audit": content_audit_summary(conn),
         "sus": sus_summary(conn),
         "asr_quality": benchmark_summary(conn),
         "calibration": calibration_report(conn),

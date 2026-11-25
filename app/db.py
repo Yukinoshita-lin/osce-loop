@@ -359,6 +359,19 @@ CREATE TABLE IF NOT EXISTS data_flow_reviews (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS content_audit_findings (
+    finding_id TEXT PRIMARY KEY,
+    attempt_id TEXT NOT NULL,
+    rule TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    role TEXT NOT NULL,
+    label TEXT NOT NULL,
+    quote TEXT NOT NULL,
+    start_ms INTEGER NOT NULL DEFAULT -1,
+    created_at TEXT NOT NULL,
+    UNIQUE(attempt_id, rule, start_ms, quote)
+);
+
 CREATE TABLE IF NOT EXISTS governance_approvals (
     approval_id TEXT PRIMARY KEY,
     approval_type TEXT NOT NULL UNIQUE,
