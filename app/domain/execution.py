@@ -357,6 +357,10 @@ def append_live_segment(
     ).fetchone()
     if not slot:
         raise ValueError("考站槽位不存在")
+    if slot["status"] in ("terminated", "stopped"):
+        raise ValueError("该槽位已终止，不能继续回传实时片段")
+    if slot["attempt_id"]:
+        raise ValueError("该槽位已生成正式场次，不能继续回传实时片段")
     speaker = (speaker or "").strip()
     if speaker not in ("candidate", "patient"):
         raise ValueError("说话人必须是 candidate 或 patient")

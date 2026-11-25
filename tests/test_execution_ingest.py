@@ -118,6 +118,15 @@ def test_ingest_links_attempt_to_run_slot(conn):
     assert refreshed["integrity"]["missing"] == refreshed["counts"]["total"] - 1
     assert 0 < refreshed["integrity"]["coverage"] <= 1
 
+    with pytest.raises(ValueError, match="已生成正式场次"):
+        append_live_segment(
+            conn,
+            run["run_id"],
+            slot["slot_key"],
+            speaker="candidate",
+            text="场次生成后不得继续回传",
+        )
+
     event = conn.execute(
         "SELECT * FROM exam_events WHERE run_id = ? AND event_type = 'slot_ingested'",
         (run["run_id"],),
