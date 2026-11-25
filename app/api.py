@@ -129,6 +129,10 @@ from .domain.governance import (
 )
 from .domain.health import system_health
 from .domain.history import candidate_history
+from .domain.threshold_calibration import (
+    latest_threshold_calibration,
+    record_threshold_calibration,
+)
 from .domain.hint_impact import hint_impact
 from .domain.execution import (
     acknowledge_live_anomalies,
@@ -2237,6 +2241,7 @@ def quality(conn=Depends(get_conn)):
         "asr_provider": build_asr_provider().info,
         "data_flow": data_flow_status(),
         "data_flow_review": latest_data_flow_review(conn),
+        "threshold_calibration": latest_threshold_calibration(conn),
         "content_audit": content_audit_summary(conn),
         "sus": sus_summary(conn),
         "asr_quality": benchmark_summary(conn),
@@ -2760,6 +2765,34 @@ def governance_data_flow_review(
         valid_days=body.valid_days,
     )
     return {"ok": True, "review": review, "latest": latest_data_flow_review(conn)}
+
+
+class ThresholdCalibrationBody(BaseModel):
+    note: str = Field(min_length=1, max_length=500)
+    valid_days: int = Field(default=365, ge=30, le=730)
+
+
+@app.post("/api/governance/threshold-calibration")
+def governance_threshold_calibration(
+    body: ThresholdCalibrationBody,
+    request: Request,
+    conn=Depends(get_conn),
+):
+    _ensure_not_stopped(conn)
+    try:
+        calibration = record_threshold_calibration(
+            conn,
+            actor=request.state.user["display_name"],
+            note=body.note,
+            valid_days=body.valid_days,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {
+        "ok": True,
+        "calibration": calibration,
+        "latest": latest_threshold_calibration(conn),
+    }
 
 
 class ContentFindingReviewBody(BaseModel):

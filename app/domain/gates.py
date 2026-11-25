@@ -21,6 +21,7 @@ from .sp_approval import persona_approval_status
 from .spqa import RED_TEAM_VERSION, sp_runtime_summary
 from .stats import quadratic_weighted_kappa
 from .sus import sus_summary
+from .threshold_calibration import latest_threshold_calibration
 
 GATES = [
     {
@@ -662,6 +663,30 @@ def evaluate_gates(conn, report: dict[str, Any], current_stage: str) -> dict[str
                     "detail": (
                         f"上次复核于 {review['created_at']}，有效期至 {review['valid_until']}；"
                         "请重新核对端点与数据合规状态并记录新一轮复核。"
+                    ),
+                }
+            )
+    if current_stage in ("G2_simulation", "G3_limited"):
+        calibration = latest_threshold_calibration(conn)
+        if calibration is None:
+            alerts.append(
+                {
+                    "level": "warn",
+                    "title": "S9 阈值尚未完成本地校准",
+                    "detail": (
+                        "当前阈值来自公开文献起始建议；进入 G2/G3 前应使用本地金标准重新校准，"
+                        "并在治理页记录本次部署采用的阈值快照与依据。"
+                    ),
+                }
+            )
+        elif calibration["expired"]:
+            alerts.append(
+                {
+                    "level": "warn",
+                    "title": "S9 阈值本地校准已过期",
+                    "detail": (
+                        f"上次校准于 {calibration['created_at']}，有效期至 {calibration['valid_until']}；"
+                        "请用新的本地数据复核阈值并重新记录。"
                     ),
                 }
             )

@@ -2836,7 +2836,7 @@ function selfCheckHtml(selfCheck) {
   `;
 }
 
-function p3SectionHtml(gov, gates, flowReview) {
+function p3SectionHtml(gov, gates, flowReview, thresholdCalibration) {
   const g3 = (gates || []).find((g) => g.id === 'G3');
   const stage = gov.release_stage || 'G0_offline';
   const stageLabel = {
@@ -2865,6 +2865,9 @@ function p3SectionHtml(gov, gates, flowReview) {
           <div class="version-row"><span class="k">数据流向复核</span><span class="v">${flowReview
             ? `${flowReview.valid ? '<span class="pill teal">有效</span>' : '<span class="pill red">已过期</span>'} · ${flowReview.days_remaining} 天后到期 · ${(flowReview.endpoints || []).length} 个端点`
             : '<span class="pill amber">未复核</span>'}</span></div>
+          <div class="version-row"><span class="k">阈值本地校准</span><span class="v">${thresholdCalibration
+            ? `${thresholdCalibration.valid ? '<span class="pill teal">有效</span>' : '<span class="pill red">已过期</span>'} · ${thresholdCalibration.days_remaining} 天后到期 · ${(thresholdCalibration.thresholds || []).length} 项阈值${thresholdCalibration.evidence && thresholdCalibration.evidence.gold_count !== undefined ? ` · 金标准 ${thresholdCalibration.evidence.gold_count} 条` : ''}`
+            : '<span class="pill amber">未校准</span>'}</span></div>
           <div class="version-row"><span class="k">模型卡与数据表</span><span class="v">${gov.model_card_public && gov.data_sheet_public ? '<span class="pill teal">已公开</span>' : '<span class="pill red">未公开</span>'}</span></div>
         </div>
         <div>
@@ -2874,6 +2877,7 @@ function p3SectionHtml(gov, gates, flowReview) {
             <button class="btn small" data-action="approve-ethics">登记伦理批准</button>
             <button class="btn small" data-action="approve-committee">登记学术委员会审议</button>
             <button class="btn small" data-action="dataflow-review">记录数据流向复核</button>
+            <button class="btn small" data-action="threshold-calibration">记录阈值校准</button>
             <button class="btn small" data-action="publish-model-card">公开模型卡与数据表</button>
           </div>
           <div class="sep"></div>
@@ -3115,7 +3119,7 @@ function scorecardHtml(data) {
           <tbody>${body}</tbody>
         </table>
       </div>
-      <div class="tiny muted" style="margin-top:6px">“未采集”仅表示缺少样本，不等同于达标；“警示”表示未触发红线但存在橡皮图章或体验风险。</div>
+      <div class="tiny muted" style="margin-top:6px">“未采集”仅表示缺少样本，不等同于达标；“警示”表示未触发红线但存在橡皮图章或体验风险。表中阈值是公开文献起始建议，须在本地数据上重新校准；本次部署采用的阈值快照与校准依据见「P3 治理准备 · 阈值本地校准」。</div>
     </div>`;
 }
 
@@ -3602,7 +3606,7 @@ async function viewQuality() {
       ${fairnessSectionHtml(data.fairness)}
     </div>
 
-    ${p3SectionHtml(data.governance || {}, gates, data.data_flow_review || null)}
+    ${p3SectionHtml(data.governance || {}, gates, data.data_flow_review || null, data.threshold_calibration || null)}
 
     <div class="grid c2" style="margin-bottom:16px">
       <div class="card">
@@ -4715,6 +4719,25 @@ document.addEventListener('click', async (e) => {
         body: { note: note.trim(), valid_days: 365 },
       });
       toast(`已记录数据流向复核，有效期至 ${fmtTime(result.review.valid_until)}`);
+      await viewQuality();
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'threshold-calibration') {
+    const note = prompt('填写本地阈值校准说明（数据来源、样本量、阈值调整依据与适用范围）：', '基于本考点金标准与模拟考数据完成阈值校准');
+    if (note === null) return;
+    if (!note.trim()) {
+      toast('校准说明不能为空', true);
+      return;
+    }
+    try {
+      const result = await api('/api/governance/threshold-calibration', {
+        method: 'POST',
+        body: { note: note.trim(), valid_days: 365 },
+      });
+      toast(`已记录阈值本地校准，有效期至 ${fmtTime(result.calibration.valid_until)}`);
       await viewQuality();
     } catch (err) {
       toast(err.message, true);

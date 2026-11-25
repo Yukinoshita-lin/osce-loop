@@ -1,9 +1,12 @@
 """闸门告警：人工编辑率、复核占比、申诉/改判率与加固校验。"""
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from app import db
 from app.domain.dataflow import record_data_flow_review
 from app.domain.gates import _g2_metric_issues, _technical_metric_issues, evaluate_gates
+from app.domain.threshold_calibration import record_threshold_calibration
 
 
 def _conn(tmp_path):
@@ -48,6 +51,35 @@ def test_low_edit_rate_with_small_sample_does_not_alert(tmp_path):
     conn = _conn(tmp_path)
     gates = evaluate_gates(conn, _report(0.0, 5), "G0_offline")
     assert not any("橡皮图章" in alert["title"] for alert in gates["alerts"])
+    conn.close()
+
+
+def test_g3_without_threshold_calibration_alerts(tmp_path):
+    conn = _conn(tmp_path)
+    gates = evaluate_gates(conn, _report(0.2, 40), "G3_limited")
+    assert any("阈值" in alert["title"] for alert in gates["alerts"])
+    conn.close()
+
+
+def test_g3_with_valid_threshold_calibration_does_not_alert(tmp_path):
+    conn = _conn(tmp_path)
+    record_threshold_calibration(conn, actor="test", note="基于本地金标准完成阈值校准")
+    gates = evaluate_gates(conn, _report(0.2, 40), "G3_limited")
+    assert not any("阈值" in alert["title"] for alert in gates["alerts"])
+    conn.close()
+
+
+def test_expired_threshold_calibration_alerts(tmp_path):
+    conn = _conn(tmp_path)
+    past = (datetime.now(timezone.utc).astimezone() - timedelta(days=1)).isoformat(timespec="seconds")
+    conn.execute(
+        "INSERT INTO threshold_calibrations(calibration_id, actor, thresholds, evidence, note, "
+        "valid_until, created_at) VALUES(?,?,?,?,?,?,?)",
+        ("tcal_old", "test", "[]", "{}", "旧校准", past, past),
+    )
+    conn.commit()
+    gates = evaluate_gates(conn, _report(0.2, 40), "G3_limited")
+    assert any("已过期" in alert["title"] for alert in gates["alerts"])
     conn.close()
 
 

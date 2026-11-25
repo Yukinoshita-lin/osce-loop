@@ -359,6 +359,16 @@ CREATE TABLE IF NOT EXISTS data_flow_reviews (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS threshold_calibrations (
+    calibration_id TEXT PRIMARY KEY,
+    actor TEXT NOT NULL,
+    thresholds TEXT NOT NULL,
+    evidence TEXT NOT NULL,
+    note TEXT,
+    valid_until TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS content_audit_findings (
     finding_id TEXT PRIMARY KEY,
     attempt_id TEXT NOT NULL,
