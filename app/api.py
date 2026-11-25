@@ -1030,6 +1030,7 @@ async def ingest_attempt(
     code = candidate_code.strip() or f"C-UPLOAD-{db.new_id('cu')[-6:].upper()}"
     name = candidate_name.strip() or "未命名考生"
     media_sha = (media or {}).get("sha256")
+    transcript_sha = transcript_digest(parsed["utterances"])
     duplicate_id = None
     if not (run_id.strip() and slot_key.strip()):
         duplicate_id = find_duplicate_attempt(
@@ -1037,9 +1038,26 @@ async def ingest_attempt(
             bundle_id=bundle["bundle_id"],
             candidate_code=code,
             media_sha256=media_sha,
-            transcript_sha256=None if media_sha else transcript_digest(parsed["utterances"]),
+            transcript_sha256=None if media_sha else transcript_sha,
         )
     if duplicate_id:
+        db.append_audit(
+            conn,
+            actor=actor,
+            action="attempt.ingest_duplicate",
+            object_type="StationAttempt",
+            object_id=duplicate_id,
+            before=None,
+            after={
+                "candidate_code": code,
+                "candidate_name": name,
+                "media_sha256": media_sha,
+                "transcript_sha256": transcript_sha,
+                "media_filename": (media or {}).get("filename"),
+                "source": parsed.get("source", "upload"),
+                "reason": "同一考生在该考站已存在相同媒体或转写",
+            },
+        )
         _cleanup_media(media)
         duplicate = _attempt_row(conn, duplicate_id)
         existing_media = (
