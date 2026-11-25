@@ -1,117 +1,102 @@
-# OSCE-Loop 考试系统
+# OSCE·Loop
 
-OSCE-Loop 是一个用于客观结构化临床考试（OSCE）的全流程管理系统，支持考试编排、实时执行、AI 评分、审核仲裁和数据可视化等核心功能。
+面向客观结构化临床考试（OSCE）全流程的 AI 辅助系统。设计目标不是让 AI 替代考官，而是把 AI 放在**可验证、可回退、可审计**的位置：AI 负责证据提取与初评建议，人保留签字、裁决与终止权。
 
-## 功能特性
+完整设计说明见 [design/AI-OSCE-全流程设计方案.html](design/AI-OSCE-全流程设计方案.html)。
 
-### 考试管理
-- **考试编排**：智能生成考生轮转schedule，支持特殊需求审批、设备冲突检测
-- **实时执行**：考试现场管理，实时监控考站状态，支持异常标记和hint控制
-- **数据采集**：支持音视频录制转录、笔录导入、自动语音识别（ASR）
+## 核心能力
 
-### AI 评分
-- **自动评分**：基于 LLM 的评分引擎，支持多维度证据提取和置信度评估
-- **批量重评**：支持对历史考试进行批量重评分
-- **评分缓存**：幂等性设计，避免重复调用节省成本
-
-### 审核与质量
-- **双盲审核**：支持双盲审核机制，仲裁分歧
-- **临界失误追踪**：自动识别 AI 漏判的关键项目
-- **指标监控**：多维度质量指标（G1-G3），异常自动告警
-
-### 透明与合规
-- **审计链**：区块链式审计链，支持篡改检测
-- **AI 披露**：向考生公开 AI 参与程度和人工确认状态
-- **数据留存**：按风险等级自动管理数据生命周期
-
-## 技术架构
-
-- **后端**：Python 3.11+ / FastAPI
-- **数据库**：SQLite（含审计链）
-- **AI**：支持多种评分 provider（Http / Mock）
-- **前端**：原生 JavaScript + CSS
+- **评分表即协议**：rubric 行为锚、证据形态、对话阶段与 AI 权限四元组驱动 SP 信息槽、检查点、证据探针与反馈模板的自动派生。
+- **证据锚定评分**：每条 AI 建议必须携带时间戳证据；无证据不写入，证据缺口自动升级人工全量复核。
+- **风险路由**：L0–L3 分级授权，关键项、低置信、边缘案例、申诉等场景按具名原因强制送审。
+- **SP 人格一致性闭环**：确定性状态机控制"说什么"，LLM 只负责"怎么说"，独立验证器按人格保真 / 信息边界 / 临床合理三项判据放行，失败回退安全模板。
+- **闸门式放行**：G0 离线副驾 → G1 练习沙箱 → G2 模拟考 → G3 有限高利害，指标未达标不放行；版本变更自动降权。
+- **治理与追溯**：哈希链审计、外部锚点、签字链、数据流向年度复核、内容审计、阈值本地校准、模型卡与数据表公开。
+- **公平性与体验**：亚组分数差、编辑率差异、反馈可及性监测，SUS、实用性、真实感与申诉/改判率纳入验收。
+- **S9 度量看板**：21 项验收指标自动判定，未采集不冒充达标，支持 CSV 导出。
 
 ## 快速开始
 
-### 安装依赖
+要求 Python 3.11+（开发与验证使用 Python 3.14）。
 
 ```bash
 pip install -r requirements.txt
-```
-
-### 初始化数据库
-
-```bash
-python -c "from app.db import connect, init_db; conn = connect(); init_db(conn)"
-```
-
-### 启动服务
-
-```bash
 python run.py
 ```
 
-服务默认在 `http://localhost:8000` 启动。
+打开 http://127.0.0.1:8000 。首次启动会自动初始化数据库、演示站包与演示账号。
 
-### 初始化演示数据
+### 演示账号
 
-系统启动后会自动检查并初始化演示数据（用户、考站、评分标准等）。
+| 用户名 | 密码 | 角色 |
+| --- | --- | --- |
+| `admin` | `admin123` | 系统管理员 |
+| `exam` | `exam123` | 考务管理者 |
+| `reviewer` | `review123` | 考官 / 评分员 |
+| `auditor` | `audit123` | 审计员 |
+| `student` | `student123` | 学生 |
+
+> 演示账号仅用于本地体验，部署前必须修改或移除。
+
+## 配置
+
+通过环境变量配置，常用项：
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `OSCELOOP_HOST` / `OSCELOOP_PORT` | `127.0.0.1` / `8000` | 监听地址与端口 |
+| `OSCELOOP_DB` | `data/osceloop.db` | SQLite 数据库路径 |
+| `OSCELOOP_RELEASE_STAGE` | `G0_offline` | 当前闸门阶段 |
+| `OSCELOOP_AI_PROVIDER` | `mock` | 评分模型提供方：`mock` / `http` |
+| `OSCELOOP_AI_BASE_URL` | 空 | OpenAI 兼容接口地址 |
+| `OSCELOOP_AI_API_KEY` | 空 | 模型接口密钥 |
+| `OSCELOOP_ASR_PROVIDER` | `off` | 转写提供方：`off` / `http` |
+| `OSCELOOP_ASR_BASE_URL` | 空 | OpenAI 兼容 `/audio/transcriptions` 地址 |
+| `OSCELOOP_AI_ALLOW_EXTERNAL` | `0` | 是否允许评分端点出内网 |
+| `OSCELOOP_ASR_ALLOW_EXTERNAL` | `0` | 是否允许 ASR 端点出内网 |
+| `OSCELOOP_TRUSTED_AI_HOSTS` | 空 | 额外信任的端点域名，逗号分隔 |
+| `OSCELOOP_COOKIE_SECURE` | `0` | HTTPS 部署时设为 `1` |
+
+涉及真实考生音视频的 L2–L3 场景，应将模型与 ASR 部署在院内/校内网络，并完成数据流向复核。
 
 ## 项目结构
 
-```
-.
-├── app/
-│   ├── api.py          # FastAPI 路由定义
-│   ├── config.py       # 配置管理
-│   ├── db.py           # 数据库操作
-│   ├── seed.py         # 演示数据生成
-│   ├── ai/             # AI 评分相关
-│   │   ├── asr.py      # 语音识别
-│   │   ├── base.py     # 评分基类
-│   │   ├── factory.py  # provider 工厂
-│   │   ├── http_provider.py  # HTTP 评分客户端
-│   │   ├── mock.py     # Mock 评分实现
-│   │   └── pipeline.py # 评分管道
-│   └── domain/         # 领域逻辑
-│       ├── scheduling.py    # 排程算法
-│       ├── execution.py     # 考试执行
-│       ├── scoring.py       # 评分逻辑
-│       ├── review.py        # 审核流程
-│       └── ...
-├── web/
-│   ├── app.js     # 前端交互逻辑
-│   ├── index.html # 页面模板
-│   └── styles.css # 样式
-├── tests/         # 测试用例
-└── run.py         # 入口脚本
+```text
+app/
+  api.py            FastAPI 路由与鉴权中间件
+  db.py             SQLite 表结构与审计链
+  config.py         环境变量与阈值配置
+  domain/           业务域：评分、闸门、SP、编排、治理、审计等
+  ai/               能力网关、评分/ASR 提供方与调用流水
+web/                原生 HTML/CSS/JS 单页工作台
+design/             全流程设计方案
+tests/              pytest 测试
+run.py              本地启动入口
 ```
 
-## 配置说明
+## 测试
 
-主要通过环境变量配置：
+```bash
+python -m pytest tests -q
+```
 
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `DATABASE_URL` | 数据库路径 | `data/osce.db` |
-| `SCORING_PROVIDER_URL` | 评分服务地址 | - |
-| `SCORING_API_KEY` | 评分服务密钥 | - |
-| `ASR_PROVIDER_URL` | ASR 服务地址 | - |
-| `MEDIA_DIR` | 媒体文件目录 | `data/media` |
+当前全量测试 **418 passed**，覆盖评分路由、证据完整性、SP 红队与认证、闸门、审计链、公平性、成本、S9 指标与治理闭环。
 
-未配置 AI 服务时，系统使用内置 Mock Provider，便于开发和测试。
+## 打包与发布
 
-## 核心 API
+发布包为源码压缩包，不包含 `data/` 运行时数据与本地缓存。构建示例：
 
-- `POST /api/auth/login` - 用户登录
-- `GET /api/bundles` - 获取考站列表
-- `POST /api/bundles/draft` - 创建考试方案
-- `POST /api/attempts/ingest` - 录入考试成绩
-- `GET /api/review/queue` - 获取待审核队列
-- `POST /api/execution/start` - 启动考试场次
-- `GET /api/quality` - 质量报告
-- `GET /api/governance/status` - 治理状态
+```powershell
+Compress-Archive -Path app,design,tests,web,run.py,requirements.txt,LICENSE,README.md,.gitignore -DestinationPath dist/osce-loop-v0.1.0.zip -Force
+```
 
-## 许可
+## 安全说明
 
-Apache-2.0 license
+- 所有治理写操作均写入审计事件；关键操作需要角色权限。
+- 默认拒绝外部 AI / ASR 端点，必须显式放行并记录数据流向复核。
+- 内容审计发现的高风险表述会进入 P0 处置、红队回归用例与动态禁用词。
+- 发现安全问题时请勿公开提交 Issue，先联系维护者。
+
+## 许可证
+
+[Apache License 2.0](LICENSE)
