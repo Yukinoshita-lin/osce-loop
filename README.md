@@ -114,4 +114,4 @@ python run.py
 
 ## 许可
 
-MIT License
+Apache-2.0 license
