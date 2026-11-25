@@ -2125,10 +2125,12 @@ async function renderFeedback(attemptId) {
 /* ---------- SP ---------- */
 async function viewSP(bundleId = state.spBundleId || '') {
   const query = bundleId ? `?bundle_id=${encodeURIComponent(bundleId)}` : '';
-  const [persona, stationData, consentData] = await Promise.all([
+  const [persona, stationData, consentData, certHistory, approvalHistory] = await Promise.all([
     api(`/api/sp/persona${query}`),
     api('/api/bundles/stations'),
     api(`/api/sp/consents${query}`).catch(() => ({ valid: false, consents: [], note: '知情同意记录仅考务可查看。' })),
+    api(`/api/sp/certifications${query}`).catch(() => []),
+    api(`/api/sp/persona-approvals${query}`).catch(() => ({ approvals: [] })),
   ]);
   state.spBundleId = persona.bundle_id;
   state.spStations = stationData.stations || [];
@@ -2143,6 +2145,8 @@ async function viewSP(bundleId = state.spBundleId || '') {
   } else {
     state.sp.persona = persona;
   }
+  state.sp.certifications = certHistory || [];
+  state.sp.approvals = (approvalHistory && approvalHistory.approvals) || [];
   renderSP();
 }
 
@@ -2275,6 +2279,25 @@ function renderSP() {
       </form>` : '<div class="tiny muted" style="margin-top:4px">知情同意由考务维护。</div>'}
       <div class="tiny muted" style="margin-top:4px">${esc(consent.note || '知情同意有效期 365 天；未成年 SP 还需监护人同意。')}</div>
     </section>`;
+  const certRows = (state.sp.certifications || []).slice(0, 6);
+  const approvalRows = (state.sp.approvals || []).slice(0, 6);
+  const historyHtml = `
+    <section class="card">
+      <div class="card-title">认证与批准历史<span class="sub">只追加 · 绑定 persona_version</span></div>
+      <div class="tiny muted" style="margin-bottom:5px">SP 认证</div>
+      ${certRows.length ? certRows.map((row) => `
+        <div class="version-row">
+          <span class="k">${esc(fmtTime(row.created_at))}</span>
+          <span class="v">${row.status === 'certified' ? '<span class="pill teal">通过</span>' : '<span class="pill red">未通过</span>'}${esc((row.persona_version || '').slice(7, 19))} · 红队 ${num(row.red_team.passed_cases, 0)}/${num(row.red_team.case_count, 0)} · 泄露 ${num(row.red_team.leak_count, 0)} · ${esc(row.actor || '—')}</span>
+        </div>`).join('') : '<div class="tiny muted">尚无认证记录。</div>'}
+      <div class="sep"></div>
+      <div class="tiny muted" style="margin-bottom:5px">人格卡批准</div>
+      ${approvalRows.length ? approvalRows.map((row) => `
+        <div class="version-row">
+          <span class="k">${esc(fmtTime(row.created_at))}</span>
+          <span class="v">${row.decision === 'approved' ? '<span class="pill teal">批准</span>' : '<span class="pill red">拒绝</span>'}${esc(row.scope === 'L2' ? '可进模拟考' : '仅练习')} · ${esc((row.persona_version || '').slice(7, 19))} · ${esc(row.actor || '—')}</span>
+        </div>`).join('') : '<div class="tiny muted">尚无批准记录。</div>'}
+    </section>`;
   const verifierHtml = verify ? `
     <div class="verify-panel">
       <div class="verify-item ${verify.persona >= 0.85 ? 'pass' : 'fail'}"><div class="k">人格保真 · 0.35</div><div class="v">${num(verify.persona, 2)}</div></div>
@@ -2320,6 +2343,7 @@ function renderSP() {
         ${certHtml}
         ${approvalHtml}
         ${consentHtml}
+        ${historyHtml}
         <section class="card">
           <div class="card-title">阶段<span class="sub">状态机驱动</span></div>
           <div class="phase-steps">
