@@ -154,6 +154,34 @@ def test_persona_approval_is_bound_to_persona_version(conn):
     assert stale["stale"] is True
 
 
+def test_persona_approval_requires_complete_persona_card(conn):
+    payload = build_bundle_payload()
+    payload["sp_profile"]["persona"].pop("disclosure")
+    payload["sp_profile"]["forbidden"] = []
+    bundle = freeze_bundle(conn, payload, actor="test", version="1.0", reason="测试不完整人格卡")
+    with pytest.raises(ValueError, match="人格卡缺少必要维度"):
+        record_persona_approval(
+            conn,
+            bundle,
+            decision="approved",
+            scope="L1",
+            disclosure_approved=True,
+            forbidden_approved=True,
+            trial_approved=True,
+        )
+    rejected = record_persona_approval(
+        conn,
+        bundle,
+        decision="rejected",
+        scope="L1",
+        disclosure_approved=False,
+        forbidden_approved=False,
+        trial_approved=False,
+        note="人格卡缺披露阈值，退回补充",
+    )
+    assert rejected["decision"] == "rejected"
+
+
 def test_expired_certification_does_not_feed_g1_metrics(conn):
     bundle = _freeze(conn)
     report = certify_bundle(conn, bundle, actor="test")

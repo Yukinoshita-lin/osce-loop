@@ -8,6 +8,28 @@ from .. import db
 DECISIONS = ("approved", "rejected")
 SCOPES = ("L1", "L2")
 SCOPE_LABELS = {"L1": "仅练习", "L2": "可进入模拟考"}
+PERSONA_FIELDS = (
+    ("tone", "情绪基调"),
+    ("language", "语言熟练度"),
+    ("memory", "病史记忆"),
+    ("cognition", "认知状态"),
+    ("disclosure", "披露阈值"),
+)
+
+
+def _persona_gaps(bundle: dict[str, Any]) -> list[str]:
+    """批准前核对人格卡五维与禁用话术是否齐全，缺项不得签字。"""
+    profile = (bundle.get("payload") or {}).get("sp_profile") or {}
+    persona = profile.get("persona") if isinstance(profile.get("persona"), dict) else {}
+    gaps = [
+        label
+        for key, label in PERSONA_FIELDS
+        if key not in persona or str(persona.get(key) if persona.get(key) is not None else "").strip() == ""
+    ]
+    forbidden = [str(item).strip() for item in profile.get("forbidden") or [] if str(item).strip()]
+    if not forbidden:
+        gaps.append("禁用话术")
+    return gaps
 
 
 def record_persona_approval(
@@ -28,6 +50,9 @@ def record_persona_approval(
         raise ValueError("scope 必须是 L1 或 L2")
     if decision == "approved" and not (disclosure_approved and forbidden_approved and trial_approved):
         raise ValueError("批准人格卡必须同时确认披露阈值、禁用话术与真人试演")
+    gaps = _persona_gaps(bundle)
+    if decision == "approved" and gaps:
+        raise ValueError("人格卡缺少必要维度：" + "、".join(gaps))
     approval_id = db.new_id("spappr")
     timestamp = db.now_iso()
     conn.execute(
