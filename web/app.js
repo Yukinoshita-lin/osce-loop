@@ -1101,6 +1101,10 @@ function renderIngestResult(data) {
   `;
 }
 
+function csvCell(value) {
+  return '"' + String(value === null || value === undefined ? '' : value).replace(/"/g, '""') + '"';
+}
+
 function downloadSampleTranscript() {
   const blob = new Blob([JSON.stringify(SAMPLE_TRANSCRIPT, null, 2)], { type: 'application/json;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -3042,6 +3046,7 @@ function scorecardHtml(data) {
   rows.forEach((row) => {
     if (!groups.includes(row.group)) groups.push(row.group);
   });
+  state.scorecardRows = rows;
   const body = groups.map((group) => {
     const groupRows = rows.filter((row) => row.group === group);
     return groupRows.map((row, index) => `
@@ -3056,6 +3061,9 @@ function scorecardHtml(data) {
   return `
     <div class="card" style="margin-bottom:16px">
       <div class="card-title">S9 验收指标总览<span class="sub">按设计文档目标自动判定 · 未采集不冒充达标</span></div>
+      <div class="btn-row" style="margin-bottom:8px">
+        <button class="btn small" data-action="export-scorecard">导出 CSV</button>
+      </div>
       <div class="tbl-wrap">
         <table>
           <thead><tr><th style="width:10%">层次</th><th>指标</th><th style="width:20%">目标</th><th style="width:24%">当前</th><th style="width:10%">状态</th></tr></thead>
@@ -4487,6 +4495,34 @@ document.addEventListener('click', async (e) => {
     } catch (err) {
       toast(err.message, true);
     }
+    return;
+  }
+  if (action === 'export-scorecard') {
+    const rows = state.scorecardRows || [];
+    if (!rows.length) return toast('暂无可导出的指标', true);
+    const statusLabels = { pass: '达标', fail: '未达标', warn: '警示', unmeasured: '未采集' };
+    const lines = [
+      ['层次', '指标', '目标', '当前', '状态', '备注'],
+      ...rows.map((row) => [
+        row.group,
+        row.label,
+        row.target,
+        row.display,
+        statusLabels[row.status] || row.status,
+        row.note || '',
+      ]),
+    ];
+    const csv = '\ufeff' + lines.map((line) => line.map(csvCell).join(',')).join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `osce-quality-scorecard-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast(`已导出 ${rows.length} 条验收指标`);
     return;
   }
   if (action === 'rescore-batch') {
