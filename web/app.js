@@ -887,7 +887,7 @@ async function viewIngest() {
           <label class="field" style="margin-top:10px">音视频文件（未上传转写时用于 ASR，可多选批量导入）
             <input class="input" type="file" name="media_file" accept="audio/*,video/*" multiple>
           </label>
-          <div class="tiny muted">多选文件时每个文件独立生成一场：考生编号/姓名按文件名拆分（优先 <code>__</code>，其次 <code>_</code>）；批量模式不关联执行槽位，也不使用共享笔记。</div>
+          <div class="tiny muted">多选文件时同名转写与音视频自动配对，未配对的文件各自独立生成一场；考生编号/姓名按文件名拆分（优先 <code>__</code>，其次 <code>_</code>）；批量模式不关联执行槽位，也不使用共享笔记。</div>
           <label class="field" style="margin-top:10px">考生笔记 / 操作日志（可选）
             <textarea class="input" name="candidate_notes" rows="3" placeholder="每行一条，可用 [02:14] 开头标注时间，例如：[02:14] 已嘱患者深呼吸后听诊"></textarea>
           </label>
@@ -929,20 +929,17 @@ async function viewIngest() {
         toast('批量导入不能关联执行槽位，请先取消关联后再试', true);
         return;
       }
-      const jobs = [
-        ...transcripts.map((file) => ({ file, kind: 'transcript' })),
-        ...mediaFiles.map((file) => ({ file, kind: 'media' })),
-      ];
+      const jobs = buildBatchJobs(transcripts, mediaFiles);
       const results = [];
       const failures = [];
       button.disabled = true;
       for (let index = 0; index < jobs.length; index += 1) {
         const job = jobs[index];
-        button.textContent = `批量导入 ${index + 1}/${jobs.length}：${job.file.name}`;
+        button.textContent = `批量导入 ${index + 1}/${jobs.length}：${job.label}`;
         try {
           results.push(await apiForm('/api/attempts/ingest', batchIngestForm(form, job)));
         } catch (err) {
-          failures.push({ name: job.file.name, message: err.message });
+          failures.push({ name: job.label, message: err.message });
         }
       }
       button.disabled = false;
@@ -969,6 +966,36 @@ async function viewIngest() {
       button.textContent = '解析/转写并运行评分';
     }
   });
+}
+
+function fileStem(filename) {
+  return String(filename || '').replace(/\.[^.]+$/, '').trim().toLowerCase();
+}
+
+function buildBatchJobs(transcripts, mediaFiles) {
+  const mediaByStem = new Map();
+  mediaFiles.forEach((file) => {
+    const stem = fileStem(file.name);
+    if (!mediaByStem.has(stem)) mediaByStem.set(stem, []);
+    mediaByStem.get(stem).push(file);
+  });
+  const jobs = [];
+  transcripts.forEach((file) => {
+    const queue = mediaByStem.get(fileStem(file.name)) || [];
+    const media = queue.shift() || null;
+    jobs.push({
+      kind: media ? 'paired' : 'transcript',
+      transcript: file,
+      media,
+      label: media ? `${file.name} + ${media.name}` : file.name,
+    });
+  });
+  mediaByStem.forEach((queue) => {
+    queue.forEach((file) => {
+      jobs.push({ kind: 'media', transcript: null, media: file, label: file.name });
+    });
+  });
+  return jobs;
 }
 
 function batchIdentity(filename) {
@@ -1000,10 +1027,11 @@ function batchIngestForm(form, job) {
   source.forEach((value, key) => {
     if (!skip.has(key)) data.append(key, value);
   });
-  const identity = batchIdentity(job.file.name);
+  const identity = batchIdentity((job.transcript || job.media).name);
   data.append('candidate_code', identity.code);
   data.append('candidate_name', identity.name);
-  data.append(job.kind === 'transcript' ? 'transcript_file' : 'media_file', job.file);
+  if (job.transcript) data.append('transcript_file', job.transcript);
+  if (job.media) data.append('media_file', job.media);
   return data;
 }
 
@@ -1014,7 +1042,7 @@ function renderBatchIngestResult(results, failures) {
     const attempt = data.attempt;
     return `<div class="version-row">
       <span class="k">${esc(attempt.candidate_code)} · ${esc(attempt.candidate_name)}</span>
-      <span class="v">${statusPill(attempt.status)} · 待复核 ${attempt.pending} 项 · <a class="link-btn" href="#/feedback" data-open-feedback="${esc(attempt.attempt_id)}">反馈</a></span>
+      <span class="v">${statusPill(attempt.status)} · 待复核 ${attempt.pending} 项 · ${data.media ? '媒体可回放' : '无媒体'} · <a class="link-btn" href="#/feedback" data-open-feedback="${esc(attempt.attempt_id)}">反馈</a></span>
     </div>`;
   }).join('');
   const failureRows = failures.map((failure) => (
