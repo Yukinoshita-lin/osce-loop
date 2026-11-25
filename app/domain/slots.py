@@ -84,10 +84,32 @@ def scan_leaks(draft: str, unreleased_slots: list[dict[str, Any]]) -> list[dict[
                     "kind": "information_boundary",
                 }
             )
-    forbidden_advice = ("你得了", "确诊为", "吃阿司匹林", "含服硝酸甘油", "不用去医院", "没事")
-    for phrase in forbidden_advice:
-        if phrase in draft:
-            violations.append({"kind": "clinical_safety", "entities": [phrase]})
+    forbidden_patterns = (
+        r"你得了",
+        r"确诊为",
+        r"应该是.{0,6}病",
+        r"就是.{0,4}病",
+        r"你吃点",
+        r"应该吃",
+        r"可以吃.{0,2}药",
+        r"吃点.{0,3}药",
+        r"吃阿司匹林",
+        r"含服硝酸甘油",
+        r"打一针",
+        r"剂量",
+        r"不用去医院",
+        r"没事",
+        r"你不行",
+        r"不合格",
+        r"太差",
+        r"水平不行",
+        r"不会看病",
+        r"问得不好",
+    )
+    for pattern in forbidden_patterns:
+        match = re.search(pattern, draft)
+        if match:
+            violations.append({"kind": "clinical_safety", "entities": [match.group(0)]})
             break
     return violations
 

@@ -463,6 +463,25 @@ def test_sp_slots_are_gated():
     assert any(v["kind"] == "information_boundary" for v in leaks)
 
 
+def test_scan_leaks_blocks_sp_advice_and_evaluation():
+    for text in (
+        "你得了心梗",
+        "应该是心脏病",
+        "你吃点阿司匹林",
+        "你可以吃这个药",
+        "你不行",
+        "这样不合格",
+        "问得不好",
+    ):
+        violations = scan_leaks(text, [])
+        assert any(v["kind"] == "clinical_safety" for v in violations), text
+
+
+def test_scan_leaks_allows_neutral_patient_speech():
+    leaks = scan_leaks("我吃点东西就疼，应该是昨天晚上开始的", [])
+    assert not any(v["kind"] == "clinical_safety" for v in leaks)
+
+
 def test_sp_guides_when_key_items_unasked_at_phase_end():
     payload = build_bundle_payload()
     derived = derive_assets(payload)
