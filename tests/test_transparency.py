@@ -8,7 +8,7 @@ import pytest
 
 from app import db
 from app.domain.gates import evaluate_gates
-from app.domain.governance import change_model_version, publish_model_card
+from app.domain.governance import change_model_version, governance_status, publish_model_card
 from app.domain.stats import quality_report
 from app.domain.transparency import (
     acknowledge_disclosure,
@@ -156,6 +156,9 @@ def test_version_change_creates_private_model_card_snapshot(conn):
     assert result["model_card"]["is_public"] is False
     assert "历史版本" in card["limitations"]
     assert conn.execute("SELECT COUNT(*) AS n FROM model_cards").fetchone()["n"] == cards_before + 1
+    status = governance_status(conn)
+    assert status["model_card"]["card_id"] == card["card_id"]
+    assert status["data_sheet"]["version"] == result["model_card"]["data_sheet_version"]
     with pytest.raises(ValueError, match="人工比对校准"):
         publish_model_card(conn, actor="治理委员会")
 

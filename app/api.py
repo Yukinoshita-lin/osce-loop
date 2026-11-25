@@ -802,11 +802,13 @@ def index():
 @app.get("/api/overview")
 def overview(conn=Depends(get_conn)):
     report = quality_report(conn)
-    attempts = db.rows_to_dicts(conn.execute("SELECT * FROM attempts ORDER BY created_at DESC").fetchall())
+    attempts = db.rows_to_dicts(conn.execute("SELECT * FROM attempts ORDER BY created_at DESC, rowid DESC").fetchall())
     summaries = [_attempt_summary(conn, a) for a in attempts]
     gates = evaluate_gates(conn, report, _stage(conn))
     recent_audit = db.rows_to_dicts(
-        conn.execute("SELECT * FROM audit_events ORDER BY created_at DESC LIMIT 8").fetchall()
+        conn.execute(
+            "SELECT * FROM audit_events ORDER BY created_at DESC, rowid DESC LIMIT 8"
+        ).fetchall()
     )
     return {
         "bundle": list_bundles(conn)[0]["payload"].get("title") if list_bundles(conn) else None,
@@ -1212,7 +1214,8 @@ def attempt_detail(attempt_id: str, request: Request, conn=Depends(get_conn)):
         "items_count": len(items),
         "audit": db.rows_to_dicts(
             conn.execute(
-                "SELECT * FROM audit_events WHERE object_id IN (?, ?) ORDER BY created_at DESC LIMIT 20",
+                "SELECT * FROM audit_events WHERE object_id IN (?, ?) "
+            "ORDER BY created_at DESC, rowid DESC LIMIT 20",
                 (attempt_id, attempt["bundle_id"]),
             ).fetchall()
         ),
@@ -1698,7 +1701,8 @@ def bundle_detail(bundle_id: str, conn=Depends(get_conn)):
         "items": items,
         "audit": db.rows_to_dicts(
             conn.execute(
-                "SELECT * FROM audit_events WHERE object_id = ? ORDER BY created_at DESC", (bundle_id,)
+                "SELECT * FROM audit_events WHERE object_id = ? ORDER BY created_at DESC, rowid DESC",
+            (bundle_id,),
             ).fetchall()
         ),
     }
@@ -2074,10 +2078,16 @@ def quality(conn=Depends(get_conn)):
     report = quality_report(conn)
     bundles_list = list_bundles(conn)
     gates = evaluate_gates(conn, report, _stage(conn))
-    model_cards = db.rows_to_dicts(conn.execute("SELECT * FROM model_cards ORDER BY created_at DESC").fetchall())
+    model_cards = db.rows_to_dicts(
+        conn.execute("SELECT * FROM model_cards ORDER BY created_at DESC, rowid DESC").fetchall()
+    )
     for card in model_cards:
         card["metrics"] = json.loads(card["metrics"])
-    calls = db.rows_to_dicts(conn.execute("SELECT * FROM ai_calls ORDER BY created_at DESC LIMIT 400").fetchall())
+    calls = db.rows_to_dicts(
+        conn.execute(
+            "SELECT * FROM ai_calls ORDER BY created_at DESC, rowid DESC LIMIT 400"
+        ).fetchall()
+    )
     latencies = sorted(c["latency_ms"] for c in calls)
     p95 = latencies[int(len(latencies) * 0.95) - 1] if latencies else None
     input_tokens = sum(c["input_tokens"] or 0 for c in calls)
@@ -2727,7 +2737,9 @@ def governance(conn=Depends(get_conn)):
 @app.get("/api/audit")
 def audit(conn=Depends(get_conn), limit: int = Query(100, ge=1, le=500)):
     return db.rows_to_dicts(
-        conn.execute("SELECT * FROM audit_events ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+        conn.execute(
+        "SELECT * FROM audit_events ORDER BY created_at DESC, rowid DESC LIMIT ?", (limit,)
+    ).fetchall()
     )
 
 
@@ -3022,12 +3034,12 @@ def run_sp_certification(body: SpCertBody, conn=Depends(get_conn)):
 def sp_certifications(conn=Depends(get_conn), bundle_id: str | None = None):
     if bundle_id:
         rows = conn.execute(
-            "SELECT * FROM sp_certifications WHERE bundle_id = ? ORDER BY created_at DESC",
+            "SELECT * FROM sp_certifications WHERE bundle_id = ? ORDER BY created_at DESC, rowid DESC",
             (bundle_id,),
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT * FROM sp_certifications ORDER BY created_at DESC"
+            "SELECT * FROM sp_certifications ORDER BY created_at DESC, rowid DESC"
         ).fetchall()
     result = []
     for row in rows:

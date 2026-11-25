@@ -104,7 +104,7 @@ def public_transparency(conn) -> dict[str, Any]:
     cards = []
     seen: set[str] = set()
     for row in conn.execute(
-        "SELECT * FROM model_cards WHERE is_public = 1 ORDER BY created_at DESC"
+        "SELECT * FROM model_cards WHERE is_public = 1 ORDER BY created_at DESC, rowid DESC"
     ).fetchall():
         if row["capability"] in seen:
             continue

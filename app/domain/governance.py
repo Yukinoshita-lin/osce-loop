@@ -351,7 +351,7 @@ def run_self_check(
 
 def latest_self_check(conn) -> dict[str, Any] | None:
     row = conn.execute(
-        "SELECT * FROM governance_checks ORDER BY created_at DESC LIMIT 1"
+        "SELECT * FROM governance_checks ORDER BY created_at DESC, rowid DESC LIMIT 1"
     ).fetchone()
     if not row:
         return None
@@ -552,19 +552,23 @@ def publish_model_card(conn, *, actor: str = "系统") -> dict[str, Any]:
 
 def governance_status(conn) -> dict[str, Any]:
     switch = conn.execute(
-        "SELECT * FROM switch_drills ORDER BY created_at DESC LIMIT 1"
+        "SELECT * FROM switch_drills ORDER BY created_at DESC, rowid DESC LIMIT 1"
     ).fetchone()
     appeal_rows = conn.execute(
-        "SELECT * FROM appeal_drills ORDER BY created_at DESC"
+        "SELECT * FROM appeal_drills ORDER BY created_at DESC, rowid DESC"
     ).fetchall()
     approvals = db.rows_to_dicts(
-        conn.execute("SELECT * FROM governance_approvals ORDER BY created_at DESC").fetchall()
+        conn.execute(
+            "SELECT * FROM governance_approvals ORDER BY created_at DESC, rowid DESC"
+        ).fetchall()
     )
     model_card = conn.execute(
-        "SELECT card_id, is_public, published_at FROM model_cards ORDER BY created_at DESC LIMIT 1"
+        "SELECT card_id, is_public, published_at FROM model_cards "
+        "ORDER BY created_at DESC, rowid DESC LIMIT 1"
     ).fetchone()
     data_sheet = conn.execute(
-        "SELECT data_sheet_id, version, is_public, published_at FROM data_sheets ORDER BY created_at DESC LIMIT 1"
+        "SELECT data_sheet_id, version, is_public, published_at FROM data_sheets "
+        "ORDER BY created_at DESC, rowid DESC LIMIT 1"
     ).fetchone()
     return {
         "release_stage": db.get_state(conn, "release_stage", "G0_offline"),

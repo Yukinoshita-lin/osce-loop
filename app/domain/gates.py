@@ -143,7 +143,7 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
         sus_score = float(sus_row["value"]) if sus_row else None
         sus_source = "legacy" if sus_row else None
     switch_row = conn.execute(
-        "SELECT passed FROM switch_drills ORDER BY created_at DESC LIMIT 1"
+        "SELECT passed FROM switch_drills ORDER BY created_at DESC, rowid DESC LIMIT 1"
     ).fetchone()
     switch_drill = 1.0 if switch_row and switch_row["passed"] else 0.0
     appeal_drill = conn.execute(
