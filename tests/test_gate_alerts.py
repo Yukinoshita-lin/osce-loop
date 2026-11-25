@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from app import db
-from app.domain.gates import _technical_metric_issues, evaluate_gates
+from app.domain.gates import _g2_metric_issues, _technical_metric_issues, evaluate_gates
 
 
 def _conn(tmp_path):
@@ -273,4 +273,16 @@ def test_technical_metric_issues_pass_within_targets():
             "evidence_rate": 1.0,
         }
     )
+    assert issues == []
+
+
+def test_g2_metric_issues_flag_thresholds():
+    issues = _g2_metric_issues({"near_improvement": 0.05, "teacher_hours": 0.2})
+    assert len(issues) == 2
+    assert any("边缘案例一致率提升" in issue for issue in issues)
+    assert any("教师评分工时下降" in issue for issue in issues)
+
+
+def test_g2_metric_issues_pass_within_targets():
+    issues = _g2_metric_issues({"near_improvement": 0.12, "teacher_hours": 0.45})
     assert issues == []

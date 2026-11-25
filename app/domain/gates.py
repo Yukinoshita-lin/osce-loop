@@ -285,6 +285,18 @@ def _technical_metric_issues(values: dict[str, Any]) -> list[str]:
     return issues
 
 
+def _g2_metric_issues(values: dict[str, Any]) -> list[str]:
+    """G2 运营与一致性指标：边缘案例提升与教师工时下降。"""
+    issues: list[str] = []
+    near = values.get("near_improvement")
+    if near is not None and float(near) < 0.10:
+        issues.append(f"边缘案例一致率提升 {float(near) * 100:.1f}pp < 10pp")
+    teacher = values.get("teacher_hours")
+    if teacher is not None and float(teacher) < 0.40:
+        issues.append(f"教师评分工时下降 {float(teacher):.1%} < 40%")
+    return issues
+
+
 def evaluate_gates(conn, report: dict[str, Any], current_stage: str) -> dict[str, Any]:
     values = _metric_values(conn, report)
     gates: list[dict[str, Any]] = []
@@ -366,6 +378,15 @@ def evaluate_gates(conn, report: dict[str, Any], current_stage: str) -> dict[str
                 "level": "warn",
                 "title": "G1 技术验收指标未达标",
                 "detail": "；".join(technical_issues) + "。建议继续内测，不扩大 SP 使用范围。",
+            }
+        )
+    g2_issues = _g2_metric_issues(values)
+    if g2_issues:
+        alerts.append(
+            {
+                "level": "warn",
+                "title": "G2 运营与一致性指标未达标",
+                "detail": "；".join(g2_issues) + "。建议回到 G1 或调整评分表与复核流程后再申请模拟考。",
             }
         )
     subgroup_gap = values.get("subgroup_gap")
