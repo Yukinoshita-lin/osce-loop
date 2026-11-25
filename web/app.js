@@ -3020,7 +3020,10 @@ function scorecardHtml(data) {
   add('评分质量', '人工编辑率', '5%–30%', pct(review.edit_rate, 1), editStatus, '低于 5% 警惕橡皮图章');
 
   costTargets.forEach((row) => {
-    add('运营', `${row.label}单站成本`, `≤ ¥${num(row.target_cny, 0)}`, row.avg_cny === null || row.avg_cny === undefined ? '—' : `¥${num(row.avg_cny, 2)}`, row.status || 'unmeasured', row.attempts ? `${row.attempts} 场样本` : '');
+    const parts = [`${row.attempts} 场样本`];
+    if (row.storage_cny) parts.push(`含存储摊销 ¥${num(row.storage_cny, 2)}`);
+    if (row.attempts > (row.ai_attempts || 0)) parts.push(`${row.attempts - row.ai_attempts} 场 AI 未计价`);
+    add('运营', `${row.label}单站成本`, `≤ ¥${num(row.target_cny, 0)}`, row.avg_cny === null || row.avg_cny === undefined ? '—' : `¥${num(row.avg_cny, 2)}`, row.status || 'unmeasured', parts.join(' · '));
   });
   add('运营', '教师评分工时下降', '≥ 40%', pct(ab.teacher_hours_reduction, 1), scorecardStatus(ab.teacher_hours_reduction, 0.40, 'ge'));
   add('运营', '练习反馈生成', '≤ 60 秒', practiceReady.count ? `平均 ${num(practiceReady.avg, 1)} 秒 · 及时率 ${pct(practiceReady.within_rate, 0)}` : '—', practiceReady.status || 'unmeasured', practiceReady.count ? `${practiceReady.count} 份报告` : '');
@@ -3572,8 +3575,8 @@ async function viewQuality() {
         <div class="version-row"><span class="k">P95 延迟</span><span class="v">${num(data.ai_calls.p95_latency_ms, 2)} ms</span></div>
         <div class="version-row"><span class="k">平均延迟</span><span class="v">${num(data.ai_calls.avg_latency_ms, 2)} ms</span></div>
         <div class="version-row"><span class="k">Token 输入 / 输出</span><span class="v">${data.ai_calls.input_tokens} / ${data.ai_calls.output_tokens}</span></div>
-        <div class="version-row"><span class="k">估算成本（USD）</span><span class="v">$${num(data.ai_calls.total_cost_usd, 4)}${data.ai_calls.cost_per_attempt && data.ai_calls.cost_per_attempt.per_attempt_usd !== null ? ` · 单站均 $${num(data.ai_calls.cost_per_attempt.per_attempt_usd, 4)} / ¥${num(data.ai_calls.cost_per_attempt.per_attempt_cny, 2)}` : ''}${data.ai_calls.pricing_configured ? '' : ' · 单价未配置'}</span></div>
-        ${((data.ai_calls.cost_per_attempt || {}).targets || []).map((t) => `<div class="version-row"><span class="k">${esc(t.label)}单站成本</span><span class="v">${t.avg_cny === null ? '—' : `¥${num(t.avg_cny, 2)}`} <span class="pill ${t.status === 'pass' ? 'teal' : t.status === 'fail' ? 'red' : 'muted'}">${t.status === 'pass' ? '达标' : t.status === 'fail' ? '超目标' : '无样本'}</span> <span class="tiny muted">目标 ≤¥${num(t.target_cny, 0)} · ${t.attempts} 场</span></span></div>`).join('')}
+        <div class="version-row"><span class="k">估算成本</span><span class="v">AI ¥${num(data.ai_calls.cost_per_attempt.total_ai_cny, 2)} + 存储摊销 ¥${num(data.ai_calls.cost_per_attempt.total_storage_cny, 2)} = ¥${num(data.ai_calls.cost_per_attempt.total_cny, 2)}${data.ai_calls.cost_per_attempt.attempts_with_cost ? ` · 单站均 ¥${num(data.ai_calls.cost_per_attempt.per_attempt_cny, 2)}` : ''}${data.ai_calls.pricing_configured ? '' : ' · 单价未配置'}</span></div>
+        ${((data.ai_calls.cost_per_attempt || {}).targets || []).map((t) => `<div class="version-row"><span class="k">${esc(t.label)}单站成本</span><span class="v">${t.avg_cny === null ? '—' : `¥${num(t.avg_cny, 2)}`} <span class="pill ${t.status === 'pass' ? 'teal' : t.status === 'fail' ? 'red' : t.status === 'warn' ? 'amber' : 'muted'}">${t.status === 'pass' ? '达标' : t.status === 'fail' ? '超目标' : t.status === 'warn' ? 'AI 待计价' : '无样本'}</span> <span class="tiny muted">目标 ≤¥${num(t.target_cny, 0)} · ${t.attempts} 场 · AI ¥${num(t.ai_cny, 2)} + 存储 ¥${num(t.storage_cny, 2)}</span></span></div>`).join('')}
         <div class="version-row"><span class="k">能力</span><span class="v">${data.ai_calls.by_capability.map((x) => `${esc(x.key)}:${x.count}`).join(' · ')}</span></div>
         <div class="version-row"><span class="k">状态</span><span class="v">${data.ai_calls.by_status.map((x) => `${esc(x.key)}:${x.count}`).join(' · ')}</span></div>
         <div class="sep"></div>

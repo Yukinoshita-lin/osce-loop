@@ -50,6 +50,10 @@ AI_OUTPUT_PRICE_PER_1K = float(os.getenv("OSCELOOP_AI_OUTPUT_PRICE_PER_1K", "0")
 ASR_PRICE_PER_MINUTE = float(os.getenv("OSCELOOP_ASR_PRICE_PER_MINUTE", "0"))
 # 运营验收：单站单次成本目标（人民币）。练习与考试分别核算，汇率可按部署配置。
 CNY_PER_USD = float(os.getenv("OSCELOOP_CNY_PER_USD", "7.2"))
+# 存储摊销：按留存期内每 GB 每月价格估算，包含备份与冗余开销，默认 0.5 元/GB·月。
+STORAGE_PRICE_CNY_PER_GB_MONTH = float(
+    os.getenv("OSCELOOP_STORAGE_PRICE_CNY_PER_GB_MONTH", "0.5")
+)
 COST_TARGET_CNY_PRACTICE = float(os.getenv("OSCELOOP_COST_TARGET_CNY_PRACTICE", "15"))
 COST_TARGET_CNY_EXAM = float(os.getenv("OSCELOOP_COST_TARGET_CNY_EXAM", "60"))
 

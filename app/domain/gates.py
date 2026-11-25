@@ -613,7 +613,10 @@ def evaluate_gates(conn, report: dict[str, Any], current_stage: str) -> dict[str
                         f"{row['label']}单站成本 ¥{row['avg_cny']:.2f} "
                         f"超过目标 ¥{row['target_cny']:.0f}"
                     ),
-                    "detail": "建议核对模型/ASR 单价、缓存命中率与提示词长度，优先压缩重复调用。",
+                    "detail": (
+                        "建议核对模型/ASR 单价、缓存命中率、提示词长度与媒体留存期，"
+                        "优先压缩重复调用与无效存储。"
+                    ),
                 }
             )
     ready = (feedback_ack_latency(conn) or {}).get("ready") or {}

@@ -1,4 +1,4 @@
-"""AI 成本归集：评分与 ASR 调用按场次汇总。"""
+"""AI 成本归集：评分与 ASR 调用按场次汇总，媒体按留存期摊销。"""
 from __future__ import annotations
 
 from app import db
@@ -76,4 +76,45 @@ def test_cost_targets_split_practice_and_exam(tmp_path):
     assert targets["exam"]["avg_usd"] == 10.0
     assert targets["exam"]["status"] == "fail"
     assert summary["per_attempt_cny"] == round(5.5 * summary["cny_per_usd"], 2)
+    conn.close()
+
+
+def test_cost_includes_storage_amortization(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.domain.cost.STORAGE_PRICE_CNY_PER_GB_MONTH", 0.5)
+    conn = db.connect(tmp_path / "cost_storage.db")
+    db.init_db(conn)
+    conn.execute(
+        "INSERT INTO attempts(attempt_id, bundle_id, candidate_code, candidate_name, session_id, "
+        "risk_level, media_size_bytes, status, created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+        ("att_store", "bnd", "C001", "考生", "SES", "L2", 1024**3, "scored", db.now_iso()),
+    )
+    conn.execute(
+        "INSERT INTO attempts(attempt_id, bundle_id, candidate_code, candidate_name, session_id, "
+        "risk_level, media_size_bytes, media_purged_at, status, created_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?)",
+        ("att_purged", "bnd", "C002", "考生", "SES", "L2", 1024**3, db.now_iso(), "scored", db.now_iso()),
+    )
+    conn.commit()
+
+    expected_storage = 0.5 * 365 / 30
+    summary = ai_cost_summary(conn)
+    assert summary["total_ai_cny"] == 0
+    assert summary["total_storage_cny"] == round(expected_storage, 2)
+    assert summary["attempts_with_cost"] == 1
+    assert summary["per_attempt_cny"] == round(expected_storage, 2)
+    targets = {row["key"]: row for row in summary["targets"]}
+    exam = targets["exam"]
+    assert exam["attempts"] == 1
+    assert exam["ai_attempts"] == 0
+    assert exam["avg_cny"] == round(expected_storage, 2)
+    assert exam["status"] == "warn"
+
+    _insert_call(conn, "c1", "att_store:HX.01", 0.1)
+    summary = ai_cost_summary(conn)
+    exam = {row["key"]: row for row in summary["targets"]}["exam"]
+    assert exam["ai_attempts"] == 1
+    assert exam["ai_cny"] == round(0.1 * summary["cny_per_usd"], 2)
+    assert exam["storage_cny"] == round(expected_storage, 2)
+    assert exam["avg_cny"] == round(0.1 * summary["cny_per_usd"] + expected_storage, 2)
+    assert exam["status"] == "pass"
     conn.close()
