@@ -222,6 +222,10 @@ def _live_segments(conn, run_id: str, slot_key: str) -> list[dict[str, Any]]:
     ]
 
 
+def live_segments_for_slot(conn, run_id: str, slot_key: str) -> list[dict[str, Any]]:
+    return _live_segments(conn, run_id, slot_key)
+
+
 def _bundle_payload_for_station(
     conn, station_id: str, station_name: str | None = None
 ) -> dict[str, Any] | None:

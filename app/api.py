@@ -122,6 +122,7 @@ from .domain.execution import (
     get_run,
     latest_run,
     live_facts,
+    live_segments_for_slot,
     slot_action,
     start_run,
     stop_run,
@@ -915,45 +916,80 @@ async def ingest_attempt(
             raise HTTPException(400, f"转写解析失败：{exc}") from exc
         parsed["source"] = "upload"
     else:
-        if media_file is None or not media_file.filename:
-            raise HTTPException(400, "请上传转写文件，或上传音视频并配置 ASR")
-        media = await _save_media(media_file)
-        asr_bundle = build_asr_provider()
-        if not asr_bundle.provider:
-            _cleanup_media(media)
-            reason = asr_bundle.info.get("reason") or "无可用的 ASR 服务"
-            raise HTTPException(400, f"未配置 ASR：{reason}")
-        asr_gateway = CapabilityGateway(
-            conn,
-            asr_bundle.provider,
-            asr_bundle.provider.model_version,
-            ASR_PROMPT_VERSION,
+        live_segments = (
+            live_segments_for_slot(conn, run_id.strip(), slot_key.strip())
+            if run_id.strip() and slot_key.strip()
+            else []
         )
-        try:
-            asr_response = asr_gateway.transcribe_media(
-                media_path=UPLOAD_DIR / media["stored_name"],
-                language=asr_language or "zh",
-                speaker_map=speaker_map,
-                first_speaker=asr_first_speaker,
-                subject_ref=f"media:{media['media_id']}",
-                idempotency_key=(
-                    f"asr:{media.get('sha256')}:{asr_language or 'zh'}:{asr_first_speaker}:"
-                    f"{json.dumps(speaker_map, sort_keys=True, ensure_ascii=False) if speaker_map else ''}"
+        if live_segments:
+            utterances = [
+                {
+                    "speaker": segment["speaker"],
+                    "start_ms": int(segment["start_ms"]),
+                    "end_ms": int(segment["end_ms"]),
+                    "text": segment["text"],
+                    "asr_confidence": segment.get("asr_confidence"),
+                }
+                for segment in live_segments
+            ]
+            parsed = {
+                "format": "live_stream",
+                "utterances": utterances,
+                "duration_ms": max(int(utterance["end_ms"]) for utterance in utterances),
+                "candidate_utterances": sum(
+                    1 for utterance in utterances if utterance["speaker"] == "candidate"
                 ),
+                "patient_utterances": sum(
+                    1 for utterance in utterances if utterance["speaker"] == "patient"
+                ),
+                "source": "live_stream",
+                "warnings": [
+                    f"使用 {len(utterances)} 条实时转写片段生成场次；未上传媒体时证据不可回放。"
+                ],
+                "notes": 0,
+            }
+            if media_file is not None and media_file.filename:
+                media = await _save_media(media_file)
+        else:
+            if media_file is None or not media_file.filename:
+                raise HTTPException(400, "请上传转写文件、上传音视频，或先回传实时转写片段")
+            media = await _save_media(media_file)
+            asr_bundle = build_asr_provider()
+            if not asr_bundle.provider:
+                _cleanup_media(media)
+                reason = asr_bundle.info.get("reason") or "无可用的 ASR 服务"
+                raise HTTPException(400, f"未配置 ASR：{reason}")
+            asr_gateway = CapabilityGateway(
+                conn,
+                asr_bundle.provider,
+                asr_bundle.provider.model_version,
+                ASR_PROMPT_VERSION,
             )
-        except ASRError as exc:
-            _cleanup_media(media)
-            raise HTTPException(400, f"ASR 转写失败：{exc}") from exc
-        parsed = asr_response["output"]
-        asr_meta = {
-            "provider": parsed.get("provider"),
-            "model_version": parsed.get("model_version"),
-            "prompt_version": asr_response["prompt_version"],
-            "latency_ms": asr_response["latency_ms"],
-            "status": asr_response["status"],
-            "language": asr_language or "zh",
-            "speaker_labels": parsed.get("speaker_labels"),
-        }
+            try:
+                asr_response = asr_gateway.transcribe_media(
+                    media_path=UPLOAD_DIR / media["stored_name"],
+                    language=asr_language or "zh",
+                    speaker_map=speaker_map,
+                    first_speaker=asr_first_speaker,
+                    subject_ref=f"media:{media['media_id']}",
+                    idempotency_key=(
+                        f"asr:{media.get('sha256')}:{asr_language or 'zh'}:{asr_first_speaker}:"
+                        f"{json.dumps(speaker_map, sort_keys=True, ensure_ascii=False) if speaker_map else ''}"
+                    ),
+                )
+            except ASRError as exc:
+                _cleanup_media(media)
+                raise HTTPException(400, f"ASR 转写失败：{exc}") from exc
+            parsed = asr_response["output"]
+            asr_meta = {
+                "provider": parsed.get("provider"),
+                "model_version": parsed.get("model_version"),
+                "prompt_version": asr_response["prompt_version"],
+                "latency_ms": asr_response["latency_ms"],
+                "status": asr_response["status"],
+                "language": asr_language or "zh",
+                "speaker_labels": parsed.get("speaker_labels"),
+            }
 
     notes = parse_notes(candidate_notes, duration_ms=int(parsed.get("duration_ms") or 0))
     if notes:
