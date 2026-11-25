@@ -2473,6 +2473,7 @@ function practiceReportHtml(report) {
       </div>
       ${report.coverage < 0.5 ? `<div class="alert"><b>样本不足，分数仅作覆盖度参考</b><p>本次仅覆盖 ${pct(report.coverage, 0)} 的评分项，未覆盖项按 0 计入全站模拟分。建议完成完整问诊后再解读分数。</p></div>` : ''}
       ${report.unscored_count ? `<div class="alert"><b>${report.unscored_count} 项 AI 未判定</b><p>AI 拒答或触发限流，这些项不计入分数与扣分项；建议复练或请教师复核。</p></div>` : ''}
+      ${report.guidance && report.guidance.count ? `<div class="alert"><b>SP 阶段末引导 ${report.guidance.count} 次</b><p>${esc(report.guidance.note || '')}</p></div>` : ''}
       <div class="grid c1-2">
         <div>
           <div class="card-title">能力域画像</div>

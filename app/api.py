@@ -3016,6 +3016,7 @@ def finish_sp_session(session_id: str, conn=Depends(get_conn)):
     if existing:
         return {"ok": True, "report": json.loads(existing["report"])}
     messages = json.loads(session["transcript"])
+    state = json.loads(session["state"])
     candidate_turns = sum(1 for m in messages if m.get("role") == "candidate")
     if candidate_turns == 0:
         raise HTTPException(400, "至少完成一轮提问后才能生成反馈")
@@ -3030,6 +3031,17 @@ def finish_sp_session(session_id: str, conn=Depends(get_conn)):
     report = build_practice_report(bundle, messages, gateway=gateway)
     report["session_id"] = session_id
     report["created_at"] = db.now_iso()
+    guided_phases = state.get("guided_phases") or []
+    report["guidance"] = {
+        "count": len(guided_phases),
+        "phases": guided_phases,
+        "note": (
+            "SP 在阶段末提示过尚未问及的关键信息；这些提示不计入成绩，"
+            "建议对照重练清单补全对应问诊环节。"
+            if guided_phases
+            else "本次未触发阶段末自然引导。"
+        ),
+    }
     conn.execute(
         "INSERT INTO sp_reports(session_id, bundle_id, report, created_at) VALUES(?,?,?,?)",
         (session_id, bundle["bundle_id"], json.dumps(report, ensure_ascii=False), report["created_at"]),
@@ -3047,6 +3059,7 @@ def finish_sp_session(session_id: str, conn=Depends(get_conn)):
             "coverage": report["coverage"],
             "deductions": len(report["deductions"]),
             "uncovered": report["uncovered_count"],
+            "guidance_count": report["guidance"]["count"],
             "ai_versions": report.get("ai_versions"),
         },
         model_version=(report.get("ai_versions") or {}).get("model_version")
