@@ -881,12 +881,13 @@ async function viewIngest() {
               <input class="input" name="actor" value="${dataAttr(state.reviewer)}" maxlength="20">
             </label>
           </div>
-          <label class="field" style="margin-top:10px">转写文件（可选；JSON / SRT / VTT）
-            <input class="input" type="file" name="transcript_file" accept=".json,.srt,.vtt">
+          <label class="field" style="margin-top:10px">转写文件（可选；JSON / SRT / VTT，可多选批量导入）
+            <input class="input" type="file" name="transcript_file" accept=".json,.srt,.vtt" multiple>
           </label>
-          <label class="field" style="margin-top:10px">音视频文件（未上传转写时用于 ASR）
-            <input class="input" type="file" name="media_file" accept="audio/*,video/*">
+          <label class="field" style="margin-top:10px">音视频文件（未上传转写时用于 ASR，可多选批量导入）
+            <input class="input" type="file" name="media_file" accept="audio/*,video/*" multiple>
           </label>
+          <div class="tiny muted">多选文件时每个文件独立生成一场：考生编号/姓名按文件名拆分（优先 <code>__</code>，其次 <code>_</code>）；批量模式不关联执行槽位，也不使用共享笔记。</div>
           <label class="field" style="margin-top:10px">考生笔记 / 操作日志（可选）
             <textarea class="input" name="candidate_notes" rows="3" placeholder="每行一条，可用 [02:14] 开头标注时间，例如：[02:14] 已嘱患者深呼吸后听诊"></textarea>
           </label>
@@ -917,8 +918,37 @@ async function viewIngest() {
     const button = $('#ingest-submit');
     const fileInput = form.querySelector('input[name="transcript_file"]');
     const mediaInput = form.querySelector('input[name="media_file"]');
-    if ((!fileInput.files || !fileInput.files.length) && (!mediaInput.files || !mediaInput.files.length)) {
+    const transcripts = Array.from((fileInput && fileInput.files) || []);
+    const mediaFiles = Array.from((mediaInput && mediaInput.files) || []);
+    if (!transcripts.length && !mediaFiles.length) {
       toast('请上传转写文件，或上传音视频以使用 ASR', true);
+      return;
+    }
+    if (transcripts.length > 1 || mediaFiles.length > 1) {
+      if (linked) {
+        toast('批量导入不能关联执行槽位，请先取消关联后再试', true);
+        return;
+      }
+      const jobs = [
+        ...transcripts.map((file) => ({ file, kind: 'transcript' })),
+        ...mediaFiles.map((file) => ({ file, kind: 'media' })),
+      ];
+      const results = [];
+      const failures = [];
+      button.disabled = true;
+      for (let index = 0; index < jobs.length; index += 1) {
+        const job = jobs[index];
+        button.textContent = `批量导入 ${index + 1}/${jobs.length}：${job.file.name}`;
+        try {
+          results.push(await apiForm('/api/attempts/ingest', batchIngestForm(form, job)));
+        } catch (err) {
+          failures.push({ name: job.file.name, message: err.message });
+        }
+      }
+      button.disabled = false;
+      button.textContent = '解析/转写并运行评分';
+      renderBatchIngestResult(results, failures);
+      toast(`批量导入完成：成功 ${results.length} 场，失败 ${failures.length} 场`, failures.length > 0);
       return;
     }
     button.disabled = true;
@@ -939,6 +969,67 @@ async function viewIngest() {
       button.textContent = '解析/转写并运行评分';
     }
   });
+}
+
+function batchIdentity(filename) {
+  const base = String(filename || '').replace(/\.[^.]+$/, '').trim() || 'batch';
+  const doubleParts = base.split('__');
+  if (doubleParts.length >= 2 && doubleParts[0] && doubleParts.slice(1).join('__')) {
+    return {
+      code: doubleParts[0].slice(0, 40),
+      name: doubleParts.slice(1).join('__').slice(0, 40),
+    };
+  }
+  const separator = base.indexOf('_');
+  if (separator > 0 && separator < base.length - 1) {
+    return {
+      code: base.slice(0, separator).slice(0, 40),
+      name: base.slice(separator + 1).slice(0, 40),
+    };
+  }
+  return { code: base.slice(0, 40), name: base.slice(0, 40) };
+}
+
+function batchIngestForm(form, job) {
+  const source = new FormData(form);
+  const skip = new Set([
+    'candidate_code', 'candidate_name', 'transcript_file', 'media_file',
+    'candidate_notes', 'run_id', 'slot_key',
+  ]);
+  const data = new FormData();
+  source.forEach((value, key) => {
+    if (!skip.has(key)) data.append(key, value);
+  });
+  const identity = batchIdentity(job.file.name);
+  data.append('candidate_code', identity.code);
+  data.append('candidate_name', identity.name);
+  data.append(job.kind === 'transcript' ? 'transcript_file' : 'media_file', job.file);
+  return data;
+}
+
+function renderBatchIngestResult(results, failures) {
+  const box = $('#ingest-result');
+  if (!box) return;
+  const rows = results.map((data) => {
+    const attempt = data.attempt;
+    return `<div class="version-row">
+      <span class="k">${esc(attempt.candidate_code)} · ${esc(attempt.candidate_name)}</span>
+      <span class="v">${statusPill(attempt.status)} · 待复核 ${attempt.pending} 项 · <a class="link-btn" href="#/feedback" data-open-feedback="${esc(attempt.attempt_id)}">反馈</a></span>
+    </div>`;
+  }).join('');
+  const failureRows = failures.map((failure) => (
+    `<div class="violation">${esc(failure.name)}：${esc(failure.message)}</div>`
+  )).join('');
+  box.innerHTML = `
+    <div class="sep"></div>
+    <div class="card-title">批量导入结果<span class="sub">成功 ${results.length} 场 · 失败 ${failures.length} 场</span></div>
+    ${rows || '<div class="tiny muted">没有成功导入的场次。</div>'}
+    ${failureRows ? `<div style="margin-top:6px">${failureRows}</div>` : ''}
+    <div class="btn-row" style="margin-top:8px">
+      <a class="btn small" href="#/review">进入复核队列</a>
+      <a class="btn small" href="#/overview">返回总览</a>
+    </div>
+    <div class="tiny muted" style="margin-top:6px">批量模式按文件名拆分考生信息；如命名不符合约定，请在复核前核对考生编号与姓名。</div>`;
 }
 
 function renderIngestResult(data) {
