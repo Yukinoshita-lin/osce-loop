@@ -171,6 +171,7 @@ def test_cost_over_target_alerts(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "app.domain.gates.ai_cost_summary",
         lambda conn: {
+            "priced_calls": 3,
             "targets": [
                 {
                     "key": "exam",
@@ -180,12 +181,48 @@ def test_cost_over_target_alerts(tmp_path, monkeypatch):
                     "target_cny": 60.0,
                     "status": "fail",
                 }
-            ]
+            ],
         },
     )
     gates = evaluate_gates(conn, _report(0.2, 40), "G0_offline")
     titles = [alert["title"] for alert in gates["alerts"]]
     assert any("考试单站成本 ¥72.00 超过目标 ¥60" in title for title in titles)
+    conn.close()
+
+
+def test_unpriced_cost_alerts(tmp_path, monkeypatch):
+    conn = _conn(tmp_path)
+    monkeypatch.setattr(
+        "app.domain.gates.ai_cost_summary",
+        lambda conn: {"priced_calls": 0, "targets": []},
+    )
+    gates = evaluate_gates(conn, _report(0.2, 40), "G0_offline")
+    assert any("单站成本尚未计量" in alert["title"] for alert in gates["alerts"])
+    conn.close()
+
+
+def test_priced_cost_within_target_does_not_alert(tmp_path, monkeypatch):
+    conn = _conn(tmp_path)
+    monkeypatch.setattr(
+        "app.domain.gates.ai_cost_summary",
+        lambda conn: {
+            "priced_calls": 12,
+            "targets": [
+                {
+                    "key": "practice",
+                    "label": "练习",
+                    "attempts": 4,
+                    "avg_cny": 8.0,
+                    "target_cny": 15.0,
+                    "status": "pass",
+                }
+            ],
+        },
+    )
+    gates = evaluate_gates(conn, _report(0.2, 40), "G0_offline")
+    titles = [alert["title"] for alert in gates["alerts"]]
+    assert not any("单站成本尚未计量" in title for title in titles)
+    assert not any("超过目标" in title for title in titles)
     conn.close()
 
 

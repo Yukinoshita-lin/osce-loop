@@ -565,7 +565,19 @@ def evaluate_gates(conn, report: dict[str, Any], current_stage: str) -> dict[str
                 "detail": "改判率偏高说明初评存在系统性偏差；建议检查行为锚、评分员校准与 AI 建议校准。",
             }
         )
-    for row in ai_cost_summary(conn).get("targets") or []:
+    cost_summary = ai_cost_summary(conn)
+    if not cost_summary.get("priced_calls"):
+        alerts.append(
+            {
+                "level": "warn",
+                "title": "单站成本尚未计量",
+                "detail": (
+                    "S9 的练习 ≤ ¥15 / 考试 ≤ ¥60 目标当前无法验证：尚无已计价 AI 调用，"
+                    "或模型/ASR 单价未配置。请先配置单价并确认调用日志，再评估成本。"
+                ),
+            }
+        )
+    for row in cost_summary.get("targets") or []:
         if row["status"] == "fail":
             alerts.append(
                 {
