@@ -11,7 +11,7 @@ from app.ai.mock import MockScoringProvider
 from app.config import MODEL_VERSION, PROMPT_VERSION
 from app.domain.bundle import freeze_bundle
 from app.domain.ingest import create_ingested_attempt
-from app.domain.rescore import rescore_attempt
+from app.domain.rescore import rescore_attempt, rescore_eligible_attempts
 from app.domain.transcript import parse_transcript
 from app.seed import build_bundle_payload
 
@@ -129,6 +129,30 @@ def test_rescore_blocked_for_locked_attempt(conn, bundle, status):
     conn.commit()
     with pytest.raises(ValueError, match="不能重跑评分"):
         rescore_attempt(conn, _new_gateway(conn), attempt_id=attempt_id)
+
+
+def test_rescore_batch_skips_reviewed_attempts(conn, bundle):
+    first = _ingest(conn, bundle)
+    second = _ingest(conn, bundle)
+    record = conn.execute(
+        "SELECT * FROM score_records WHERE attempt_id = ? LIMIT 1", (second,)
+    ).fetchone()
+    conn.execute(
+        "UPDATE score_records SET reviewer = ?, reviewed_at = ? WHERE record_id = ?",
+        ("评分员", db.now_iso(), record["record_id"]),
+    )
+    conn.commit()
+    result = rescore_eligible_attempts(conn, _new_gateway(conn), actor="测试")
+    assert result["considered"] == 2
+    assert [entry["attempt_id"] for entry in result["rescored"]] == [first]
+    assert len(result["skipped"]) == 1
+    assert result["skipped"][0]["attempt_id"] == second
+    assert "人工复核" in result["skipped"][0]["reason"]
+    event = conn.execute(
+        "SELECT * FROM audit_events WHERE action = 'attempt.rescore_batch'"
+    ).fetchone()
+    assert event is not None
+    conn.close()
 
 
 def test_rescore_requires_transcript(conn, bundle):

@@ -3546,7 +3546,11 @@ async function viewQuality() {
         <div class="sep"></div>
         <div class="card-title">治理自检<span class="sub">异常自动降级</span></div>
         ${selfCheckHtml(data.latest_self_check)}
-        <div class="btn-row" style="margin-top:8px"><button class="btn small primary" data-action="self-check">运行治理自检</button></div>
+        <div class="btn-row" style="margin-top:8px">
+          <button class="btn small primary" data-action="self-check">运行治理自检</button>
+          <button class="btn small" data-action="rescore-batch" title="已复核、已签字或已发布场次会自动跳过">重跑未复核场次</button>
+        </div>
+        <div class="tiny muted" style="margin-top:4px">批量重跑只覆盖尚未人工复核的 AI 建议分，金标准保留。</div>
       </div>
       <div class="card">
         <div class="card-title">AI 调用<span class="sub">网关唯一出口</span></div>
@@ -4479,6 +4483,17 @@ document.addEventListener('click', async (e) => {
       const result = await api('/api/retention/purge', { method: 'POST', body: { apply: true } });
       const failed = result.summary.failed || 0;
       toast(`已清理 ${result.summary.purged_attempts} 个场次媒体，删除 ${result.deleted_files} 个文件，释放 ${bytesText(result.freed_bytes)}${failed ? `；${failed} 个文件删除失败，将重试` : ''}`);
+      await viewQuality();
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'rescore-batch') {
+    if (!confirm('批量重跑所有未复核场次？已复核、已签字或已发布场次会自动跳过；已有金标准保留。')) return;
+    try {
+      const result = await api('/api/attempts/rescore-batch', { method: 'POST' });
+      toast(`批量重跑完成：${result.rescored.length}/${result.considered} 场，跳过 ${result.skipped.length} 场`);
       await viewQuality();
     } catch (err) {
       toast(err.message, true);

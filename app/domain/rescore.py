@@ -91,3 +91,60 @@ def rescore_attempt(
         "model_version": gateway.model_version,
         "prompt_version": gateway.prompt_version,
     }
+
+
+def rescore_eligible_attempts(
+    conn,
+    gateway: CapabilityGateway,
+    *,
+    bundle_id: str | None = None,
+    actor: str = "考务",
+    limit: int = 200,
+) -> dict[str, Any]:
+    """批量重跑未复核场次；已复核、已签字或已发布场次自动跳过并说明原因。"""
+    sql = "SELECT attempt_id FROM attempts"
+    params: list[Any] = []
+    if bundle_id:
+        sql += " WHERE bundle_id = ?"
+        params.append(bundle_id)
+    sql += " ORDER BY created_at, rowid LIMIT ?"
+    params.append(max(1, min(limit, 500)))
+    rows = conn.execute(sql, params).fetchall()
+
+    rescored: list[dict[str, Any]] = []
+    skipped: list[dict[str, str]] = []
+    for row in rows:
+        try:
+            rescored.append(
+                rescore_attempt(conn, gateway, attempt_id=row["attempt_id"], actor=actor)
+            )
+        except ValueError as exc:
+            skipped.append({"attempt_id": row["attempt_id"], "reason": str(exc)})
+    batch_id = db.new_id("rescbatch")
+    db.append_audit(
+        conn,
+        actor=actor,
+        action="attempt.rescore_batch",
+        object_type="BatchJob",
+        object_id=batch_id,
+        before=None,
+        after={
+            "bundle_id": bundle_id,
+            "considered": len(rows),
+            "rescored": len(rescored),
+            "skipped": len(skipped),
+            "model_version": gateway.model_version,
+            "prompt_version": gateway.prompt_version,
+        },
+        model_version=gateway.model_version,
+        prompt_version=gateway.prompt_version,
+    )
+    return {
+        "batch_id": batch_id,
+        "bundle_id": bundle_id,
+        "considered": len(rows),
+        "rescored": rescored,
+        "skipped": skipped,
+        "model_version": gateway.model_version,
+        "prompt_version": gateway.prompt_version,
+    }

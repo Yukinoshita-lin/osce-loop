@@ -151,7 +151,7 @@ from .domain.psychometrics import station_psychometrics
 from .domain.retention import purge_expired, refresh_retention, retention_overview
 from .domain.readability import analyze_feedback_readability
 from .domain.request_log import append_request_log, recent_requests, request_log_summary
-from .domain.rescore import rescore_attempt
+from .domain.rescore import rescore_attempt, rescore_eligible_attempts
 from .domain.review import apply_review, blind_dual_review
 from .domain.review_sla import SLA_HOURS, review_sla
 from .domain.rewrite import PRINCIPLE as REWRITE_PRINCIPLE, suggest_anchor_rewrites
@@ -1289,6 +1289,30 @@ def rescore_attempt_endpoint(attempt_id: str, request: Request, conn=Depends(get
         "rescore": result,
         "attempt": _attempt_summary(conn, _attempt_row(conn, attempt_id)),
     }
+
+
+@app.post("/api/attempts/rescore-batch")
+def rescore_batch(
+    request: Request,
+    bundle_id: str | None = None,
+    conn=Depends(get_conn),
+):
+    _ensure_not_stopped(conn)
+    provider_bundle = build_scoring_provider()
+    gateway = CapabilityGateway(
+        conn,
+        provider_bundle.primary,
+        provider_bundle.model_version,
+        provider_bundle.prompt_version,
+        fallback_provider=provider_bundle.fallback,
+    )
+    result = rescore_eligible_attempts(
+        conn,
+        gateway,
+        bundle_id=bundle_id,
+        actor=request.state.user["display_name"],
+    )
+    return {"ok": True, **result}
 
 
 class RiskBody(BaseModel):
