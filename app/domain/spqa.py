@@ -11,6 +11,7 @@ from typing import Any
 from .. import db
 from ..config import SP_CERT_VALID_DAYS
 from .bundle import list_bundles
+from .content_audit import build_regression_cases
 from .slots import DialogueStateMachine, SPController, scan_leaks
 from .sp_approval import persona_approval_status
 
@@ -113,7 +114,7 @@ def _p95(values: list[float]) -> float | None:
     return round(ordered[index], 2)
 
 
-def run_red_team(bundle: dict[str, Any]) -> dict[str, Any]:
+def run_red_team(bundle: dict[str, Any], extra_cases: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     payload = bundle["payload"]
     derived = bundle["derived"]
     cases: list[dict[str, Any]] = []
@@ -124,7 +125,8 @@ def run_red_team(bundle: dict[str, Any]) -> dict[str, Any]:
     p0_incidents = 0
     latencies: list[float] = []
 
-    for case in RED_TEAM_CASES:
+    regression_cases = list(extra_cases or [])
+    for case in RED_TEAM_CASES + regression_cases:
         machine = DialogueStateMachine(payload, derived)
         controller = SPController(machine)
         state = machine.start()
@@ -179,6 +181,7 @@ def run_red_team(bundle: dict[str, Any]) -> dict[str, Any]:
                 "case_id": case["case_id"],
                 "name": case["name"],
                 "why": case["why"],
+                "forbidden": list(case.get("forbidden") or []),
                 "passed": passed,
                 "degraded_turns": case_degraded,
                 "leaks": [e for v in case_leaks for e in v.get("entities", [])],
@@ -202,6 +205,8 @@ def run_red_team(bundle: dict[str, Any]) -> dict[str, Any]:
         "persona_first_pass_rate": persona_first_pass,
         "p0_incidents": p0_incidents,
         "p95_latency_ms": _p95(latencies),
+        "regression_case_count": len(regression_cases),
+        "regression_case_ids": [case["case_id"] for case in regression_cases],
     }
 
 
@@ -285,8 +290,10 @@ def sp_runtime_summary(conn, *, recent_limit: int = 5) -> dict[str, Any]:
     }
 
 
-def run_certification(bundle: dict[str, Any]) -> dict[str, Any]:
-    red_team = run_red_team(bundle)
+def run_certification(
+    bundle: dict[str, Any], extra_cases: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
+    red_team = run_red_team(bundle, extra_cases=extra_cases)
     consistency = run_consistency(bundle, runs=20)
     checks = [
         {
@@ -344,6 +351,8 @@ def run_certification(bundle: dict[str, Any]) -> dict[str, Any]:
         "valid": status == "certified",
         "stale": False,
         "case_stale": False,
+        "regression_case_count": red_team.get("regression_case_count", 0),
+        "regression_case_ids": red_team.get("regression_case_ids", []),
         "checks": checks,
         "red_team": red_team,
         "consistency": consistency,
@@ -351,8 +360,16 @@ def run_certification(bundle: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def certify_bundle(conn, bundle: dict[str, Any], actor: str = "SP 认证员") -> dict[str, Any]:
-    report = run_certification(bundle)
+def certify_bundle(
+    conn,
+    bundle: dict[str, Any],
+    actor: str = "SP 认证员",
+    extra_cases: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    regression_cases = (
+        build_regression_cases(conn) if extra_cases is None else extra_cases
+    )
+    report = run_certification(bundle, extra_cases=regression_cases)
     cert_id = db.new_id("cert")
     created = datetime.fromisoformat(report["created_at"])
     valid_until = (created + timedelta(days=SP_CERT_VALID_DAYS)).isoformat(timespec="seconds")
@@ -387,6 +404,7 @@ def certify_bundle(conn, bundle: dict[str, Any], actor: str = "SP 认证员") ->
             "status": report["status"],
             "checks": {c["key"]: c["value"] for c in report["checks"]},
             "case_count": report["red_team"]["case_count"],
+            "regression_case_count": report.get("regression_case_count", 0),
             "consistency": report["consistency"]["rate"],
         },
         model_version=db.get_state(conn, "sp_model_version"),

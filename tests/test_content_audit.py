@@ -8,6 +8,7 @@ import pytest
 from app import db
 from app.domain.content_audit import (
     audit_utterances,
+    build_regression_cases,
     content_audit_summary,
     review_finding,
     run_content_audit,
@@ -114,6 +115,10 @@ def test_content_findings_can_be_reviewed_and_summary_updates(tmp_path):
         "SELECT * FROM audit_events WHERE action = 'content.finding_reviewed'"
     ).fetchone()
     assert event is not None
+    cases = build_regression_cases(conn)
+    assert cases
+    assert cases[0]["source_finding_id"] == finding["finding_id"]
+    assert cases[0]["turns"]
     conn.close()
 
 

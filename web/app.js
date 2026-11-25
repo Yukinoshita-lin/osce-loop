@@ -2364,6 +2364,7 @@ function renderSP() {
         <div class="version-row"><span class="k">信息泄露</span><span class="v">${cert.red_team.leak_count}</span></div>
         <div class="version-row"><span class="k">人格首轮通过</span><span class="v">${pct(cert.red_team.persona_first_pass_rate, 0)}</span></div>
         <div class="version-row"><span class="k">跨会话一致性</span><span class="v">${pct(cert.consistency.rate, 0)}</span></div>
+        ${cert.regression_case_count ? `<div class="version-row"><span class="k">现场回归用例</span><span class="v">${cert.regression_case_count} 条 <span class="tiny muted">来自已确认内容审计线索</span></span></div>` : ''}
         <div class="version-row"><span class="k">P95 单轮延迟</span><span class="v">${num(cert.red_team.p95_latency_ms, 0)} ms</span></div>
         <div class="version-row"><span class="k">认证有效期</span><span class="v">${cert.valid_until ? `${fmtTime(cert.valid_until)} · 剩余 ${cert.days_remaining} 天` : '未设置'}</span></div>
         ${cert.expired ? `<div class="violation">认证已于 ${esc(fmtTime(cert.valid_until))} 过期；G1 的 SP 指标按未采集处理，请按季度更新红队用例并复测。</div>` : ''}

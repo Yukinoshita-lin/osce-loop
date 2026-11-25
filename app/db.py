@@ -367,6 +367,7 @@ CREATE TABLE IF NOT EXISTS content_audit_findings (
     role TEXT NOT NULL,
     label TEXT NOT NULL,
     quote TEXT NOT NULL,
+    match TEXT,
     start_ms INTEGER NOT NULL DEFAULT -1,
     status TEXT NOT NULL DEFAULT 'open',
     reviewed_by TEXT,
@@ -754,6 +755,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
         ("reviewed_by", "TEXT"),
         ("reviewed_at", "TEXT"),
         ("review_note", "TEXT"),
+        ("match", "TEXT"),
     ):
         if column not in finding_columns:
             conn.execute(f"ALTER TABLE content_audit_findings ADD COLUMN {column} {ddl}")
