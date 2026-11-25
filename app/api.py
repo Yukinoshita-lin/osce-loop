@@ -83,7 +83,11 @@ from .domain.bundle_integrity import verify_bundle_integrity
 from .domain.calibration import calibration_report, import_gold_scores, parse_gold_file
 from .domain.consent import consent_status, record_consent
 from .domain.cost import ai_cost_summary
-from .domain.dataflow import data_flow_status
+from .domain.dataflow import (
+    data_flow_status,
+    latest_data_flow_review,
+    record_data_flow_review as record_flow_review,
+)
 from .domain.coverage import blueprint_coverage
 from .domain.critical_miss import critical_misses, record_critical_miss_review
 from .domain.content_audit import run_content_audit
@@ -2206,6 +2210,7 @@ def quality(conn=Depends(get_conn)):
         "ai_provider": scoring_provider_info(),
         "asr_provider": build_asr_provider().info,
         "data_flow": data_flow_status(),
+        "data_flow_review": latest_data_flow_review(conn),
         "sus": sus_summary(conn),
         "asr_quality": benchmark_summary(conn),
         "calibration": calibration_report(conn),
@@ -2707,6 +2712,27 @@ class GovernanceBody(BaseModel):
 def governance_self_check(body: GovernanceBody, conn=Depends(get_conn)):
     result = run_self_check(conn, actor=body.actor, apply=body.apply)
     return {"ok": True, **result}
+
+
+class DataFlowReviewBody(BaseModel):
+    note: str = Field(default="", max_length=500)
+    valid_days: int = Field(default=365, ge=30, le=730)
+
+
+@app.post("/api/governance/data-flow-review")
+def governance_data_flow_review(
+    body: DataFlowReviewBody,
+    request: Request,
+    conn=Depends(get_conn),
+):
+    _ensure_not_stopped(conn)
+    review = record_flow_review(
+        conn,
+        actor=request.state.user["display_name"],
+        note=body.note,
+        valid_days=body.valid_days,
+    )
+    return {"ok": True, "review": review, "latest": latest_data_flow_review(conn)}
 
 
 class TerminationBody(BaseModel):

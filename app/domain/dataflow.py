@@ -6,9 +6,12 @@
 from __future__ import annotations
 
 import ipaddress
+import json
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlparse
 
+from .. import db
 from ..config import (
     AI_ALLOW_EXTERNAL,
     AI_BASE_URL,
@@ -21,6 +24,8 @@ from ..config import (
 
 PRIVATE_SUFFIXES = (".local", ".internal", ".lan", ".intranet")
 DISABLED_PROVIDERS = {"", "off", "none", "mock"}
+REVIEW_VALID_DAYS = 365
+REVIEW_DUE_SOON_DAYS = 30
 
 
 def host_kind(host: str | None) -> str:
@@ -81,4 +86,107 @@ def data_flow_status() -> dict[str, Any]:
             "评分与 ASR 默认应使用本机或内网端点；公网端点必须在配置中显式放行，"
             "并确认数据出境/出校合规审查。"
         ),
+    }
+
+
+def record_data_flow_review(
+    conn,
+    *,
+    actor: str,
+    note: str = "",
+    valid_days: int = REVIEW_VALID_DAYS,
+) -> dict[str, Any]:
+    """记录年度数据流向复核：固化当时的端点快照与合规结论，并写入审计链。"""
+    status = data_flow_status()
+    now = datetime.now(timezone.utc).astimezone()
+    days = max(30, min(int(valid_days), 730))
+    valid_until = (now + timedelta(days=days)).isoformat(timespec="seconds")
+    endpoints = [
+        {
+            "kind": flow["kind"],
+            "label": flow["label"],
+            "host": flow["host"],
+            "scope": flow["scope"],
+            "external": flow["external"],
+            "allowed": flow["allowed"],
+        }
+        for flow in status["flows"]
+    ]
+    review_id = db.new_id("dfr")
+    timestamp = now.isoformat(timespec="seconds")
+    conn.execute(
+        "INSERT INTO data_flow_reviews(review_id, actor, endpoints, note, valid_until, created_at) "
+        "VALUES(?,?,?,?,?,?)",
+        (
+            review_id,
+            actor,
+            json.dumps(endpoints, ensure_ascii=False),
+            note.strip() or None,
+            valid_until,
+            timestamp,
+        ),
+    )
+    conn.commit()
+    db.append_audit(
+        conn,
+        actor=actor,
+        action="dataflow.review",
+        object_type="DataFlowReview",
+        object_id=review_id,
+        before=None,
+        after={
+            "endpoints": endpoints,
+            "compliant": status["compliant"],
+            "valid_until": valid_until,
+            "note": note.strip(),
+        },
+    )
+    return {
+        "review_id": review_id,
+        "actor": actor,
+        "endpoints": endpoints,
+        "compliant": status["compliant"],
+        "note": note.strip(),
+        "valid_until": valid_until,
+        "created_at": timestamp,
+    }
+
+
+def latest_data_flow_review(conn) -> dict[str, Any] | None:
+    row = conn.execute(
+        "SELECT * FROM data_flow_reviews ORDER BY created_at DESC, rowid DESC LIMIT 1"
+    ).fetchone()
+    if not row:
+        return None
+    try:
+        endpoints = json.loads(row["endpoints"] or "[]")
+    except (TypeError, ValueError):
+        endpoints = []
+    expires = None
+    if row["valid_until"]:
+        try:
+            expires = datetime.fromisoformat(row["valid_until"])
+        except ValueError:
+            expires = None
+    now = datetime.now(timezone.utc).astimezone()
+    if expires is None:
+        expired = True
+        days_remaining = 0
+    else:
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        remaining = expires - now
+        expired = remaining.total_seconds() <= 0
+        days_remaining = max(0, int(remaining.total_seconds() // 86400))
+    return {
+        "review_id": row["review_id"],
+        "actor": row["actor"],
+        "endpoints": endpoints,
+        "note": row["note"],
+        "valid_until": row["valid_until"],
+        "created_at": row["created_at"],
+        "expired": expired,
+        "days_remaining": days_remaining,
+        "due_soon": (not expired) and days_remaining <= REVIEW_DUE_SOON_DAYS,
+        "valid": not expired,
     }

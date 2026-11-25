@@ -13,7 +13,7 @@ from .bundle import list_bundles
 from .consent import consent_status
 from .cost import ai_cost_summary
 from .critical_miss import critical_misses
-from .dataflow import data_flow_status
+from .dataflow import data_flow_status, latest_data_flow_review
 from .fairness import fairness_report
 from .latency import feedback_ack_latency
 from .sp_approval import persona_approval_status
@@ -636,6 +636,30 @@ def evaluate_gates(conn, report: dict[str, Any], current_stage: str) -> dict[str
                 ),
             }
         )
+    if current_stage in ("G2_simulation", "G3_limited") or flow["external"]:
+        review = latest_data_flow_review(conn)
+        if review is None:
+            alerts.append(
+                {
+                    "level": "warn",
+                    "title": "尚未完成数据流向年度复核",
+                    "detail": (
+                        "请核对模型/ASR 端点、数据出境与授权状态，并在质量页记录年度复核；"
+                        "复核有效期默认 365 天，到期后需重新核对。"
+                    ),
+                }
+            )
+        elif review["expired"]:
+            alerts.append(
+                {
+                    "level": "warn",
+                    "title": "数据流向复核已过期",
+                    "detail": (
+                        f"上次复核于 {review['created_at']}，有效期至 {review['valid_until']}；"
+                        "请重新核对端点与数据合规状态并记录新一轮复核。"
+                    ),
+                }
+            )
     ready = (feedback_ack_latency(conn) or {}).get("ready") or {}
     practice_ready = ready.get("practice") or {}
     if practice_ready.get("status") == "fail":

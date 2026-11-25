@@ -2812,7 +2812,7 @@ function selfCheckHtml(selfCheck) {
   `;
 }
 
-function p3SectionHtml(gov, gates) {
+function p3SectionHtml(gov, gates, flowReview) {
   const g3 = (gates || []).find((g) => g.id === 'G3');
   const stage = gov.release_stage || 'G0_offline';
   const stageLabel = {
@@ -2838,6 +2838,9 @@ function p3SectionHtml(gov, gates) {
           <div class="version-row"><span class="k">申诉流程演练</span><span class="v">${appeal.passed || 0} / 2 次通过</span></div>
           <div class="version-row"><span class="k">伦理与数据合规</span><span class="v">${gov.ethics_approved ? '<span class="pill teal">已批准</span>' : '<span class="pill red">未批准</span>'}</span></div>
           <div class="version-row"><span class="k">学术委员会审议</span><span class="v">${gov.academic_committee_approved ? '<span class="pill teal">已审议</span>' : '<span class="pill red">未审议</span>'}</span></div>
+          <div class="version-row"><span class="k">数据流向复核</span><span class="v">${flowReview
+            ? `${flowReview.valid ? '<span class="pill teal">有效</span>' : '<span class="pill red">已过期</span>'} · ${flowReview.days_remaining} 天后到期 · ${(flowReview.endpoints || []).length} 个端点`
+            : '<span class="pill amber">未复核</span>'}</span></div>
           <div class="version-row"><span class="k">模型卡与数据表</span><span class="v">${gov.model_card_public && gov.data_sheet_public ? '<span class="pill teal">已公开</span>' : '<span class="pill red">未公开</span>'}</span></div>
         </div>
         <div>
@@ -2846,6 +2849,7 @@ function p3SectionHtml(gov, gates) {
             <button class="btn small" data-action="appeal-drill">申诉流程演练</button>
             <button class="btn small" data-action="approve-ethics">登记伦理批准</button>
             <button class="btn small" data-action="approve-committee">登记学术委员会审议</button>
+            <button class="btn small" data-action="dataflow-review">记录数据流向复核</button>
             <button class="btn small" data-action="publish-model-card">公开模型卡与数据表</button>
           </div>
           <div class="sep"></div>
@@ -3557,7 +3561,7 @@ async function viewQuality() {
       ${fairnessSectionHtml(data.fairness)}
     </div>
 
-    ${p3SectionHtml(data.governance || {}, gates)}
+    ${p3SectionHtml(data.governance || {}, gates, data.data_flow_review || null)}
 
     <div class="grid c2" style="margin-bottom:16px">
       <div class="card">
@@ -4629,6 +4633,21 @@ document.addEventListener('click', async (e) => {
         },
       });
       toast('学术委员会审议已登记');
+      await viewQuality();
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
+  if (action === 'dataflow-review') {
+    const note = prompt('填写年度数据流向复核说明（端点、合规依据、数据流向变化）：', '年度数据流向与外部端点复核');
+    if (note === null) return;
+    try {
+      const result = await api('/api/governance/data-flow-review', {
+        method: 'POST',
+        body: { note: note.trim(), valid_days: 365 },
+      });
+      toast(`已记录数据流向复核，有效期至 ${fmtTime(result.review.valid_until)}`);
       await viewQuality();
     } catch (err) {
       toast(err.message, true);

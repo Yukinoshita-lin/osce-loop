@@ -1,6 +1,9 @@
-"""数据流向：模型与 ASR 端点的内网/公网分类与合规判定。"""
+"""数据流向：模型与 ASR 端点的内网/公网分类、合规判定与年度复核。"""
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
+from app import db
 from app.domain import dataflow
 
 
@@ -59,3 +62,37 @@ def test_mock_providers_have_no_flows(monkeypatch):
     status = dataflow.data_flow_status()
     assert status["flows"] == []
     assert status["compliant"] is True
+
+
+def test_data_flow_review_records_snapshot_and_validity(tmp_path):
+    conn = db.connect(tmp_path / "dataflow_review.db")
+    db.init_db(conn)
+    review = dataflow.record_data_flow_review(conn, actor="test", note="年度复核")
+    assert review["endpoints"] == []
+    latest = dataflow.latest_data_flow_review(conn)
+    assert latest["valid"] is True
+    assert latest["expired"] is False
+    assert latest["days_remaining"] >= 360
+    assert conn.execute("SELECT COUNT(*) AS n FROM data_flow_reviews").fetchone()["n"] == 1
+    assert (
+        conn.execute("SELECT COUNT(*) AS n FROM audit_events WHERE action = 'dataflow.review'").fetchone()["n"]
+        == 1
+    )
+    conn.close()
+
+
+def test_expired_data_flow_review_is_flagged(tmp_path):
+    conn = db.connect(tmp_path / "dataflow_expired.db")
+    db.init_db(conn)
+    past = (datetime.now(timezone.utc).astimezone() - timedelta(days=1)).isoformat(timespec="seconds")
+    conn.execute(
+        "INSERT INTO data_flow_reviews(review_id, actor, endpoints, note, valid_until, created_at) "
+        "VALUES(?,?,?,?,?,?)",
+        ("dfr_old", "test", "[]", "旧复核", past, past),
+    )
+    conn.commit()
+    latest = dataflow.latest_data_flow_review(conn)
+    assert latest["expired"] is True
+    assert latest["valid"] is False
+    assert latest["days_remaining"] == 0
+    conn.close()

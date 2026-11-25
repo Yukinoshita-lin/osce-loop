@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from app import db
+from app.domain.dataflow import record_data_flow_review
 from app.domain.gates import _g2_metric_issues, _technical_metric_issues, evaluate_gates
 
 
@@ -91,6 +92,21 @@ def test_external_model_endpoint_alerts_at_g3(tmp_path, monkeypatch):
     alert = next(item for item in gates["alerts"] if "端点不在内网" in item["title"])
     assert alert["level"] == "danger"
     assert "api.example.com" in alert["detail"]
+    conn.close()
+
+
+def test_missing_data_flow_review_alerts_until_recorded(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "app.domain.gates.data_flow_status",
+        lambda: {"flows": [], "external": [], "compliant": True},
+    )
+    conn = _conn(tmp_path)
+    first = evaluate_gates(conn, _report(0.2, 40), "G3_limited")
+    assert any("数据流向年度复核" in alert["title"] for alert in first["alerts"])
+
+    record_data_flow_review(conn, actor="test", note="年度复核")
+    second = evaluate_gates(conn, _report(0.2, 40), "G3_limited")
+    assert not any("数据流向年度复核" in alert["title"] for alert in second["alerts"])
     conn.close()
 
 

@@ -350,6 +350,15 @@ CREATE TABLE IF NOT EXISTS appeal_drills (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS data_flow_reviews (
+    review_id TEXT PRIMARY KEY,
+    actor TEXT NOT NULL,
+    endpoints TEXT NOT NULL,
+    note TEXT,
+    valid_until TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS governance_approvals (
     approval_id TEXT PRIMARY KEY,
     approval_type TEXT NOT NULL UNIQUE,
