@@ -102,6 +102,7 @@ from .domain.feedback import (
 )
 from .domain.gates import evaluate_gates
 from .domain.governance import (
+    change_model_version,
     emergency_stop_active,
     governance_status,
     latest_self_check,
@@ -2246,37 +2247,16 @@ class VersionBody(BaseModel):
 
 @app.post("/api/governance/version-bump")
 def version_bump(body: VersionBody, conn=Depends(get_conn)):
-    old_model = db.get_state(conn, "model_version", MODEL_VERSION)
-    old_prompt = db.get_state(conn, "prompt_version", PROMPT_VERSION)
-    new_model = body.model_version or f"{old_model}-next"
-    new_prompt = body.prompt_version or old_prompt
-    changes = apply_authority_reset(
-        conn,
-        reason=f"模型/提示词版本变更：{old_model}/{old_prompt} → {new_model}/{new_prompt}",
-        actor=body.actor,
-        model_version=new_model,
-        prompt_version=new_prompt,
-    )
-    db.set_state(conn, "model_version", new_model)
-    db.set_state(conn, "prompt_version", new_prompt)
-    db.append_audit(
-        conn,
-        actor=body.actor,
-        action="governance.version_change",
-        object_type="ModelVersion",
-        object_id="score.suggest",
-        before={"model_version": old_model, "prompt_version": old_prompt},
-        after={"model_version": new_model, "prompt_version": new_prompt, "downgraded": len(changes)},
-        model_version=new_model,
-        prompt_version=new_prompt,
-    )
-    return {
-        "ok": True,
-        "model_version": new_model,
-        "prompt_version": new_prompt,
-        "changes": changes,
-        "overrides": list_overrides(conn),
-    }
+    try:
+        result = change_model_version(
+            conn,
+            model_version=body.model_version,
+            prompt_version=body.prompt_version,
+            actor=body.actor,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, **result, "overrides": list_overrides(conn)}
 
 
 @app.get("/api/fairness")

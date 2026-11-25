@@ -607,3 +607,50 @@ def set_release_stage(conn, *, stage: str, actor: str, reason: str) -> dict[str,
         after={"release_stage": stage, "reason": reason},
     )
     return {"old_stage": current, "new_stage": stage, "actor": actor, "reason": reason}
+
+
+def change_model_version(
+    conn,
+    *,
+    model_version: str | None = None,
+    prompt_version: str | None = None,
+    actor: str = "系统管理员",
+) -> dict[str, Any]:
+    """模型/提示词变更：降级既有 AI 权限，并立即生成绑定新版本的模型卡快照。"""
+    from .transparency import refresh_transparency_assets
+
+    old_model = db.get_state(conn, "model_version", MODEL_VERSION)
+    old_prompt = db.get_state(conn, "prompt_version", PROMPT_VERSION)
+    new_model = (model_version or "").strip() or f"{old_model}-next"
+    new_prompt = (prompt_version or "").strip() or old_prompt
+    changes = apply_authority_reset(
+        conn,
+        reason=f"模型/提示词版本变更：{old_model}/{old_prompt} → {new_model}/{new_prompt}",
+        actor=actor,
+        model_version=new_model,
+        prompt_version=new_prompt,
+    )
+    db.set_state(conn, "model_version", new_model)
+    db.set_state(conn, "prompt_version", new_prompt)
+    db.append_audit(
+        conn,
+        actor=actor,
+        action="governance.version_change",
+        object_type="ModelVersion",
+        object_id="score.suggest",
+        before={"model_version": old_model, "prompt_version": old_prompt},
+        after={"model_version": new_model, "prompt_version": new_prompt, "downgraded": len(changes)},
+        model_version=new_model,
+        prompt_version=new_prompt,
+    )
+    snapshot = refresh_transparency_assets(conn, actor=actor)
+    return {
+        "model_version": new_model,
+        "prompt_version": new_prompt,
+        "changes": changes,
+        "model_card": {
+            "card_id": snapshot["card_id"],
+            "data_sheet_version": snapshot["data_sheet_version"],
+            "is_public": snapshot["is_public"],
+        },
+    }

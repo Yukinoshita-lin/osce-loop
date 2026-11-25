@@ -4971,14 +4971,14 @@ document.addEventListener('click', async (e) => {
     return;
   }
   if (action === 'version-bump') {
-    if (!confirm('模拟模型/提示词版本变更？系统会把所有 suggest/decide 权限自动降为 extract，并写入审计。')) return;
+    if (!confirm('模拟模型/提示词版本变更？系统会把所有 suggest/decide 权限自动降为 extract，生成新版本模型卡快照，并写入审计。')) return;
     try {
       const model = 'mock-score-1.1';
       const result = await api('/api/governance/version-bump', {
         method: 'POST',
         body: { model_version: model, actor: state.reviewer || '系统管理员' },
       });
-      toast(`版本已切换为 ${result.model_version}，${result.changes.length} 个评分项权限自动降级`);
+      toast(`版本已切换为 ${result.model_version}，${result.changes.length} 个评分项权限自动降级${result.model_card ? '，已生成模型卡快照' : ''}`);
       await viewQuality();
     } catch (err) {
       toast(err.message, true);

@@ -8,7 +8,7 @@ import pytest
 
 from app import db
 from app.domain.gates import evaluate_gates
-from app.domain.governance import publish_model_card
+from app.domain.governance import change_model_version, publish_model_card
 from app.domain.stats import quality_report
 from app.domain.transparency import (
     acknowledge_disclosure,
@@ -138,6 +138,23 @@ def test_refresh_creates_new_private_assets(conn):
     ).fetchone()
     assert event is not None
     assert json.loads(event["after"])["data_sheet_version"] == "1.1"
+
+
+def test_version_change_creates_private_model_card_snapshot(conn):
+    cards_before = conn.execute("SELECT COUNT(*) AS n FROM model_cards").fetchone()["n"]
+    result = change_model_version(
+        conn, model_version="score-9.9", prompt_version="prompt-9.9", actor="测试"
+    )
+    card = conn.execute(
+        "SELECT * FROM model_cards WHERE model_version = ? ORDER BY rowid DESC LIMIT 1",
+        ("score-9.9",),
+    ).fetchone()
+    assert card is not None
+    assert card["prompt_version"] == "prompt-9.9"
+    assert card["is_public"] == 0
+    assert result["model_card"]["card_id"] == card["card_id"]
+    assert result["model_card"]["is_public"] is False
+    assert conn.execute("SELECT COUNT(*) AS n FROM model_cards").fetchone()["n"] == cards_before + 1
 
 
 def test_refresh_requires_republish_for_g3(conn):
