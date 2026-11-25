@@ -54,6 +54,7 @@ from app.domain.spqa import (
     run_red_team,
 )
 from app.domain.stats import quadratic_weighted_kappa, quality_report
+from app.domain.transparency import refresh_transparency_assets
 from app.seed import build_bundle_payload, seed_if_empty
 
 
@@ -1187,6 +1188,7 @@ def test_p3_readiness_and_release(seeded_path, tmp_path):
         approver="学术委员会",
         note="A/B 报告审议（P3 测试）",
     )
+    refresh_transparency_assets(conn, actor="test")
     publish_model_card(conn, actor="test")
     bundle_row = conn.execute(
         "SELECT bundle_id FROM bundles ORDER BY frozen_at DESC, rowid DESC LIMIT 1"

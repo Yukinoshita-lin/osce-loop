@@ -127,12 +127,27 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
             break
         critical_streak += 1
 
-    public_card_count = conn.execute(
-        "SELECT COUNT(*) AS n FROM model_cards WHERE is_public = 1"
-    ).fetchone()["n"]
-    public_sheet_count = conn.execute(
-        "SELECT COUNT(*) AS n FROM data_sheets WHERE is_public = 1"
-    ).fetchone()["n"]
+    current_model_version = db.get_state(conn, "model_version", "") or ""
+    current_prompt_version = db.get_state(conn, "prompt_version", "") or ""
+    current_card_public = conn.execute(
+        "SELECT 1 FROM model_cards WHERE is_public = 1 AND model_version = ? "
+        "AND prompt_version = ? LIMIT 1",
+        (current_model_version, current_prompt_version),
+    ).fetchone()
+    current_sheet_public = False
+    for sheet_row in conn.execute(
+        "SELECT content FROM data_sheets WHERE is_public = 1 ORDER BY created_at DESC, rowid DESC"
+    ).fetchall():
+        try:
+            content = json.loads(sheet_row["content"] or "{}")
+        except (TypeError, ValueError):
+            continue
+        if (
+            content.get("model_version") == current_model_version
+            and content.get("prompt_version") == current_prompt_version
+        ):
+            current_sheet_public = True
+            break
     version_complete = version_stamped == ai_records and ai_records > 0
     sus = sus_summary(conn)
     if sus["count"]:
@@ -157,7 +172,7 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
         "SELECT status FROM governance_approvals WHERE approval_type = 'academic_committee'"
     ).fetchone()
     academic_committee = 1.0 if committee_row and committee_row["status"] == "approved" else 0.0
-    model_card_public = 1.0 if public_card_count > 0 and public_sheet_count > 0 else 0.0
+    model_card_public = 1.0 if current_card_public and current_sheet_public else 0.0
     bundles = list_bundles(conn)
     current_bundle = bundles[0] if bundles else None
     sp_consent = consent_status(conn, current_bundle["bundle_id"]) if current_bundle else None
@@ -697,6 +712,26 @@ def evaluate_gates(conn, report: dict[str, Any], current_stage: str) -> dict[str
             title = "SP 人格卡尚未获得人工批准"
             detail = "需要考官确认披露阈值、禁用话术并完成真人试演后才能开放 SP 练习。"
         alerts.append({"level": "danger", "title": title, "detail": detail})
+    model_version_now = db.get_state(conn, "model_version", "") or ""
+    prompt_version_now = db.get_state(conn, "prompt_version", "") or ""
+    public_card_total = conn.execute(
+        "SELECT COUNT(*) AS n FROM model_cards WHERE is_public = 1"
+    ).fetchone()["n"]
+    public_sheet_total = conn.execute(
+        "SELECT COUNT(*) AS n FROM data_sheets WHERE is_public = 1"
+    ).fetchone()["n"]
+    if (public_card_total or public_sheet_total) and values.get("model_card") == 0.0:
+        alerts.append(
+            {
+                "level": "warn",
+                "title": "公开模型卡未覆盖当前模型版本",
+                "detail": (
+                    f"当前版本 {model_version_now or '未记录'} / {prompt_version_now or '未记录'} "
+                    "没有匹配的公开模型卡与数据表；G3 放行不应引用旧版本公开材料，"
+                    "请刷新并发布覆盖当前版本的模型卡与数据表。"
+                ),
+            }
+        )
     if values.get("sus_source") == "legacy":
         alerts.append(
             {

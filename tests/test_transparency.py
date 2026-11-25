@@ -163,6 +163,22 @@ def test_version_change_creates_private_model_card_snapshot(conn):
         publish_model_card(conn, actor="治理委员会")
 
 
+def test_g3_model_card_gate_requires_current_version(conn):
+    refresh_transparency_assets(conn, actor="透明度管理员")
+    publish_model_card(conn, actor="治理委员会")
+    gates = evaluate_gates(conn, quality_report(conn), "G3_limited")
+    assert gates["metric_values"]["model_card"] == 1.0
+
+    change_model_version(
+        conn, model_version="score-10.0", prompt_version="prompt-10.0", actor="测试"
+    )
+    gates = evaluate_gates(conn, quality_report(conn), "G3_limited")
+    assert gates["metric_values"]["model_card"] == 0.0
+    assert any(
+        "公开模型卡未覆盖当前模型版本" in alert["title"] for alert in gates["alerts"]
+    )
+
+
 def test_refresh_requires_republish_for_g3(conn):
     refresh_transparency_assets(conn, actor="透明度管理员")
     gates = evaluate_gates(conn, quality_report(conn), "G3_limited")
