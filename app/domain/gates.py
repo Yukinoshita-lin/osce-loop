@@ -354,6 +354,8 @@ def evaluate_gates(conn, report: dict[str, Any], current_stage: str) -> dict[str
                     "key": key,
                     "label": label,
                     "target": target_text,
+                    "target_value": target,
+                    "direction": direction,
                     "value": value,
                     "status": status,
                 }

@@ -1209,6 +1209,16 @@ def test_p3_readiness_and_release(seeded_path, tmp_path):
     gates = evaluate_gates(conn, report, "G0_offline")
     g3 = next(g for g in gates["gates"] if g["id"] == "G3")
     assert g3["status"] == "pass", {c["key"]: c["value"] for c in g3["criteria"]}
+    qwk_g3 = next(c for c in g3["criteria"] if c["key"] == "qwk_ai")
+    assert qwk_g3["target_value"] == 0.80 and qwk_g3["direction"] == "ge"
+    qwk_g2 = next(
+        c
+        for g in gates["gates"]
+        if g["id"] == "G2"
+        for c in g["criteria"]
+        if c["key"] == "qwk_ai"
+    )
+    assert qwk_g2["target_value"] == 0.75
     result = set_release_stage(
         conn,
         stage="G3_limited",

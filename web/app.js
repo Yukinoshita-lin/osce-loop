@@ -3001,6 +3001,8 @@ function scorecardHtml(data) {
   const reviewShareRows = ((report.review_share || {}).by_risk) || [];
   const appeals = report.appeals || {};
   const review = report.review || {};
+  const currentGate = (((data.gates || {}).gates) || []).find((g) => g.is_current) || null;
+  const qwkTarget = currentGate && currentGate.id === 'G3' ? 0.80 : 0.75;
   const rows = [];
   const add = (group, label, target, display, status, note) => {
     rows.push({ group, label, target, display, status, note: note || '' });
@@ -3012,7 +3014,7 @@ function scorecardHtml(data) {
   add('技术', '端到端语音延迟 P95', '≤ 1.5 秒', values.p95_latency === null || values.p95_latency === undefined ? '—' : `${num(values.p95_latency, 2)} 秒`, scorecardStatus(values.p95_latency, 1.5, 'le'));
   add('技术', '医学专名 ASR 词错率', '≤ 8%', pct(asrError, 1), scorecardStatus(asrError, 0.08, 'le'), '取最近一次 ASR 基准样本');
 
-  add('评分质量', 'AI–人 QWK', 'L2 ≥ 0.75 · L3 ≥ 0.80', num(report.qwk_ai, 3), scorecardStatus(report.qwk_ai, 0.75, 'ge'));
+  add('评分质量', 'AI–人 QWK', qwkTarget === 0.80 ? 'L3 ≥ 0.80' : 'L2 ≥ 0.75', num(report.qwk_ai, 3), scorecardStatus(report.qwk_ai, qwkTarget, 'ge'), currentGate ? `当前阶段 ${currentGate.id} ${currentGate.name}` : '');
   add('评分质量', '边缘案例一致率提升', '≥ 10pp', ab.near_improvement === null || ab.near_improvement === undefined ? '—' : `${num(ab.near_improvement * 100, 1)}pp`, scorecardStatus(ab.near_improvement, 0.10, 'ge'));
   add('评分质量', '关键项漏判', '= 0', num(values.critical_miss, 0), scorecardStatus(values.critical_miss, 0, 'eq'));
   let editStatus = scorecardStatus(review.edit_rate, 0.30, 'le');
