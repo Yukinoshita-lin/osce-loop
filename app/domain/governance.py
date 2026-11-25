@@ -507,15 +507,24 @@ def register_approval(conn, *, approval_type: str, approver: str, note: str = ""
 
 
 def publish_model_card(conn, *, actor: str = "系统") -> dict[str, Any]:
-    row = conn.execute("SELECT * FROM model_cards ORDER BY created_at DESC LIMIT 1").fetchone()
+    row = conn.execute(
+        "SELECT * FROM model_cards ORDER BY created_at DESC, rowid DESC LIMIT 1"
+    ).fetchone()
     if not row:
         raise ValueError("尚无可公开的模型卡")
+    if "发布前需完成新一轮人工比对校准" in str(row["limitations"] or ""):
+        raise ValueError(
+            "最新模型卡是版本变更快照，指标仍来自历史版本；"
+            "请先完成新版本人工比对校准并刷新模型卡后再发布"
+        )
     timestamp = db.now_iso()
     conn.execute(
         "UPDATE model_cards SET is_public = 1, published_at = ? WHERE card_id = ?",
         (timestamp, row["card_id"]),
     )
-    sheet = conn.execute("SELECT * FROM data_sheets ORDER BY created_at DESC LIMIT 1").fetchone()
+    sheet = conn.execute(
+        "SELECT * FROM data_sheets ORDER BY created_at DESC, rowid DESC LIMIT 1"
+    ).fetchone()
     if sheet:
         conn.execute(
             "UPDATE data_sheets SET is_public = 1, published_at = ? WHERE data_sheet_id = ?",

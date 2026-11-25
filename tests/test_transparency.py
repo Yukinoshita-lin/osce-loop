@@ -156,6 +156,8 @@ def test_version_change_creates_private_model_card_snapshot(conn):
     assert result["model_card"]["is_public"] is False
     assert "历史版本" in card["limitations"]
     assert conn.execute("SELECT COUNT(*) AS n FROM model_cards").fetchone()["n"] == cards_before + 1
+    with pytest.raises(ValueError, match="人工比对校准"):
+        publish_model_card(conn, actor="治理委员会")
 
 
 def test_refresh_requires_republish_for_g3(conn):
