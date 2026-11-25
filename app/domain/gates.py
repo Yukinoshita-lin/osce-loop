@@ -7,6 +7,7 @@ from typing import Any
 
 from .. import db
 from .ab import ab_report
+from .accessibility import feedback_accessibility
 from .asr_benchmark import benchmark_summary
 from .bundle import list_bundles
 from .consent import consent_status
@@ -225,11 +226,20 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
     asr_error = asr_metrics.get("medical_term_error_rate")
     if asr_error is None:
         asr_error = asr_metrics.get("error_rate")
+    experience = feedback_accessibility(conn).get("experience") or {}
+    usefulness = experience.get("usefulness") or {}
+    realism = experience.get("realism") or {}
     return {
         "qwk_ai": report.get("qwk_ai"),
         "rolling_qwk": rolling_qwk,
         "evidence_rate": (report.get("evidence") or {}).get("rate"),
         "asr_error_rate": asr_error,
+        "usefulness": usefulness.get("average"),
+        "usefulness_status": usefulness.get("status"),
+        "usefulness_count": usefulness.get("count", 0),
+        "realism": realism.get("average"),
+        "realism_status": realism.get("status"),
+        "realism_count": realism.get("count", 0),
         "avg_review_seconds": (report.get("review") or {}).get("avg_seconds"),
         "edit_rate": (report.get("review") or {}).get("edit_rate"),
         "critical_miss": critical_miss,
@@ -435,6 +445,24 @@ def evaluate_gates(conn, report: dict[str, Any], current_stage: str) -> dict[str
                 "level": "warn",
                 "title": f"反馈可及性组间差 {accessibility_gap:.2f} 分超过 0.3 分",
                 "detail": "提示某组学生更难读懂反馈；按预绑定路径进行反馈语言分级、增加术语注释并重测。",
+            }
+        )
+    for key, label in (("usefulness", "学生实用性评分"), ("realism", "学生真实感评分")):
+        if values.get(f"{key}_status") != "fail":
+            continue
+        average = float(values[key])
+        count = values.get(f"{key}_count") or 0
+        if average < 6:
+            level = "danger"
+            advice = "低于 6 分通常意味着练习平台不会被主动使用，应先处理场景真实感与反馈可用性。"
+        else:
+            level = "warn"
+            advice = "建议检查反馈可读性与场景真实感，避免学生放弃主动练习。"
+        alerts.append(
+            {
+                "level": level,
+                "title": f"{label} {average:.1f} 低于 7.0",
+                "detail": f"{count} 份样本均值 {average:.1f}/10，低于目标 7.0；{advice}",
             }
         )
     if report.get("integrity_gap_rate", 0) > 0.02:

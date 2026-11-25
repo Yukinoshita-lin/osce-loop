@@ -221,6 +221,49 @@ def test_fairness_gaps_within_thresholds_do_not_alert(tmp_path, monkeypatch):
     conn.close()
 
 
+def _experience(usefulness, realism):
+    return {
+        "experience": {
+            "usefulness": usefulness,
+            "realism": realism,
+        }
+    }
+
+
+def test_low_usefulness_and_realism_alert(tmp_path, monkeypatch):
+    conn = _conn(tmp_path)
+    monkeypatch.setattr(
+        "app.domain.gates.feedback_accessibility",
+        lambda conn, bundle_id=None: _experience(
+            {"average": 6.4, "count": 8, "status": "fail"},
+            {"average": 5.2, "count": 8, "status": "fail"},
+        ),
+    )
+    gates = evaluate_gates(conn, _report(0.2, 40), "G0_offline")
+    alerts = {alert["title"]: alert for alert in gates["alerts"]}
+    assert alerts["学生实用性评分 6.4 低于 7.0"]["level"] == "warn"
+    assert alerts["学生真实感评分 5.2 低于 7.0"]["level"] == "danger"
+    assert gates["metric_values"]["usefulness"] == 6.4
+    assert gates["metric_values"]["realism_status"] == "fail"
+    conn.close()
+
+
+def test_experience_within_target_or_insufficient_does_not_alert(tmp_path, monkeypatch):
+    conn = _conn(tmp_path)
+    monkeypatch.setattr(
+        "app.domain.gates.feedback_accessibility",
+        lambda conn, bundle_id=None: _experience(
+            {"average": 8.1, "count": 8, "status": "pass"},
+            {"average": 6.8, "count": 3, "status": "insufficient"},
+        ),
+    )
+    gates = evaluate_gates(conn, _report(0.2, 40), "G0_offline")
+    titles = [alert["title"] for alert in gates["alerts"]]
+    assert not any("学生实用性评分" in title for title in titles)
+    assert not any("学生真实感评分" in title for title in titles)
+    conn.close()
+
+
 def test_unresolved_critical_miss_alerts(tmp_path, monkeypatch):
     conn = _conn(tmp_path)
     monkeypatch.setattr(
