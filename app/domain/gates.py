@@ -7,6 +7,7 @@ from typing import Any
 
 from .. import db
 from .ab import ab_report
+from .asr_benchmark import benchmark_summary
 from .bundle import list_bundles
 from .consent import consent_status
 from .cost import ai_cost_summary
@@ -220,10 +221,15 @@ def _metric_values(conn, report: dict[str, Any]) -> dict[str, Any]:
         [row["ai_score"] for row in rolling_rows],
         [row["gold_score"] for row in rolling_rows],
     )
+    asr_metrics = (benchmark_summary(conn).get("latest") or {}).get("metrics") or {}
+    asr_error = asr_metrics.get("medical_term_error_rate")
+    if asr_error is None:
+        asr_error = asr_metrics.get("error_rate")
     return {
         "qwk_ai": report.get("qwk_ai"),
         "rolling_qwk": rolling_qwk,
         "evidence_rate": (report.get("evidence") or {}).get("rate"),
+        "asr_error_rate": asr_error,
         "avg_review_seconds": (report.get("review") or {}).get("avg_seconds"),
         "edit_rate": (report.get("review") or {}).get("edit_rate"),
         "critical_miss": critical_miss,
@@ -282,6 +288,9 @@ def _technical_metric_issues(values: dict[str, Any]) -> list[str]:
     evidence = _as_float("evidence_rate")
     if evidence is not None and evidence < 0.95:
         issues.append(f"证据定位准确率 {evidence:.0%} < 95%")
+    asr_error = _as_float("asr_error_rate")
+    if asr_error is not None and asr_error > 0.08:
+        issues.append(f"医学专名 ASR 词错率 {asr_error:.1%} > 8%")
     return issues
 
 

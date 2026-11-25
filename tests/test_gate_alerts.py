@@ -253,14 +253,16 @@ def test_technical_metric_issues_flag_each_threshold():
             "p95_latency": 2.0,
             "sus": 65,
             "evidence_rate": 0.90,
+            "asr_error_rate": 0.12,
         }
     )
-    assert len(issues) == 5
+    assert len(issues) == 6
     assert any("SP 事实错误率" in issue for issue in issues)
     assert any("人格首轮通过率" in issue for issue in issues)
     assert any("语音延迟 P95" in issue for issue in issues)
     assert any("SUS 65.0" in issue for issue in issues)
     assert any("证据定位准确率" in issue for issue in issues)
+    assert any("ASR 词错率" in issue for issue in issues)
 
 
 def test_technical_metric_issues_pass_within_targets():
