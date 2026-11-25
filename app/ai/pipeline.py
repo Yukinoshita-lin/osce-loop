@@ -100,12 +100,13 @@ def run_scoring(
     attempt: dict[str, Any],
     transcript: list[dict[str, Any]],
     actor: str = "AI 评分副驾",
+    force: bool = False,
 ) -> dict[str, Any]:
     attempt_id = attempt["attempt_id"]
     existing = conn.execute(
         "SELECT COUNT(*) AS n FROM score_records WHERE attempt_id = ?", (attempt_id,)
     ).fetchone()["n"]
-    if existing:
+    if existing and not force:
         return get_attempt_scores(conn, attempt_id)
 
     payload = bundle["payload"]
@@ -296,14 +297,19 @@ def run_scoring(
         "pending_review": pending,
         "records": len(rubric),
         "status": status,
+        "rerun": force,
     }
     db.append_audit(
         conn,
         actor=actor,
-        action="attempt.scored",
+        action="attempt.rescored" if force else "attempt.scored",
         object_type="StationAttempt",
         object_id=attempt_id,
-        before=None,
+        before=(
+            {"status": attempt.get("status"), "ai_total": attempt.get("ai_total")}
+            if force
+            else None
+        ),
         after=summary,
         model_version=gateway.model_version,
         prompt_version=gateway.prompt_version,
@@ -328,6 +334,21 @@ INSERT INTO score_records(
     routing, gold_score, status, final_score, reviewer, reviewed_at,
     model_version, prompt_version, rubric_version, asr_confidence, created_at
 ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+ON CONFLICT(attempt_id, item_id) DO UPDATE SET
+    ai_score = excluded.ai_score,
+    ai_confidence = excluded.ai_confidence,
+    ai_evidence = excluded.ai_evidence,
+    ai_rationale = excluded.ai_rationale,
+    routing = excluded.routing,
+    status = excluded.status,
+    final_score = excluded.final_score,
+    reviewer = excluded.reviewer,
+    reviewed_at = excluded.reviewed_at,
+    model_version = excluded.model_version,
+    prompt_version = excluded.prompt_version,
+    rubric_version = excluded.rubric_version,
+    asr_confidence = excluded.asr_confidence,
+    created_at = excluded.created_at
 """
 
 

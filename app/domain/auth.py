@@ -284,7 +284,7 @@ def rbac_allowed(method: str, path: str, role: str) -> bool:
     if path.startswith("/api/attempts/"):
         if path.endswith("/ingest"):
             return role == "exam_manager"
-        if path.endswith(("/signoff", "/publish", "/appeal", "/risk-level", "/integrity-supplement")):
+        if path.endswith(("/signoff", "/publish", "/appeal", "/risk-level", "/rescore", "/integrity-supplement")):
             return role == "exam_manager"
         return False
     if path.startswith("/api/governance/"):

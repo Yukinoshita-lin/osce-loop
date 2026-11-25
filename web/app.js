@@ -329,6 +329,7 @@ async function viewOverview() {
         <a class="link-btn" href="#/review">复核</a>
         <span class="muted"> · </span>
         <a class="link-btn" href="#/feedback" data-open-feedback="${esc(a.attempt_id)}">反馈</a>
+        ${a.rerun_allowed ? `<span class="muted"> · </span><button class="link-btn" data-action="rescore" data-attempt="${esc(a.attempt_id)}">重跑评分</button>` : ''}
         ${a.pending === 0 && a.status !== 'signed_off' && a.status !== 'published' ? `<span class="muted"> · </span><button class="link-btn" data-action="signoff" data-attempt="${esc(a.attempt_id)}" data-failing="${a.final_total !== null && a.final_total < a.pass_line ? '1' : '0'}">${a.final_total !== null && a.final_total < a.pass_line ? '签字（需寄语）' : '签字'}</button>` : ''}
         ${a.status === 'signed_off' ? `<span class="muted"> · </span><button class="link-btn" data-action="publish" data-attempt="${esc(a.attempt_id)}">发布</button>` : ''}
       </td>
@@ -4629,6 +4630,17 @@ document.addEventListener('click', async (e) => {
         <button class="link-btn" data-action="signoff-confirm" data-attempt="${esc(el.dataset.attempt)}">确认签字</button>
         <span class="muted"> · </span>
         <button class="link-btn" data-action="signoff-cancel">取消</button>`;
+    }
+    return;
+  }
+  if (action === 'rescore') {
+    if (!confirm('重跑会用当前模型与提示词版本重新生成该场次的 AI 建议分；已有金标准保留，人工复核记录会阻止重跑。继续？')) return;
+    try {
+      const result = await api(`/api/attempts/${encodeURIComponent(el.dataset.attempt)}/rescore`, { method: 'POST' });
+      toast(`已重跑评分：${result.rescore.records} 条记录，AI 总分 ${num(result.rescore.ai_total, 1)}`);
+      await viewOverview();
+    } catch (err) {
+      toast(err.message, true);
     }
     return;
   }

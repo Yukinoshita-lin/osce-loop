@@ -148,6 +148,7 @@ from .domain.psychometrics import station_psychometrics
 from .domain.retention import purge_expired, refresh_retention, retention_overview
 from .domain.readability import analyze_feedback_readability
 from .domain.request_log import append_request_log, recent_requests, request_log_summary
+from .domain.rescore import rescore_attempt
 from .domain.review import apply_review, blind_dual_review
 from .domain.review_sla import SLA_HOURS, review_sla
 from .domain.rewrite import PRINCIPLE as REWRITE_PRINCIPLE, suggest_anchor_rewrites
@@ -658,6 +659,19 @@ def _attempt_summary(conn, attempt: dict[str, Any]) -> dict[str, Any]:
     else:
         transcript_sha = None
         transcript_state = "missing"
+    rerun_allowed = (
+        attempt["status"] not in ("reviewed", "signed_off", "published")
+        and not conn.execute(
+            "SELECT 1 FROM score_records WHERE attempt_id = ? "
+            "AND (reviewer IS NOT NULL OR reviewed_at IS NOT NULL) LIMIT 1",
+            (attempt["attempt_id"],),
+        ).fetchone()
+        and not conn.execute(
+            "SELECT 1 FROM review_actions a JOIN score_records r ON r.record_id = a.record_id "
+            "WHERE r.attempt_id = ? LIMIT 1",
+            (attempt["attempt_id"],),
+        ).fetchone()
+    )
     return {
         "attempt_id": attempt["attempt_id"],
         "candidate_code": attempt["candidate_code"],
@@ -679,6 +693,7 @@ def _attempt_summary(conn, attempt: dict[str, Any]) -> dict[str, Any]:
         "pending": len(pending),
         "critical_pending": len(critical_pending),
         "reviewed": len(records) - len(pending),
+        "rerun_allowed": rerun_allowed,
         "near_cutoff": bool(attempt.get("near_cutoff")),
         "integrity_gap": bool(attempt.get("integrity_gap")),
         "integrity_note": attempt.get("integrity_note"),
@@ -1183,6 +1198,34 @@ def appeal_attempt(attempt_id: str, conn=Depends(get_conn)):
         after={"status": "pending_review", "appeal": True},
     )
     return {"ok": True, "attempt": _attempt_summary(conn, _attempt_row(conn, attempt_id))}
+
+
+@app.post("/api/attempts/{attempt_id}/rescore")
+def rescore_attempt_endpoint(attempt_id: str, request: Request, conn=Depends(get_conn)):
+    _ensure_not_stopped(conn)
+    _attempt_row(conn, attempt_id)
+    provider_bundle = build_scoring_provider()
+    gateway = CapabilityGateway(
+        conn,
+        provider_bundle.primary,
+        provider_bundle.model_version,
+        provider_bundle.prompt_version,
+        fallback_provider=provider_bundle.fallback,
+    )
+    try:
+        result = rescore_attempt(
+            conn,
+            gateway,
+            attempt_id=attempt_id,
+            actor=request.state.user["display_name"],
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {
+        "ok": True,
+        "rescore": result,
+        "attempt": _attempt_summary(conn, _attempt_row(conn, attempt_id)),
+    }
 
 
 class RiskBody(BaseModel):
