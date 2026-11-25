@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 from .. import db
+from .anomaly import detect_anomalies
 from .scheduling import latest_schedule
 
 STATION_HINTS: dict[str, list[str]] = {
@@ -256,10 +257,17 @@ def live_facts(conn, run_id: str, slot_key: str) -> dict[str, Any] | None:
     payload = _bundle_payload_for_station(conn, slot["station_id"], slot["station_name"])
     segments = _live_segments(conn, run_id, slot_key)
     facts = _evidence_facts(payload, segments) if payload else None
+    duration_ms = max((int(segment.get("end_ms") or 0) for segment in segments), default=0)
+    anomalies = detect_anomalies(
+        segments,
+        duration_ms=duration_ms,
+        station_duration_min=(payload or {}).get("duration_min"),
+    )
     return {
         "slot_key": slot_key,
         "segment_count": len(segments),
         "facts": facts,
+        "anomalies": anomalies,
     }
 
 
@@ -459,17 +467,26 @@ def get_run(conn, run_id: str) -> dict[str, Any]:
         )
         live_segments = live_by_slot.get(slot["slot_key"], [])
         slot["live_segment_count"] = len(live_segments)
-        if slot["evidence_facts"] is None and live_segments:
-            station_payload = station_payloads.get(slot["station_id"])
-            if station_payload is None:
-                station_name = slot.get("station_name") or ""
-                if station_name:
-                    station_payload = next(
-                        (payload for title, payload in title_payloads if station_name in title),
-                        None,
-                    )
-            if station_payload:
+        slot["live_anomalies"] = []
+        station_payload = station_payloads.get(slot["station_id"])
+        if station_payload is None:
+            station_name = slot.get("station_name") or ""
+            if station_name:
+                station_payload = next(
+                    (payload for title, payload in title_payloads if station_name in title),
+                    None,
+                )
+        if live_segments:
+            if slot["evidence_facts"] is None and station_payload:
                 slot["evidence_facts"] = _evidence_facts(station_payload, live_segments)
+            live_duration_ms = max(
+                (int(segment.get("end_ms") or 0) for segment in live_segments), default=0
+            )
+            slot["live_anomalies"] = detect_anomalies(
+                live_segments,
+                duration_ms=live_duration_ms,
+                station_duration_min=(station_payload or {}).get("duration_min"),
+            )
     events = []
     for event in conn.execute(
         "SELECT * FROM exam_events WHERE run_id = ? ORDER BY rowid DESC LIMIT 120", (run_id,)

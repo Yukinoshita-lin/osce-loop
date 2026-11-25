@@ -179,13 +179,26 @@ def test_live_segments_update_evidence_facts(conn):
     assert second_facts["missing"] < first_facts["missing"]
     assert second_facts["covered"] > first_facts["covered"]
 
+    third = append_live_segment(
+        conn,
+        run["run_id"],
+        slot["slot_key"],
+        speaker="patient",
+        text="疼死我了，受不了",
+        start_ms=80000,
+        end_ms=82000,
+    )
+    anomaly_types = {item["type"] for item in third["facts"]["anomalies"]}
+    assert "emotion" in anomaly_types
+    assert "silence" in anomaly_types
+
     refreshed = get_run(conn, run["run_id"])
     linked = next(s for s in refreshed["slots"] if s["slot_key"] == slot["slot_key"])
-    assert linked["live_segment_count"] == 2
+    assert linked["live_segment_count"] == 3
     assert linked["evidence_facts"]["utterances"] == 2
-    assert linked["evidence_facts"]["missing"] == second_facts["missing"]
+    assert any(item["type"] == "emotion" for item in linked["live_anomalies"])
     event = conn.execute(
         "SELECT COUNT(*) AS n FROM exam_events WHERE run_id = ? AND event_type = 'live_segment'",
         (run["run_id"],),
     ).fetchone()
-    assert event["n"] == 2
+    assert event["n"] == 3
