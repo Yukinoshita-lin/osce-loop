@@ -1,7 +1,7 @@
 """反馈可读性初筛：句长、长句占比与术语密度。"""
 from __future__ import annotations
 
-from app.domain.readability import analyze_feedback_readability
+from app.domain.readability import analyze_feedback_readability, simplify_feedback_text
 
 
 def test_readable_feedback_is_easy():
@@ -32,3 +32,23 @@ def test_empty_feedback_is_unmeasured():
     result = analyze_feedback_readability([])
     assert result["level"] == "unmeasured"
     assert result["avg_sentence_chars"] is None
+
+
+def test_plain_language_replaces_terms_and_lowers_density():
+    source = (
+        "鉴别诊断需要结合生命体征与危险信号，同时关注压榨样胸痛是否放射到左臂，"
+        "必要时完善心电图并评估并发症与预后，再决定后续干预与给药剂量。"
+    )
+    simplified = simplify_feedback_text(source)
+    assert "鉴别诊断" not in simplified["text"]
+    assert "血压、脉搏、呼吸、体温" in simplified["text"]
+    assert any(entry["term"] == "鉴别诊断" for entry in simplified["glossary"])
+    assert simplified["text"].count("。") >= 2
+    before = analyze_feedback_readability([source])
+    after = analyze_feedback_readability([simplified["text"]])
+    assert after["term_density"] < before["term_density"]
+
+
+def test_plain_language_empty_text_is_safe():
+    result = simplify_feedback_text("")
+    assert result == {"text": "", "glossary": []}

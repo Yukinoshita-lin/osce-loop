@@ -54,6 +54,7 @@ const state = {
   spBundleId: null,
   spStations: [],
   feedbackId: null,
+  feedbackLevel: 'standard',
   bundleCurrent: null,
   bundlePayload: null,
   bundleFocus: null,
@@ -2075,6 +2076,12 @@ async function renderFeedback(attemptId) {
   const history = data.history || {};
   const crossProfile = data.cross_station_profile || {};
   const domainMax = Math.max(1, ...data.domains.map((d) => d.score || 0));
+  const level = state.feedbackLevel === 'plain' ? 'plain' : 'standard';
+  const behaviorField = level === 'plain' ? 'plain_behavior' : 'behavior';
+  const alternativeField = level === 'plain' ? 'plain_alternative' : 'alternative';
+  const readability = level === 'plain'
+    ? (data.plain_readability || data.readability || {})
+    : (data.readability || {});
   const deductionHtml = data.deductions.length ? data.deductions.map((u) => {
     const ev = u.evidence;
     const evText = ev ? `${mmss(ev.start_ms)} · ${esc(ev.quote)}` : '人工记录 / 无片段';
@@ -2084,10 +2091,16 @@ async function renderFeedback(attemptId) {
         <div>${reasonPill(u.score === 0 ? 'critical_negative' : 'near_cutoff', u.score_label)}</div>
       </div>
       <div class="fb-part"><div class="lab">① 证据</div><div class="val">${ev && u.media_url && !data.media_purged_at ? `<button class="timestamp-btn" data-action="play-feedback" data-start="${ev.start_ms}" data-end="${ev.end_ms}" data-url="${dataAttr(u.media_url || '')}">播放 ${mmss(ev.start_ms)}</button> ` : ''}${purgedNote}${evText}</div></div>
-      <div class="fb-part"><div class="lab">② 行为</div><div class="val">${esc(u.behavior)}</div></div>
-      <div class="fb-part alt"><div class="lab">③ 替代</div><div class="val">${esc(u.alternative || '下次可追加一句具体提问，覆盖该评分项后再进入下一环节。')}</div></div>
+      <div class="fb-part"><div class="lab">② 行为</div><div class="val">${esc(u[behaviorField] || u.behavior)}</div></div>
+      <div class="fb-part alt"><div class="lab">③ 替代</div><div class="val">${esc(u[alternativeField] || u.alternative || '下次可追加一句具体提问，覆盖该评分项后再进入下一环节。')}</div></div>
     </div>`;
   }).join('') : '<div class="empty">本次没有扣分项。</div>';
+  const glossaryHtml = level === 'plain' && (data.glossary || []).length
+    ? `<div class="card" style="margin-bottom:16px">
+        <div class="card-title">术语注释<span class="sub">简明表述配套 · 不改评分结论</span></div>
+        ${data.glossary.map((entry) => `<div class="version-row"><span class="k">${esc(entry.term)}</span><span class="v">${esc(entry.plain)}</span></div>`).join('')}
+      </div>`
+    : '';
 
   body.innerHTML = `
     <div class="grid c4" style="margin-bottom:14px">
@@ -2096,6 +2109,13 @@ async function renderFeedback(attemptId) {
       <div class="kpi ${data.final_total !== null && data.final_total >= data.pass_line ? 'teal' : 'red'}"><div class="k">结论</div><div class="v" style="font-size:18px">${data.final_total === null ? '待定' : data.final_total >= data.pass_line ? '达标' : '未达标'}</div><div class="d">${esc(data.status_note)}</div></div>
       <div class="kpi amber"><div class="k">扣分项</div><div class="v">${data.deductions.length}</div><div class="d">优势项 ${data.strengths.length} · 人工评分项可能无片段</div></div>
     </div>
+
+    <div class="btn-row" style="margin-bottom:14px">
+      <button class="btn small ${level === 'standard' ? 'primary' : ''}" data-action="feedback-level" data-level="standard">标准表述</button>
+      <button class="btn small ${level === 'plain' ? 'primary' : ''}" data-action="feedback-level" data-level="plain">简明表述</button>
+      <span class="tiny muted">简明版替换术语并拆短句，不改评分结论。</span>
+    </div>
+    ${glossaryHtml}
 
     ${data.feedback_note ? `<div class="card" style="margin-bottom:16px">
       <div class="card-title">教师寄语<span class="sub">人工撰写 · 随成绩一同发布</span></div>
@@ -2188,13 +2208,13 @@ async function renderFeedback(attemptId) {
           ${data.feedback_quality.repaired ? `<span class="pill amber">兜底修复 ${data.feedback_quality.repaired}</span>` : ''}
           ${data.feedback_quality.repaired_evidence ? `<span class="pill amber">证据兜底 ${data.feedback_quality.repaired_evidence}</span>` : ''}
         </div>` : ''}
-        ${data.readability && data.readability.level !== 'unmeasured' ? `<div class="attempt-strip" style="margin-top:8px">
-          <span>可读性 <span class="pill ${data.readability.level === 'easy' ? 'teal' : data.readability.level === 'hard' ? 'red' : 'amber'}">${esc(data.readability.level_label)}</span></span>
-          <span>平均句长 <b>${num(data.readability.avg_sentence_chars, 1)}</b> 字</span>
-          <span>术语密度 <b>${num(data.readability.term_density, 2)}</b>/100 字</span>
+        ${readability && readability.level !== 'unmeasured' ? `<div class="attempt-strip" style="margin-top:8px">
+          <span>${level === 'plain' ? '简明版可读性' : '可读性'} <span class="pill ${readability.level === 'easy' ? 'teal' : readability.level === 'hard' ? 'red' : 'amber'}">${esc(readability.level_label)}</span></span>
+          <span>平均句长 <b>${num(readability.avg_sentence_chars, 1)}</b> 字</span>
+          <span>术语密度 <b>${num(readability.term_density, 2)}</b>/100 字</span>
         </div>
-        ${data.readability.note ? `<div class="tiny muted" style="margin-top:4px">${esc(data.readability.note)}</div>` : ''}
-        ${(data.readability.suggestions || []).length ? `<div class="tiny" style="color:var(--amber);margin-top:2px">${data.readability.suggestions.map(esc).join('；')}</div>` : ''}` : ''}
+        ${readability.note ? `<div class="tiny muted" style="margin-top:4px">${esc(readability.note)}</div>` : ''}
+        ${(readability.suggestions || []).length ? `<div class="tiny" style="color:var(--amber);margin-top:2px">${readability.suggestions.map(esc).join('；')}</div>` : ''}` : ''}
         <div class="sep"></div>
         <div class="small dim">第三段是最容易被忽略、也最有价值的部分——它把评分表从“审判工具”变成“教学工具”。</div>
         <div class="sep"></div>
@@ -3910,6 +3930,11 @@ document.addEventListener('click', async (e) => {
   const action = el.dataset.action;
   if (action === 'download-sample') {
     downloadSampleTranscript();
+    return;
+  }
+  if (action === 'feedback-level') {
+    state.feedbackLevel = el.dataset.level === 'plain' ? 'plain' : 'standard';
+    if (state.feedbackId) await renderFeedback(state.feedbackId);
     return;
   }
   if (action === 'ack-disclosure') {

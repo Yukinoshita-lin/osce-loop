@@ -159,7 +159,7 @@ from .domain.profile import candidate_cross_station_profile
 from .domain.proposal_input import proposal_input
 from .domain.psychometrics import station_psychometrics
 from .domain.retention import purge_expired, refresh_retention, retention_overview
-from .domain.readability import analyze_feedback_readability
+from .domain.readability import analyze_feedback_readability, simplify_feedback_text
 from .domain.request_log import append_request_log, recent_requests, request_log_summary
 from .domain.rescore import rescore_attempt, rescore_eligible_attempts
 from .domain.review import apply_review, blind_dual_review
@@ -1920,11 +1920,26 @@ def feedback(attempt_id: str, request: Request, conn=Depends(get_conn)):
         media_id=attempt.get("media_id"),
         duration_ms=int(attempt.get("duration_ms") or 0),
     )
+    glossary_map: dict[str, dict[str, str]] = {}
+    for unit in deductions + strengths:
+        plain_behavior = simplify_feedback_text(str(unit.get("behavior") or ""))
+        plain_alternative = simplify_feedback_text(str(unit.get("alternative") or ""))
+        unit["plain_behavior"] = plain_behavior["text"]
+        unit["plain_alternative"] = plain_alternative["text"]
+        for entry in plain_behavior["glossary"] + plain_alternative["glossary"]:
+            glossary_map[entry["term"]] = entry
     readability = analyze_feedback_readability(
         [
             unit.get(field, "")
             for unit in deductions + strengths
             for field in ("behavior", "alternative")
+        ]
+    )
+    plain_readability = analyze_feedback_readability(
+        [
+            unit.get(field, "")
+            for unit in deductions + strengths
+            for field in ("plain_behavior", "plain_alternative")
         ]
     )
     tone = analyze_feedback_tone(
@@ -1954,6 +1969,8 @@ def feedback(attempt_id: str, request: Request, conn=Depends(get_conn)):
         "strengths": strengths,
         "feedback_quality": summarize_feedback(deductions),
         "readability": readability,
+        "plain_readability": plain_readability,
+        "glossary": list(glossary_map.values()),
         "tone": tone if request.state.user["role"] != "student" else None,
         "survey": survey_for_attempt(conn, attempt_id),
         "history": candidate_history(conn, attempt_id),

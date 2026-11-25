@@ -25,6 +25,65 @@ TERMS = (
     "干预",
 )
 LEVEL_LABELS = {"easy": "易懂", "medium": "一般", "hard": "偏难", "unmeasured": "未采集"}
+PLAIN_TERMS = {
+    "鉴别诊断": "还要排除的其他疾病",
+    "生命体征": "血压、脉搏、呼吸、体温",
+    "危险信号": "危险表现",
+    "压榨样": "像被重物压住一样",
+    "适应证": "适合做的情况",
+    "禁忌证": "不能做的情况",
+    "并发症": "其他问题",
+    "预后": "恢复情况",
+    "查体": "身体检查",
+    "听诊": "用听诊器听",
+    "触诊": "用手按压检查",
+    "循证": "有研究依据",
+    "给药": "用药",
+    "剂量": "用药量",
+    "干预": "处理",
+}
+GLOSSARY = {
+    **PLAIN_TERMS,
+    "放射": "疼痛扩散到其他部位",
+    "病理": "病理检查结果",
+    "叩诊": "叩击身体检查",
+}
+SENTENCE_SPLIT = re.compile(r"(?<=[。！？!?；;\n])")
+
+
+def _simplify_sentence(sentence: str) -> str:
+    chunks = [chunk.strip() for chunk in re.split(r"[，,]", sentence) if chunk.strip()]
+    if not chunks:
+        return sentence.strip()
+    sentences: list[str] = []
+    current = ""
+    for chunk in chunks:
+        candidate = chunk if not current else current + "，" + chunk
+        if not current or len(re.sub(r"\s+", "", candidate)) <= 40:
+            current = candidate
+        else:
+            sentences.append(current)
+            current = chunk
+    if current:
+        sentences.append(current)
+    return "。".join(item.rstrip("。！？；;") for item in sentences) + "。"
+
+
+def simplify_feedback_text(text: str) -> dict[str, Any]:
+    """生成反馈简明版：替换安全术语并按逗号拆短句，同时返回术语注释。"""
+    source = str(text or "").strip()
+    if not source:
+        return {"text": "", "glossary": []}
+    glossary = [
+        {"term": term, "plain": plain}
+        for term, plain in GLOSSARY.items()
+        if term in source
+    ]
+    simplified = source
+    for term, plain in PLAIN_TERMS.items():
+        simplified = simplified.replace(term, plain)
+    output = "".join(_simplify_sentence(part) for part in SENTENCE_SPLIT.split(simplified) if part.strip())
+    return {"text": output, "glossary": glossary}
 
 
 def analyze_feedback_readability(texts: list[str]) -> dict[str, Any]:
