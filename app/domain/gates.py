@@ -417,6 +417,29 @@ def evaluate_gates(conn, report: dict[str, Any], current_stage: str) -> dict[str
                 "detail": f"当前最大亚组差 {subgroup_gap} SD；连续超标应自动降级并复核该组边缘案例。",
             }
         )
+    elif subgroup_gap is not None and subgroup_gap > 0.15:
+        alerts.append(
+            {
+                "level": "warn",
+                "title": f"亚组分数差 {subgroup_gap} SD 超过 0.15 SD",
+                "detail": (
+                    "已高于 S9 公平性目标 0.15 SD，但尚未触发 0.20 SD 自动降级；"
+                    "建议按预绑定路径审查人格提示词与病例情境，增补该情境的教学暴露并重跑对照。"
+                ),
+            }
+        )
+    sus_value = values.get("sus")
+    if sus_value is not None and 70 <= float(sus_value) < 75:
+        alerts.append(
+            {
+                "level": "warn",
+                "title": f"SUS {float(sus_value):.1f} 低于体验目标 75",
+                "detail": (
+                    "当前 SUS 已达到 G1 放行线 70，但低于 S9 体验目标 75；"
+                    "建议按 SUS 条目定位可学习性与信心短板，优先改进首次使用引导与反馈措辞。"
+                ),
+            }
+        )
     miss_state = critical_misses(conn)
     if miss_state.get("unresolved"):
         alerts.append(

@@ -82,6 +82,44 @@ def test_rolling_qwk_and_subgroup_gap_alerts(tmp_path, monkeypatch):
     conn.close()
 
 
+def test_sus_between_gate_and_experience_target_warns(tmp_path, monkeypatch):
+    conn = _conn(tmp_path)
+    monkeypatch.setattr(
+        "app.domain.gates.sus_summary", lambda conn: {"count": 6, "average": 72.0}
+    )
+    gates = evaluate_gates(conn, _report(0.2, 40), "G0_offline")
+    titles = [alert["title"] for alert in gates["alerts"]]
+    assert any("SUS 72.0 低于体验目标 75" in title for title in titles)
+    assert not any("< 70" in title for title in titles)
+    conn.close()
+
+
+def test_subgroup_gap_between_target_and_degrade_warns(tmp_path, monkeypatch):
+    conn = _conn(tmp_path)
+    monkeypatch.setattr(
+        "app.domain.gates.fairness_report",
+        lambda conn, bundle_id=None: {"overall_gap_sd": 0.18},
+    )
+    gates = evaluate_gates(conn, _report(0.2, 40), "G0_offline")
+    titles = [alert["title"] for alert in gates["alerts"]]
+    assert any("0.18 SD 超过 0.15 SD" in title for title in titles)
+    assert not any("超过 0.20 SD" in title for title in titles)
+    conn.close()
+
+
+def test_subgroup_gap_above_degrade_line_only_alerts_danger(tmp_path, monkeypatch):
+    conn = _conn(tmp_path)
+    monkeypatch.setattr(
+        "app.domain.gates.fairness_report",
+        lambda conn, bundle_id=None: {"overall_gap_sd": 0.26},
+    )
+    gates = evaluate_gates(conn, _report(0.2, 40), "G0_offline")
+    titles = [alert["title"] for alert in gates["alerts"]]
+    assert any("超过 0.20 SD" in title for title in titles)
+    assert not any("0.15 SD" in title for title in titles)
+    conn.close()
+
+
 def test_review_share_and_appeal_alerts(tmp_path):
     conn = _conn(tmp_path)
     report = _report(0.2, 40)
