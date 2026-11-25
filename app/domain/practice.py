@@ -1,13 +1,51 @@
 """SP 练习结束后的项级评分与三段式形成性反馈。"""
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from ..ai.mock import MockScoringProvider
 from .feedback import ensure_feedback_evidence, ensure_feedback_units, summarize_feedback
+from .rubric import PHASE_LABELS
 from .stats import domain_scores
 
 SCORE_LABELS = {0: "negative", 1: "partial", 2: "positive"}
+
+
+def practice_guidance_summary(conn) -> dict[str, Any]:
+    """汇总练习报告中的阶段末自然引导次数，识别关键信息遗漏模式。"""
+    reports = 0
+    guided_reports = 0
+    total_guidance = 0
+    by_phase: dict[str, int] = {}
+    for row in conn.execute("SELECT report FROM sp_reports").fetchall():
+        reports += 1
+        try:
+            report = json.loads(row["report"] or "{}")
+        except (TypeError, ValueError):
+            continue
+        guidance = report.get("guidance") or {}
+        try:
+            count = int(guidance.get("count") or 0)
+        except (TypeError, ValueError):
+            count = 0
+        if count <= 0:
+            continue
+        guided_reports += 1
+        total_guidance += count
+        for phase in guidance.get("phases") or []:
+            by_phase[phase] = by_phase.get(phase, 0) + 1
+    return {
+        "reports": reports,
+        "guided_reports": guided_reports,
+        "guide_rate": round(guided_reports / reports, 3) if reports else None,
+        "total_guidance": total_guidance,
+        "by_phase": [
+            {"phase": phase, "label": PHASE_LABELS.get(phase, phase), "count": count}
+            for phase, count in sorted(by_phase.items(), key=lambda item: -item[1])
+        ],
+        "note": "阶段末引导次数用于识别关键信息遗漏模式，不直接计入学生成绩。",
+    }
 
 
 def build_transcript(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:

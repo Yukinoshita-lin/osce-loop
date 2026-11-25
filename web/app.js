@@ -2942,6 +2942,7 @@ async function viewQuality() {
   const appeals = report.appeals || {};
   const reviewShares = (report.review_share || {}).by_risk || [];
   const feedbackLatency = data.feedback_latency || {};
+  const spGuidance = data.sp_guidance || {};
   const readyPractice = (feedbackLatency.ready || {}).practice || {};
   const readyExam = (feedbackLatency.ready || {}).exam || {};
   const gates = data.gates.gates;
@@ -3192,6 +3193,7 @@ async function viewQuality() {
       <span>反馈确认时延 ${feedbackLatency.count ? `平均 <b>${num(feedbackLatency.avg_hours, 1)}</b> 小时 · 72h 内 <span class="pill ${feedbackLatency.status === 'pass' ? 'teal' : 'red'}">${pct(feedbackLatency.within_rate, 0)}</span>（${feedbackLatency.count} 份）` : '尚无学生确认记录'}</span>
       <span>练习反馈生成 ${readyPractice.count ? `平均 <b>${num(readyPractice.avg, 1)}</b> 秒 · 60s 内 <span class="pill ${readyPractice.status === 'pass' ? 'teal' : 'red'}">${pct(readyPractice.within_rate, 0)}</span>（${readyPractice.count} 份）` : '尚无练习报告'}</span>
       <span>考试反馈生成 ${readyExam.count ? `平均 <b>${num(readyExam.avg, 1)}</b> 小时 · 72h 内 <span class="pill ${readyExam.status === 'pass' ? 'teal' : 'red'}">${pct(readyExam.within_rate, 0)}</span>（${readyExam.count} 份）` : '尚无已发布成绩'}</span>
+      ${spGuidance.reports ? `<span>SP 阶段末引导 <b>${spGuidance.guided_reports || 0}</b>/${spGuidance.reports} 份报告 · 共 <b>${spGuidance.total_guidance || 0}</b> 次${(spGuidance.by_phase || []).length ? `（${spGuidance.by_phase.map((p) => `${esc(p.label)} ${p.count}`).join('、')}）` : ''}</span>` : ''}
       ${appeals.missing_snapshot ? `<span class="tiny muted">${appeals.missing_snapshot} 场历史申诉缺少原始快照</span>` : ''}
     </div>
 

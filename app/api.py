@@ -142,7 +142,7 @@ from .domain.item_quality import item_quality_report
 from .domain.latency import feedback_ack_latency
 from .domain.maintenance import run_maintenance
 from .domain.media import backfill_media_hashes
-from .domain.practice import build_practice_report
+from .domain.practice import build_practice_report, practice_guidance_summary
 from .domain.profile import candidate_cross_station_profile
 from .domain.psychometrics import station_psychometrics
 from .domain.retention import purge_expired, refresh_retention, retention_overview
@@ -2001,6 +2001,7 @@ def quality(conn=Depends(get_conn)):
         "hint_impact": hint_impact(conn),
         "coverage": blueprint_coverage(conn),
         "feedback_latency": feedback_ack_latency(conn),
+        "sp_guidance": practice_guidance_summary(conn),
         "ai_calls": {
             "count": len(calls),
             "p95_latency_ms": p95,
