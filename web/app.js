@@ -3090,6 +3090,7 @@ async function viewQuality() {
   const reviewShares = (report.review_share || {}).by_risk || [];
   const feedbackLatency = data.feedback_latency || {};
   const spGuidance = data.sp_guidance || {};
+  const spRuntime = data.sp_runtime || {};
   const readyPractice = (feedbackLatency.ready || {}).practice || {};
   const readyExam = (feedbackLatency.ready || {}).exam || {};
   const gates = data.gates.gates;
@@ -3101,6 +3102,13 @@ async function viewQuality() {
   };
   $('#stage-pill').textContent = stageLabels[(data.governance || {}).release_stage] || (data.governance || {}).release_stage || 'G0 离线副驾';
   const qwkClass = report.qwk_ai >= 0.7 ? 'teal' : report.qwk_ai >= 0.6 ? 'amber' : 'red';
+  const spDegradedRows = (spRuntime.recent_degraded || []).map((row) => {
+    const kinds = (row.violations || []).map((v) => v.kind).filter(Boolean);
+    return `<div class="version-row">
+      <span class="k">${esc(fmtTime(row.created_at))}</span>
+      <span class="v">会话 ${esc(row.session_id)} · 验证总分 ${num(row.total, 3)} · ${esc(kinds.join('、') || '触发安全回退')}</span>
+    </div>`;
+  }).join('');
   const alerts = (data.gates.alerts || []).map((a) => `
     <div class="alert ${a.level === 'danger' ? 'danger' : ''}"><b>${esc(a.title)}</b><p>${esc(a.detail)}</p></div>`).join('');
   const stationRows = stationQuality.map((s) => `
@@ -3348,8 +3356,15 @@ async function viewQuality() {
       <span>练习反馈生成 ${readyPractice.count ? `平均 <b>${num(readyPractice.avg, 1)}</b> 秒 · 60s 内 <span class="pill ${readyPractice.status === 'pass' ? 'teal' : 'red'}">${pct(readyPractice.within_rate, 0)}</span>（${readyPractice.count} 份）` : '尚无练习报告'}</span>
       <span>考试反馈生成 ${readyExam.count ? `平均 <b>${num(readyExam.avg, 1)}</b> 小时 · 72h 内 <span class="pill ${readyExam.status === 'pass' ? 'teal' : 'red'}">${pct(readyExam.within_rate, 0)}</span>（${readyExam.count} 份）` : '尚无已发布成绩'}</span>
       ${spGuidance.reports ? `<span>SP 阶段末引导 <b>${spGuidance.guided_reports || 0}</b>/${spGuidance.reports} 份报告 · 共 <b>${spGuidance.total_guidance || 0}</b> 次${(spGuidance.by_phase || []).length ? `（${spGuidance.by_phase.map((p) => `${esc(p.label)} ${p.count}`).join('、')}）` : ''}</span>` : ''}
+      <span>SP 运行时 ${spRuntime.turns ? `<b>${spRuntime.degraded}</b>/${spRuntime.turns} 轮降级 <span class="pill ${spRuntime.degraded ? 'amber' : 'teal'}">${pct(spRuntime.degradation_rate, 1)}</span>` : '尚无调用记录'}</span>
       ${appeals.missing_snapshot ? `<span class="tiny muted">${appeals.missing_snapshot} 场历史申诉缺少原始快照</span>` : ''}
     </div>
+
+    ${spDegradedRows ? `<div class="card" style="margin-bottom:16px">
+      <div class="card-title">SP 运行时降级<span class="sub">未通过独立验证器 · 已回退安全模板</span></div>
+      ${spDegradedRows}
+      <div class="tiny muted" style="margin-top:6px">${esc(spRuntime.note || '')}</div>
+    </div>` : ''}
 
     ${scorecardHtml(data)}
 

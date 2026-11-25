@@ -244,6 +244,47 @@ def run_consistency(bundle: dict[str, Any], runs: int = 20) -> dict[str, Any]:
     }
 
 
+def sp_runtime_summary(conn, *, recent_limit: int = 5) -> dict[str, Any]:
+    """SP 运行时质量：降级轮次是验证器拦截的质量信号，也应是红队回归输入。"""
+    rows = conn.execute(
+        "SELECT status, COUNT(*) AS n FROM ai_calls WHERE capability = 'sp.generate+verify' GROUP BY status"
+    ).fetchall()
+    counts = {(row["status"] or "unknown"): int(row["n"]) for row in rows}
+    turns = sum(counts.values())
+    degraded = counts.get("degraded", 0)
+    recent_rows = conn.execute(
+        "SELECT subject_ref, detail, created_at FROM ai_calls "
+        "WHERE capability = 'sp.generate+verify' AND status = 'degraded' "
+        "ORDER BY created_at DESC, rowid DESC LIMIT ?",
+        (max(1, min(recent_limit, 20)),),
+    ).fetchall()
+    recent = []
+    for row in recent_rows:
+        try:
+            detail = json.loads(row["detail"] or "{}")
+        except (TypeError, ValueError):
+            detail = {}
+        recent.append(
+            {
+                "session_id": row["subject_ref"],
+                "total": detail.get("total"),
+                "violations": detail.get("violations") or [],
+                "created_at": row["created_at"],
+            }
+        )
+    return {
+        "turns": turns,
+        "degraded": degraded,
+        "degradation_rate": round(degraded / turns, 4) if turns else None,
+        "by_status": [{"key": key, "count": count} for key, count in sorted(counts.items())],
+        "recent_degraded": recent,
+        "note": (
+            "降级表示 SP 草稿未通过独立验证器并已回退安全模板；"
+            "应作为质量信号复盘，并把触发话术补充进红队回归用例。"
+        ),
+    }
+
+
 def run_certification(bundle: dict[str, Any]) -> dict[str, Any]:
     red_team = run_red_team(bundle)
     consistency = run_consistency(bundle, runs=20)

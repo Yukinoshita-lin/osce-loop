@@ -186,6 +186,7 @@ from .domain.spqa import (
     certification_for_bundle,
     certify_bundle,
     ensure_certification,
+    sp_runtime_summary,
     sp_session_ready,
 )
 from .domain.stats import domain_scores, quality_report
@@ -2108,6 +2109,7 @@ def quality(conn=Depends(get_conn)):
         "coverage": blueprint_coverage(conn),
         "feedback_latency": feedback_ack_latency(conn),
         "sp_guidance": practice_guidance_summary(conn),
+        "sp_runtime": sp_runtime_summary(conn),
         "ai_calls": {
             "count": len(calls),
             "p95_latency_ms": p95,
