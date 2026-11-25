@@ -4513,7 +4513,12 @@ document.addEventListener('click', async (e) => {
         body: { speaker: isCandidate ? 'candidate' : 'patient', text, actor: state.reviewer || '考务' },
       });
       const summary = (result.facts || {}).facts || {};
-      toast(`转写片段已回传；尚无证据 ${summary.missing === undefined ? '—' : summary.missing} 项`);
+      const newAnomalies = result.new_anomalies || [];
+      toast(
+        newAnomalies.length
+          ? `转写片段已回传；新增异常：${newAnomalies.map((a) => a.label || a.type).join('、')}`
+          : `转写片段已回传；尚无证据 ${summary.missing === undefined ? '—' : summary.missing} 项`
+      );
       await viewExecution();
     } catch (err) {
       toast(err.message, true);

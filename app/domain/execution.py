@@ -245,6 +245,48 @@ def _bundle_payload_for_station(
     return payload if isinstance(payload, dict) else None
 
 
+def _record_live_anomalies(
+    conn, run_id: str, slot: dict[str, Any], anomalies: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """同一槽位同类异常只记录一次，避免实时回传重复告警。"""
+    seen: set[str] = set()
+    for row in conn.execute(
+        "SELECT payload FROM exam_events WHERE run_id = ? AND event_type = 'live_anomaly' "
+        "AND slot_key = ?",
+        (run_id, slot["slot_key"]),
+    ).fetchall():
+        try:
+            payload = json.loads(row["payload"] or "{}")
+        except (TypeError, ValueError):
+            continue
+        kind = payload.get("type")
+        if kind:
+            seen.add(kind)
+    recorded: list[dict[str, Any]] = []
+    severity_map = {"high": "critical", "medium": "warn"}
+    for anomaly in anomalies:
+        kind = anomaly.get("type")
+        if not kind or kind in seen:
+            continue
+        seen.add(kind)
+        _event(
+            conn,
+            run_id,
+            "live_anomaly",
+            f"{slot['candidate_name']} · {slot['station_name']} 实时异常：{anomaly.get('label') or kind}",
+            severity=severity_map.get(str(anomaly.get("severity")), "info"),
+            slot_key=slot["slot_key"],
+            payload={
+                "slot_key": slot["slot_key"],
+                "type": kind,
+                "at_ms": anomaly.get("at_ms"),
+                "detail": anomaly.get("detail"),
+            },
+        )
+        recorded.append(anomaly)
+    return recorded
+
+
 def live_facts(conn, run_id: str, slot_key: str) -> dict[str, Any] | None:
     run = conn.execute("SELECT * FROM exam_runs WHERE run_id = ?", (run_id,)).fetchone()
     if not run:
@@ -335,8 +377,11 @@ def append_live_segment(
         f"{slot['candidate_name']} · {slot['station_name']} 收到{role_label}转写片段",
         payload={"slot_key": slot_key, "speaker": speaker, "segment_id": segment_id},
     )
-    conn.commit()
     facts = live_facts(conn, run_id, slot_key)
+    new_anomalies = _record_live_anomalies(
+        conn, run_id, dict(slot), (facts or {}).get("anomalies") or []
+    )
+    conn.commit()
     return {
         "ok": True,
         "segment": {
@@ -351,6 +396,7 @@ def append_live_segment(
             "created_at": timestamp,
         },
         "facts": facts,
+        "new_anomalies": new_anomalies,
     }
 
 

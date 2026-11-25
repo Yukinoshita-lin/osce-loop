@@ -1,6 +1,8 @@
 """执行槽位与场次录入联动。"""
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from app import db
@@ -191,14 +193,32 @@ def test_live_segments_update_evidence_facts(conn):
     anomaly_types = {item["type"] for item in third["facts"]["anomalies"]}
     assert "emotion" in anomaly_types
     assert "silence" in anomaly_types
+    assert {item["type"] for item in third["new_anomalies"]} == {"emotion", "silence"}
+
+    duplicate = append_live_segment(
+        conn,
+        run["run_id"],
+        slot["slot_key"],
+        speaker="patient",
+        text="疼死我了，受不了",
+        start_ms=80000,
+        end_ms=82000,
+    )
+    assert duplicate["new_anomalies"] == []
 
     refreshed = get_run(conn, run["run_id"])
     linked = next(s for s in refreshed["slots"] if s["slot_key"] == slot["slot_key"])
-    assert linked["live_segment_count"] == 3
+    assert linked["live_segment_count"] == 4
     assert linked["evidence_facts"]["utterances"] == 2
     assert any(item["type"] == "emotion" for item in linked["live_anomalies"])
     event = conn.execute(
         "SELECT COUNT(*) AS n FROM exam_events WHERE run_id = ? AND event_type = 'live_segment'",
         (run["run_id"],),
     ).fetchone()
-    assert event["n"] == 3
+    assert event["n"] == 4
+    anomaly_events = conn.execute(
+        "SELECT payload FROM exam_events WHERE run_id = ? AND event_type = 'live_anomaly'",
+        (run["run_id"],),
+    ).fetchall()
+    assert len(anomaly_events) == 2
+    assert {json.loads(row["payload"])["type"] for row in anomaly_events} == {"silence", "emotion"}
