@@ -643,7 +643,13 @@ def change_model_version(
         model_version=new_model,
         prompt_version=new_prompt,
     )
-    snapshot = refresh_transparency_assets(conn, actor=actor)
+    snapshot = refresh_transparency_assets(
+        conn,
+        actor=actor,
+        extra_limitations=[
+            "模型/提示词版本刚变更，当前指标仍来自历史版本；发布前需完成新一轮人工比对校准。"
+        ],
+    )
     return {
         "model_version": new_model,
         "prompt_version": new_prompt,
@@ -652,5 +658,6 @@ def change_model_version(
             "card_id": snapshot["card_id"],
             "data_sheet_version": snapshot["data_sheet_version"],
             "is_public": snapshot["is_public"],
+            "limitations": snapshot["limitations"],
         },
     }

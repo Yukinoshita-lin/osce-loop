@@ -154,6 +154,7 @@ def test_version_change_creates_private_model_card_snapshot(conn):
     assert card["is_public"] == 0
     assert result["model_card"]["card_id"] == card["card_id"]
     assert result["model_card"]["is_public"] is False
+    assert "历史版本" in card["limitations"]
     assert conn.execute("SELECT COUNT(*) AS n FROM model_cards").fetchone()["n"] == cards_before + 1
 
 

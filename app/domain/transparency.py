@@ -137,7 +137,12 @@ def public_transparency(conn) -> dict[str, Any]:
     }
 
 
-def refresh_transparency_assets(conn, *, actor: str = "系统") -> dict[str, Any]:
+def refresh_transparency_assets(
+    conn,
+    *,
+    actor: str = "系统",
+    extra_limitations: list[str] | None = None,
+) -> dict[str, Any]:
     report = quality_report(conn)
     fairness = fairness_report(conn)
     ab = ab_report(conn)
@@ -165,6 +170,10 @@ def refresh_transparency_assets(conn, *, actor: str = "系统") -> dict[str, Any
             + "，需优先复核行为锚表述。"
         )
     limitations.append("模型卡与数据表基于当前数据库快照；模型或提示词版本变更后需重新生成。")
+    for note in extra_limitations or []:
+        note = str(note or "").strip()
+        if note and note not in limitations:
+            limitations.append(note)
 
     metrics = {
         "qwk_ai": report["qwk_ai"],
