@@ -1054,7 +1054,7 @@ async def ingest_attempt(
         if run_id.strip() and slot_key.strip()
         else None,
         "transcript": {
-            "format": parsed["format"],
+            "format": parsed.get("format", "upload"),
             "utterances": len(parsed["utterances"]),
             "candidate_utterances": parsed["candidate_utterances"],
             "patient_utterances": parsed["patient_utterances"],
