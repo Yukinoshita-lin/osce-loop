@@ -83,6 +83,7 @@ from .domain.bundle_integrity import verify_bundle_integrity
 from .domain.calibration import calibration_report, import_gold_scores, parse_gold_file
 from .domain.consent import consent_status, record_consent
 from .domain.cost import ai_cost_summary
+from .domain.dataflow import data_flow_status
 from .domain.coverage import blueprint_coverage
 from .domain.critical_miss import critical_misses, record_critical_miss_review
 from .domain.content_audit import run_content_audit
@@ -2171,6 +2172,7 @@ def quality(conn=Depends(get_conn)):
         "governance": governance_status(conn),
         "ai_provider": scoring_provider_info(),
         "asr_provider": build_asr_provider().info,
+        "data_flow": data_flow_status(),
         "sus": sus_summary(conn),
         "asr_quality": benchmark_summary(conn),
         "calibration": calibration_report(conn),

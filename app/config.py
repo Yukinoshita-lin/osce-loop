@@ -44,6 +44,14 @@ AI_MODEL = os.getenv("OSCELOOP_AI_MODEL", "").strip()
 AI_TIMEOUT_SECONDS = float(os.getenv("OSCELOOP_AI_TIMEOUT_SECONDS", "30"))
 AI_MAX_RETRIES = int(os.getenv("OSCELOOP_AI_MAX_RETRIES", "1"))
 AI_FALLBACK = os.getenv("OSCELOOP_AI_FALLBACK", "mock").strip().lower()
+# 数据流向：真实考生数据默认不得出院/校内网；外部模型或 ASR 端点必须显式放行。
+AI_ALLOW_EXTERNAL = os.getenv("OSCELOOP_AI_ALLOW_EXTERNAL", "0") == "1"
+ASR_ALLOW_EXTERNAL = os.getenv("OSCELOOP_ASR_ALLOW_EXTERNAL", "0") == "1"
+TRUSTED_AI_HOSTS = {
+    item.strip().lower()
+    for item in os.getenv("OSCELOOP_TRUSTED_AI_HOSTS", "").split(",")
+    if item.strip()
+}
 # 成本计量：单价未配置时只记录 Token/时长，不虚报金额。
 AI_INPUT_PRICE_PER_1K = float(os.getenv("OSCELOOP_AI_INPUT_PRICE_PER_1K", "0"))
 AI_OUTPUT_PRICE_PER_1K = float(os.getenv("OSCELOOP_AI_OUTPUT_PRICE_PER_1K", "0"))

@@ -13,6 +13,7 @@ from .bundle import list_bundles
 from .consent import consent_status
 from .cost import ai_cost_summary
 from .critical_miss import critical_misses
+from .dataflow import data_flow_status
 from .fairness import fairness_report
 from .latency import feedback_ack_latency
 from .sp_approval import persona_approval_status
@@ -621,6 +622,20 @@ def evaluate_gates(conn, report: dict[str, Any], current_stage: str) -> dict[str
                     ),
                 }
             )
+    flow = data_flow_status()
+    if not flow["compliant"]:
+        external = "、".join(f"{item['label']} {item['host']}" for item in flow["external"])
+        alerts.append(
+            {
+                "level": "danger" if current_stage in ("G2_simulation", "G3_limited") else "warn",
+                "title": "模型或 ASR 端点不在内网",
+                "detail": (
+                    f"{external} 为公网端点但未显式放行；真实考生音视频与转写不应出院/校内网。"
+                    "请改用内网地址，或完成数据合规审查后配置 OSCELOOP_AI_ALLOW_EXTERNAL / "
+                    "OSCELOOP_ASR_ALLOW_EXTERNAL 放行，并把内网域名加入 OSCELOOP_TRUSTED_AI_HOSTS。"
+                ),
+            }
+        )
     ready = (feedback_ack_latency(conn) or {}).get("ready") or {}
     practice_ready = ready.get("practice") or {}
     if practice_ready.get("status") == "fail":

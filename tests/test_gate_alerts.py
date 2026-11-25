@@ -68,6 +68,32 @@ def test_tampered_audit_chain_fails_replay_and_alerts(tmp_path):
     conn.close()
 
 
+def test_external_model_endpoint_alerts_at_g3(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "app.domain.gates.data_flow_status",
+        lambda: {
+            "flows": [
+                {
+                    "kind": "scoring",
+                    "label": "评分模型",
+                    "host": "api.example.com",
+                    "scope": "public",
+                    "external": True,
+                    "allowed": False,
+                }
+            ],
+            "external": [{"label": "评分模型", "host": "api.example.com"}],
+            "compliant": False,
+        },
+    )
+    conn = _conn(tmp_path)
+    gates = evaluate_gates(conn, _report(0.2, 40), "G3_limited")
+    alert = next(item for item in gates["alerts"] if "端点不在内网" in item["title"])
+    assert alert["level"] == "danger"
+    assert "api.example.com" in alert["detail"]
+    conn.close()
+
+
 def test_rolling_qwk_and_subgroup_gap_alerts(tmp_path, monkeypatch):
     conn = _conn(tmp_path)
     monkeypatch.setattr("app.domain.gates.quadratic_weighted_kappa", lambda a, b: 0.5)

@@ -3104,6 +3104,7 @@ async function viewQuality() {
   const feedbackLatency = data.feedback_latency || {};
   const spGuidance = data.sp_guidance || {};
   const spRuntime = data.sp_runtime || {};
+  const dataFlow = data.data_flow || { flows: [], compliant: true };
   const readyPractice = (feedbackLatency.ready || {}).practice || {};
   const readyExam = (feedbackLatency.ready || {}).exam || {};
   const gates = data.gates.gates;
@@ -3572,6 +3573,10 @@ async function viewQuality() {
         <div class="version-row"><span class="k">超时 / 重试</span><span class="v">${num(provider.timeout_seconds, 0)}s · ${provider.max_retries ?? 0} 次</span></div>
         <div class="version-row"><span class="k">ASR 提供方</span><span class="v">${esc(asr.provider || 'off')} · ${asr.configured ? esc(asr.model_version || '已配置') : '未启用'}</span></div>
         ${asr.reason ? `<div class="tiny muted" style="color:var(--amber)">${esc(asr.reason)}</div>` : ''}
+        <div class="version-row"><span class="k">数据流向</span><span class="v">${(dataFlow.flows || []).length
+          ? dataFlow.flows.map((f) => `${esc(f.label)} ${esc(f.host)} ${f.external ? (f.allowed ? '<span class="pill amber">公网已放行</span>' : '<span class="pill red">公网未放行</span>') : '<span class="pill teal">内网</span>'}`).join(' · ')
+          : '未配置外部模型 / ASR 端点'}</span></div>
+        ${dataFlow.compliant ? '' : `<div class="tiny" style="color:var(--red)">${esc((dataFlow.external || []).map((f) => `${f.label}（${f.host}）`).join('、'))} 为公网端点且未显式放行；真实考生数据不应出院/校内网。</div>`}
         <div class="sep"></div>
         <div class="version-row"><span class="k">调用次数</span><span class="v">${data.ai_calls.count}</span></div>
         <div class="version-row"><span class="k">P95 延迟</span><span class="v">${num(data.ai_calls.p95_latency_ms, 2)} ms</span></div>
