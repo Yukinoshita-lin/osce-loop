@@ -10,7 +10,8 @@ from app.ai.base import CapabilityGateway
 from app.ai.mock import MockScoringProvider
 from app.config import MODEL_VERSION, PROMPT_VERSION
 from app.domain.bundle import freeze_bundle
-from app.domain.ingest import create_ingested_attempt
+from app.domain.ingest import create_ingested_attempt, find_duplicate_attempt
+from app.domain.integrity import transcript_digest
 from app.domain.transcript import parse_notes, parse_transcript
 from app.seed import build_bundle_payload
 
@@ -254,6 +255,67 @@ def test_ingest_creates_scored_attempt(conn, bundle):
         "SELECT payload FROM transcripts WHERE attempt_id = ?", (attempt_id,)
     ).fetchone()
     assert len(json.loads(transcript["payload"])) == 9
+
+
+def test_find_duplicate_attempt_by_media_or_transcript(conn, bundle):
+    parsed = parse_transcript("sample.json", json.dumps(SAMPLE_JSON, ensure_ascii=False).encode("utf-8"))
+    gateway = CapabilityGateway(conn, MockScoringProvider(), MODEL_VERSION, PROMPT_VERSION)
+    media_attempt = create_ingested_attempt(
+        conn,
+        gateway,
+        bundle=bundle,
+        transcript=parsed["utterances"],
+        candidate_code="C-DUP-001",
+        candidate_name="媒体重复考生",
+        risk_level="L2",
+        release_stage="G0_offline",
+        media_id="media_dup",
+        media_url="/media/uploads/dup.wav",
+        media_filename="dup.wav",
+        media_sha256="sha256:dup",
+        actor="test",
+    )
+    duplicate = find_duplicate_attempt(
+        conn,
+        bundle_id=bundle["bundle_id"],
+        candidate_code="C-DUP-001",
+        media_sha256="sha256:dup",
+    )
+    assert duplicate == media_attempt
+    assert (
+        find_duplicate_attempt(
+            conn,
+            bundle_id=bundle["bundle_id"],
+            candidate_code="C-OTHER",
+            media_sha256="sha256:dup",
+        )
+        is None
+    )
+
+    no_media_attempt = create_ingested_attempt(
+        conn,
+        gateway,
+        bundle=bundle,
+        transcript=parsed["utterances"],
+        candidate_code="C-DUP-002",
+        candidate_name="转写重复考生",
+        risk_level="L2",
+        release_stage="G0_offline",
+        media_id="upload_no_media",
+        media_url=None,
+        media_filename=None,
+        actor="test",
+    )
+    digest = transcript_digest(parsed["utterances"])
+    assert (
+        find_duplicate_attempt(
+            conn,
+            bundle_id=bundle["bundle_id"],
+            candidate_code="C-DUP-002",
+            transcript_sha256=digest,
+        )
+        == no_media_attempt
+    )
 
 
 def test_ingest_without_media_marks_integrity_gap(conn, bundle):

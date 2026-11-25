@@ -14,6 +14,36 @@ from .integrity import transcript_digest
 from .retention import retention_plan
 
 
+def find_duplicate_attempt(
+    conn,
+    *,
+    bundle_id: str,
+    candidate_code: str,
+    media_sha256: str | None = None,
+    transcript_sha256: str | None = None,
+) -> str | None:
+    """按媒体哈希或转写哈希查找同一考生在同一考站的既有场次，避免重复导入。"""
+    if media_sha256:
+        row = conn.execute(
+            "SELECT attempt_id FROM attempts WHERE bundle_id = ? AND candidate_code = ? "
+            "AND media_sha256 = ? AND media_purged_at IS NULL "
+            "ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            (bundle_id, candidate_code, media_sha256),
+        ).fetchone()
+        if row:
+            return row["attempt_id"]
+    if transcript_sha256:
+        row = conn.execute(
+            "SELECT a.attempt_id FROM attempts a JOIN transcripts t ON t.attempt_id = a.attempt_id "
+            "WHERE a.bundle_id = ? AND a.candidate_code = ? AND t.sha256 = ? "
+            "ORDER BY a.created_at DESC, a.rowid DESC LIMIT 1",
+            (bundle_id, candidate_code, transcript_sha256),
+        ).fetchone()
+        if row:
+            return row["attempt_id"]
+    return None
+
+
 def create_ingested_attempt(
     conn,
     gateway: CapabilityGateway,

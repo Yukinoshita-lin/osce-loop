@@ -130,11 +130,12 @@ from .domain.execution import (
     toggle_hints,
     toggle_station_hints,
 )
-from .domain.ingest import create_ingested_attempt
+from .domain.ingest import create_ingested_attempt, find_duplicate_attempt
 from .domain.integrity import (
     backfill_transcript_hashes,
     integrity_supplement_missing,
     record_integrity_supplement,
+    transcript_digest,
     transcript_integrity,
     verify_evidence,
 )
@@ -1028,6 +1029,44 @@ async def ingest_attempt(
 
     code = candidate_code.strip() or f"C-UPLOAD-{db.new_id('cu')[-6:].upper()}"
     name = candidate_name.strip() or "未命名考生"
+    media_sha = (media or {}).get("sha256")
+    duplicate_id = None
+    if not (run_id.strip() and slot_key.strip()):
+        duplicate_id = find_duplicate_attempt(
+            conn,
+            bundle_id=bundle["bundle_id"],
+            candidate_code=code,
+            media_sha256=media_sha,
+            transcript_sha256=None if media_sha else transcript_digest(parsed["utterances"]),
+        )
+    if duplicate_id:
+        _cleanup_media(media)
+        duplicate = _attempt_row(conn, duplicate_id)
+        existing_media = (
+            {"media_url": duplicate.get("media_url"), "filename": duplicate.get("media_filename")}
+            if duplicate.get("media_url")
+            else None
+        )
+        return {
+            "ok": True,
+            "deduplicated": True,
+            "attempt": _attempt_summary(conn, duplicate),
+            "linked_slot": None,
+            "transcript": {
+                "format": parsed.get("format", "upload"),
+                "utterances": len(parsed["utterances"]),
+                "candidate_utterances": parsed["candidate_utterances"],
+                "patient_utterances": parsed["patient_utterances"],
+                "duration_ms": parsed["duration_ms"],
+                "warnings": parsed["warnings"],
+                "source": parsed.get("source", "upload"),
+                "asr": asr_meta,
+                "notes": parsed.get("notes", 0),
+            },
+            "media": existing_media,
+            "integrity_gap": bool(duplicate.get("integrity_gap")),
+            "dedupe_reason": "同一考生在该考站已存在相同媒体或转写，未重复导入。",
+        }
     provider_bundle = build_scoring_provider()
     gateway = CapabilityGateway(
         conn,

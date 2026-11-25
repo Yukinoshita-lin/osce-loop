@@ -1038,10 +1038,11 @@ function batchIngestForm(form, job) {
 function renderBatchIngestResult(results, failures) {
   const box = $('#ingest-result');
   if (!box) return;
+  const deduped = results.filter((data) => data.deduplicated).length;
   const rows = results.map((data) => {
     const attempt = data.attempt;
     return `<div class="version-row">
-      <span class="k">${esc(attempt.candidate_code)} · ${esc(attempt.candidate_name)}</span>
+      <span class="k">${esc(attempt.candidate_code)} · ${esc(attempt.candidate_name)}${data.deduplicated ? ' <span class="pill amber">已存在</span>' : ''}</span>
       <span class="v">${statusPill(attempt.status)} · 待复核 ${attempt.pending} 项 · ${data.media ? '媒体可回放' : '无媒体'} · <a class="link-btn" href="#/feedback" data-open-feedback="${esc(attempt.attempt_id)}">反馈</a></span>
     </div>`;
   }).join('');
@@ -1050,7 +1051,7 @@ function renderBatchIngestResult(results, failures) {
   )).join('');
   box.innerHTML = `
     <div class="sep"></div>
-    <div class="card-title">批量导入结果<span class="sub">成功 ${results.length} 场 · 失败 ${failures.length} 场</span></div>
+    <div class="card-title">批量导入结果<span class="sub">成功 ${results.length} 场${deduped ? ` · 已存在 ${deduped} 场` : ''} · 失败 ${failures.length} 场</span></div>
     ${rows || '<div class="tiny muted">没有成功导入的场次。</div>'}
     ${failureRows ? `<div style="margin-top:6px">${failureRows}</div>` : ''}
     <div class="btn-row" style="margin-top:8px">
@@ -1068,6 +1069,7 @@ function renderIngestResult(data) {
   if (!box) return;
   box.innerHTML = `
     <div class="sep"></div>
+    ${data.deduplicated ? `<div class="alert" style="margin-bottom:8px"><b>未重复导入，已返回既有场次</b><p>${esc(data.dedupe_reason || '')}</p></div>` : ''}
     ${(a.anomalies || []).length ? `<div class="alert" style="margin-bottom:8px"><b>自动异常 ${a.anomalies.length} 项</b><p>${a.anomalies.map((item) => `${esc(item.label)}：${esc(item.detail)}`).join('；')}</p></div>` : ''}
     ${data.linked_slot ? `<div class="attempt-strip" style="margin-bottom:8px">
       <span class="pill teal">已回写执行槽位</span>
